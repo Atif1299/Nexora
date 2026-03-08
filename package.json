@@ -1,18 +1,19 @@
 {
-  "name": "code-oss-dev",
-  "version": "1.107.0",
-  "distro": "14448fdebff821982801580aba09897633a6e91b",
-  "author": {
-    "name": "Microsoft Corporation"
-  },
-  "license": "MIT",
-  "main": "./out/main.js",
-  "type": "module",
-  "private": true,
-  "scripts": {
-    "test": "echo Please run any of the test scripts from the scripts folder.",
-    "test-browser": "npx playwright install && node test/unit/browser/index.js",
-    "test-browser-no-install": "node test/unit/browser/index.js",
+"name": "nexora-ide",
+"version": "1.0.0",
+"distro": "14448fdebff821982801580aba09897633a6e91b",
+"author": {
+  "name": "Nexora Team - Muhammad Atif & Talha Asif"
+},
+"description": "Nexora - Agentic IDE for AI Orchestration",
+"license": "MIT",
+"main": "./out/main.js",
+"type": "module",
+"private": true,
+"scripts": {
+  "test": "echo Please run any of the test scripts from the scripts folder.",
+  "test-browser": "npx playwright install && node test/unit/browser/index.js",
+  "test-browser-no-install": "node test/unit/browser/index.js",
     "test-node": "mocha test/unit/node/index.js --delay --ui=tdd --timeout=5000 --exit",
     "test-extension": "vscode-test",
     "test-build-scripts": "cd build && npm run test",
