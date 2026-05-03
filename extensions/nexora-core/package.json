@@ -30,15 +30,18 @@
         {
           "type": "webview",
           "id": "nexora.chatPanel",
-          "name": "Nexora Chat"
+          "name": "Nexora Chat",
+          "visibility": "visible"
         },
         {
           "id": "nexora.taskTree",
-          "name": "Task Plan"
+          "name": "Task Plan",
+          "visibility": "collapsed"
         },
         {
           "id": "nexora.platformBrowser",
-          "name": "Platform Browser"
+          "name": "Platform Browser",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -46,6 +49,16 @@
       {
         "command": "nexora.openChat",
         "title": "Open Nexora Chat",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.openTaskPlan",
+        "title": "Open Nexora Task Plan",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.openPlatformBrowser",
+        "title": "Open Nexora Platform Browser",
         "category": "Nexora"
       },
       {
@@ -98,8 +111,12 @@
     "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/node": "^18.x",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.18.1",
     "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "ws": "^8.20.0"
   }
 }

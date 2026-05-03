@@ -14,6 +14,12 @@ import { createMemoryApi } from './backend/memory';
 import { createCognitiveApi } from './backend/cognitive';
 import { createAuthApi } from './backend/auth';
 import { createOrchestrateApi } from './backend/orchestrate';
+import { createHistoryApi, type HistoryItem, type RollbackableItem, type RollbackInfo, type RollbackResponse, type HistoryStats } from './backend/history';
+import { createAgentApi, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './backend/agent';
+import { createSessionsApi, type ChatSession, type ChatMessage, type SessionSummary, type SessionListResponse } from './backend/sessions';
+
+export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
+export type { ChatSession, ChatMessage, SessionSummary, SessionListResponse };
 
 export class BackendClient {
 	private config: BackendConfig;
@@ -80,6 +86,10 @@ export class BackendClient {
 		return createMemoryApi(this.transport).queryMemory(workspaceId, query, limit);
 	}
 
+	async getWorkspaceIdForPath(workspacePath: string): Promise<{ workspace_path: string; workspace_id: string }> {
+		return createMemoryApi(this.transport).getWorkspaceIdForPath(workspacePath);
+	}
+
 	/**
 	 * Get relevant context for a task from workspace memory.
 	 * Used before intent classification for context-aware processing.
@@ -104,6 +114,50 @@ export class BackendClient {
 	async sendMessage(message: string): Promise<any> {
 		// preserve behavior: throws on errors (transport.post throws)
 		return createCognitiveApi(this.transport).sendMessage(message);
+	}
+
+	/**
+	 * Simple chat conversation without task decomposition.
+	 * Use this for Chat mode - just has a conversation.
+	 * 
+	 * @param message User's message
+	 * @param workspacePath Optional workspace path for context
+	 * @param model Optional model to use (e.g., "anthropic/claude-3-haiku-20240307")
+	 * @returns Chat response with response text and model used
+	 */
+	async chat(message: string, workspacePath?: string, model?: string): Promise<{ response: string; model_used: string }> {
+		return this.transport.post('/api/cognitive/chat', {
+			message,
+			workspace_path: workspacePath,
+			model
+		});
+	}
+
+	/**
+	 * Execute one turn of the agent loop with tool calling.
+	 * Returns either tool calls to execute or a final answer.
+	 * 
+	 * @param messages Conversation messages so far
+	 * @param workspaceId Workspace ID for memory queries
+	 * @param workspacePath Optional workspace path for file operations
+	 * @param model Optional model to use
+	 * @returns Agent turn response with tool calls or final answer
+	 */
+	async agentTurn(
+		messages: AgentMessage[],
+		workspaceId: string,
+		workspacePath?: string,
+		model?: string,
+		mode: AgentMode = 'ask'
+	): Promise<AgentTurnResponse> {
+		return createAgentApi(this.transport).agentTurn(messages, workspaceId, workspacePath, model, mode);
+	}
+
+	/**
+	 * Get list of available agent tools.
+	 */
+	async getAgentTools(): Promise<{ tools: any[]; total: number }> {
+		return createAgentApi(this.transport).getTools();
 	}
 
 	/**
@@ -302,6 +356,205 @@ export class BackendClient {
 		deployment_url?: string;
 	}> {
 		return createOrchestrateApi(this.transport).deployGeneratedCode(prompt, repoName, projectName, userId);
+	}
+
+	/**
+	 * Generate an execution plan WITHOUT executing.
+	 * Returns plan for user approval (HITL).
+	 * 
+	 * @param request User request to plan
+	 * @param userId User identifier
+	 * @param workspacePath Optional workspace path for context
+	 * @returns Execution plan with tasks and estimated cost
+	 */
+	async generatePlan(
+		request: string,
+		userId: string = 'default',
+		workspacePath?: string,
+		model?: string
+	): Promise<any> {
+		return createOrchestrateApi(this.transport).generatePlan(request, userId, workspacePath, model);
+	}
+
+	/**
+	 * Get plan details by ID.
+	 * 
+	 * @param planId Plan identifier
+	 * @returns Plan details
+	 */
+	async getPlan(planId: string): Promise<any> {
+		return createOrchestrateApi(this.transport).getPlan(planId);
+	}
+
+	/**
+	 * Approve plan and start execution.
+	 * 
+	 * @param planId Plan identifier to approve
+	 * @returns Execution result with task statuses
+	 */
+	async approvePlan(planId: string): Promise<any> {
+		return createOrchestrateApi(this.transport).approvePlan(planId);
+	}
+
+	/**
+	 * Cancel a plan before execution.
+	 * 
+	 * @param planId Plan identifier to cancel
+	 * @returns Cancellation status
+	 */
+	async cancelPlan(planId: string): Promise<any> {
+		return createOrchestrateApi(this.transport).cancelPlan(planId);
+	}
+
+	/**
+	 * Modify a plan before approval.
+	 * 
+	 * @param planId Plan identifier
+	 * @param modification Modifications to apply
+	 * @returns Updated plan
+	 */
+	async modifyPlan(planId: string, modification: any): Promise<any> {
+		return createOrchestrateApi(this.transport).modifyPlan(planId, modification);
+	}
+
+	/**
+	 * List all plans.
+	 * 
+	 * @param userId Optional user filter
+	 * @returns List of plans
+	 */
+	async listPlans(userId?: string): Promise<any> {
+		return createOrchestrateApi(this.transport).listPlans(userId);
+	}
+
+	// ============================================================================
+	// History API (Week 10)
+	// ============================================================================
+
+	/**
+	 * Get user's execution history.
+	 * 
+	 * @param userId User identifier (default: 'default')
+	 * @param limit Maximum records (default: 50)
+	 * @param offset Pagination offset (default: 0)
+	 * @returns List of history items
+	 */
+	async getUserHistory(userId: string = 'default', limit: number = 50, offset: number = 0): Promise<HistoryItem[]> {
+		return createHistoryApi(this.transport).getUserHistory(userId, limit, offset);
+	}
+
+	/**
+	 * Get history for a specific workflow/plan.
+	 * 
+	 * @param workflowId The workflow/plan ID
+	 * @returns List of history items for the workflow
+	 */
+	async getWorkflowHistory(workflowId: string): Promise<HistoryItem[]> {
+		return createHistoryApi(this.transport).getWorkflowHistory(workflowId);
+	}
+
+	/**
+	 * Get executions that can be rolled back.
+	 * 
+	 * @param userId User identifier
+	 * @returns List of rollbackable items
+	 */
+	async getRollbackable(userId: string = 'default'): Promise<RollbackableItem[]> {
+		return createHistoryApi(this.transport).getRollbackable(userId);
+	}
+
+	/**
+	 * Get info about what a rollback would do.
+	 * 
+	 * @param historyId History record ID
+	 * @returns Rollback preview information
+	 */
+	async getRollbackInfo(historyId: number): Promise<RollbackInfo> {
+		return createHistoryApi(this.transport).getRollbackInfo(historyId);
+	}
+
+	/**
+	 * Rollback a specific execution.
+	 * 
+	 * @param historyId History record ID to rollback
+	 * @param userId User performing the rollback
+	 * @returns Rollback result
+	 */
+	async rollback(historyId: number, userId: string = 'default'): Promise<RollbackResponse> {
+		return createHistoryApi(this.transport).rollback(historyId, userId);
+	}
+
+	/**
+	 * Get execution statistics for a user.
+	 * 
+	 * @param userId User identifier
+	 * @returns Aggregated statistics
+	 */
+	async getHistoryStats(userId: string = 'default'): Promise<HistoryStats> {
+		return createHistoryApi(this.transport).getStats(userId);
+	}
+
+	// ============================================================================
+	// Sessions API (FYP Integration)
+	// ============================================================================
+
+	/**
+	 * Create a new chat session.
+	 */
+	async createSession(name: string = 'New Chat', userId: string = 'default'): Promise<ChatSession> {
+		return createSessionsApi(this.transport).createSession(name, userId);
+	}
+
+	/**
+	 * List all sessions for a user.
+	 */
+	async listSessions(userId: string = 'default', limit: number = 50, offset: number = 0): Promise<SessionListResponse> {
+		return createSessionsApi(this.transport).listSessions(userId, limit, offset);
+	}
+
+	/**
+	 * Load a session with all messages.
+	 */
+	async loadSession(sessionId: string, userId: string = 'default'): Promise<ChatSession> {
+		return createSessionsApi(this.transport).loadSession(sessionId, userId);
+	}
+
+	/**
+	 * Save/update a session.
+	 */
+	async saveSession(session: {
+		id: string;
+		name: string;
+		messages: ChatMessage[];
+		workspace_id?: string;
+		workspace_path?: string;
+	}, userId: string = 'default'): Promise<ChatSession> {
+		return createSessionsApi(this.transport).saveSession(session, userId);
+	}
+
+	/**
+	 * Add a message to a session.
+	 */
+	async addSessionMessage(
+		sessionId: string,
+		message: { role: string; content: string; mode?: string },
+		userId: string = 'default'
+	): Promise<ChatSession> {
+		return createSessionsApi(this.transport).addMessage(sessionId, message, userId);
+	}
+
+	/**
+	 * Delete a session.
+	 */
+	async deleteSession(sessionId: string, userId: string = 'default'): Promise<{ status: string; session_id: string }> {
+		return createSessionsApi(this.transport).deleteSession(sessionId, userId);
+	}
+
+	/**
+	 * Search across sessions.
+	 */
+	async searchSessions(query: string, userId: string = 'default', limit: number = 10): Promise<SessionListResponse> {
+		return createSessionsApi(this.transport).searchSessions(query, userId, limit);
 	}
 
 	private _getMockResponse(endpoint: string): any {

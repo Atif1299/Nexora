@@ -8,11 +8,22 @@ import { ChatPanelProvider } from './chatPanel';
 import { PlatformBrowserProvider } from './platformPanel';
 import { TaskTreeProvider } from './taskTreeProvider';
 import { getBackendClient } from './services/backendClient';
+import { getOrchestrationWebSocket, disposeWebSocket } from './services/websocketClient';
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Nexora Core extension is now active!');
 
-	const chatProvider = new ChatPanelProvider(context.extensionUri);
+	// Initialize WebSocket connection for real-time updates
+	const wsClient = getOrchestrationWebSocket('default');
+	wsClient.connect().then(connected => {
+		if (connected) {
+			console.log('[Nexora] WebSocket connected for real-time updates');
+		} else {
+			console.log('[Nexora] WebSocket connection failed - will retry on plan execution');
+		}
+	});
+
+	const chatProvider = new ChatPanelProvider(context.extensionUri, context);
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider('nexora.chatPanel', chatProvider)
 	);
@@ -31,6 +42,12 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.commands.registerCommand('nexora.openChat', () => {
 			vscode.commands.executeCommand('nexora.chatPanel.focus');
+		}),
+		vscode.commands.registerCommand('nexora.openTaskPlan', () => {
+			vscode.commands.executeCommand('nexora.taskTree.focus');
+		}),
+		vscode.commands.registerCommand('nexora.openPlatformBrowser', () => {
+			vscode.commands.executeCommand('nexora.platformBrowser.focus');
 		}),
 		vscode.commands.registerCommand('nexora.refreshPlatforms', async () => {
 			await platformProvider.refresh();
@@ -86,6 +103,15 @@ export function activate(context: vscode.ExtensionContext) {
 			if (result && result.tasks && result.tasks.length > 0) {
 				taskTreeProvider.setDecomposition(result);
 			}
+		}),
+		vscode.commands.registerCommand('nexora.updateTaskTreeFromPlan', (plan: any) => {
+			if (plan && plan.tasks && plan.tasks.length > 0) {
+				taskTreeProvider.setPlan(plan);
+				vscode.commands.executeCommand('nexora.taskTree.focus');
+			}
+		}),
+		vscode.commands.registerCommand('nexora.updateTaskStatus', (taskId: string, status: string) => {
+			taskTreeProvider.updateTaskStatus(taskId, status);
 		})
 	);
 
@@ -105,4 +131,5 @@ async function checkBackendOnStartup(): Promise<void> {
 
 export function deactivate() {
 	console.log('Nexora Core extension deactivated');
+	disposeWebSocket();
 }
