@@ -34,6 +34,18 @@
           "visibility": "visible"
         },
         {
+          "type": "webview",
+          "id": "nexora.workflowViewer",
+          "name": "Workflow",
+          "visibility": "collapsed"
+        },
+        {
+          "type": "webview",
+          "id": "nexora.outputViewer",
+          "name": "Output",
+          "visibility": "collapsed"
+        },
+        {
           "id": "nexora.taskTree",
           "name": "Task Plan",
           "visibility": "collapsed"
@@ -83,6 +95,21 @@
         "title": "Clear Task Plan",
         "category": "Nexora",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "nexora.showTaskOutput",
+        "title": "Show Task Output",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.openWorkflow",
+        "title": "Open Workflow Viewer",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.openOutput",
+        "title": "Open Output Viewer",
+        "category": "Nexora"
       }
     ],
     "menus": {
@@ -103,7 +130,14 @@
           "group": "navigation"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "nexora.openChat",
+        "key": "ctrl+alt+i",
+        "mac": "cmd+ctrl+i"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

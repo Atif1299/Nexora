@@ -15,22 +15,34 @@ function copyFile(src, dest) {
 	fs.copyFileSync(src, dest);
 }
 
-function main() {
-	const root = path.resolve(__dirname, '..');
-	const srcDir = path.join(root, 'src', 'webview', 'chat');
-	const outDir = path.join(root, 'out', 'webview', 'chat');
+function copyWebviewFolder(root, folderName, assets) {
+	const srcDir = path.join(root, 'src', 'webview', folderName);
+	const outDir = path.join(root, 'out', 'webview', folderName);
 
-	const assets = ['chat.css', 'chat.js'];
 	for (const file of assets) {
 		const src = path.join(srcDir, file);
 		const dest = path.join(outDir, file);
 		if (!fs.existsSync(src)) {
-			throw new Error(`Missing webview asset: ${src}`);
+			console.warn(`[copyWebviewAssets] Warning: Missing asset ${src}`);
+			continue;
 		}
 		copyFile(src, dest);
 	}
 
-	console.log('[copyWebviewAssets] copied chat assets');
+	console.log(`[copyWebviewAssets] copied ${folderName} assets`);
+}
+
+function main() {
+	const root = path.resolve(__dirname, '..');
+
+	// Chat panel assets
+	copyWebviewFolder(root, 'chat', ['chat.css', 'chat.js']);
+
+	// Week 11: Workflow panel assets
+	copyWebviewFolder(root, 'workflow', ['workflow.css', 'workflow.js']);
+
+	// Week 11: Output panel assets
+	copyWebviewFolder(root, 'output', ['output.css', 'output.js']);
 }
 
 main();

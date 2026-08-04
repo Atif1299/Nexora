@@ -3,27 +3,29 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { Codicon } from '../../../../../../base/common/codicons.js';
+// NEXORA: Many imports commented out - unused after disabling ChatSessionsViewPaneContainer
+// import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
 import * as nls from '../../../../../../nls.js';
-import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
+// import { IConfigurationService } from '../../../../../../platform/configuration/common/configuration.js';
 import { ContextKeyExpr } from '../../../../../../platform/contextkey/common/contextkey.js';
-import { IContextMenuService } from '../../../../../../platform/contextview/browser/contextView.js';
+// import { IContextMenuService } from '../../../../../../platform/contextview/browser/contextView.js';
 import { SyncDescriptor } from '../../../../../../platform/instantiation/common/descriptors.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
 import { IProductService } from '../../../../../../platform/product/common/productService.js';
 import { Registry } from '../../../../../../platform/registry/common/platform.js';
-import { IStorageService } from '../../../../../../platform/storage/common/storage.js';
-import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
-import { registerIcon } from '../../../../../../platform/theme/common/iconRegistry.js';
-import { IThemeService } from '../../../../../../platform/theme/common/themeService.js';
-import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
-import { ViewPaneContainer } from '../../../../../browser/parts/views/viewPaneContainer.js';
+// import { IStorageService } from '../../../../../../platform/storage/common/storage.js';
+// import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry.js';
+// import { registerIcon } from '../../../../../../platform/theme/common/iconRegistry.js';
+// import { IThemeService } from '../../../../../../platform/theme/common/themeService.js';
+// import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
+// import { ViewPaneContainer } from '../../../../../browser/parts/views/viewPaneContainer.js';
 import { IWorkbenchContribution } from '../../../../../common/contributions.js';
-import { Extensions, IViewContainersRegistry, IViewDescriptor, IViewDescriptorService, IViewsRegistry, ViewContainerLocation } from '../../../../../common/views.js';
-import { IExtensionService } from '../../../../../services/extensions/common/extensions.js';
-import { IWorkbenchLayoutService } from '../../../../../services/layout/browser/layoutService.js';
+// NEXORA: Removed ViewContainerLocation and IViewDescriptorService - unused after disabling chat sessions view
+import { Extensions, IViewContainersRegistry, IViewDescriptor, IViewsRegistry } from '../../../../../common/views.js';
+// import { IExtensionService } from '../../../../../services/extensions/common/extensions.js';
+// import { IWorkbenchLayoutService } from '../../../../../services/layout/browser/layoutService.js';
 import { ChatContextKeyExprs } from '../../../common/chatContextKeys.js';
 import { IChatSessionItemProvider, IChatSessionsExtensionPoint, IChatSessionsService, localChatSessionType } from '../../../common/chatSessionsService.js';
 import { AGENT_SESSIONS_VIEWLET_ID } from '../../../common/constants.js';
@@ -35,19 +37,21 @@ export class ChatSessionsView extends Disposable implements IWorkbenchContributi
 	static readonly ID = 'workbench.contrib.chatSessionsView';
 	constructor() {
 		super();
-		this.registerViewContainer();
+		// NEXORA: Disable built-in Agent Sessions view - Nexora uses its own chat panel
+		// this.registerViewContainer();
 	}
-	private registerViewContainer(): void {
-		Registry.as<IViewContainersRegistry>(Extensions.ViewContainersRegistry).registerViewContainer(
-			{
-				id: AGENT_SESSIONS_VIEWLET_ID,
-				title: nls.localize2('chat.agent.sessions', "Agent Sessions"),
-				ctorDescriptor: new SyncDescriptor(ChatSessionsViewPaneContainer),
-				hideIfEmpty: true,
-				icon: registerIcon('chat-sessions-icon', Codicon.commentDiscussionSparkle, 'Icon for Agent Sessions View'),
-				order: 6
-			}, ViewContainerLocation.Sidebar);
-	}
+	// NEXORA: Method disabled - Nexora uses its own chat panel
+	// private registerViewContainer(): void {
+	// 	Registry.as<IViewContainersRegistry>(Extensions.ViewContainersRegistry).registerViewContainer(
+	// 		{
+	// 			id: AGENT_SESSIONS_VIEWLET_ID,
+	// 			title: nls.localize2('chat.agent.sessions', "Agent Sessions"),
+	// 			ctorDescriptor: new SyncDescriptor(ChatSessionsViewPaneContainer),
+	// 			hideIfEmpty: true,
+	// 			icon: registerIcon('chat-sessions-icon', Codicon.commentDiscussionSparkle, 'Icon for Agent Sessions View'),
+	// 			order: 6
+	// 		}, ViewContainerLocation.Sidebar);
+	// }
 
 }
 
@@ -244,42 +248,42 @@ export class ChatSessionsViewContrib extends Disposable implements IWorkbenchCon
 	}
 }
 
-// Chat sessions container
-class ChatSessionsViewPaneContainer extends ViewPaneContainer {
-	constructor(
-		@IInstantiationService instantiationService: IInstantiationService,
-		@IConfigurationService configurationService: IConfigurationService,
-		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
-		@IContextMenuService contextMenuService: IContextMenuService,
-		@ITelemetryService telemetryService: ITelemetryService,
-		@IExtensionService extensionService: IExtensionService,
-		@IThemeService themeService: IThemeService,
-		@IStorageService storageService: IStorageService,
-		@IWorkspaceContextService contextService: IWorkspaceContextService,
-		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
-		@ILogService logService: ILogService,
-	) {
-		super(
-			AGENT_SESSIONS_VIEWLET_ID,
-			{
-				mergeViewWithContainerWhenSingleView: false,
-			},
-			instantiationService,
-			configurationService,
-			layoutService,
-			contextMenuService,
-			telemetryService,
-			extensionService,
-			themeService,
-			storageService,
-			contextService,
-			viewDescriptorService,
-			logService
-		);
-	}
-
-	override getTitle(): string {
-		const title = nls.localize('chat.agent.sessions.title', "Agent Sessions");
-		return title;
-	}
-}
+// NEXORA: Chat sessions container disabled - Nexora uses its own chat panel
+// class ChatSessionsViewPaneContainer extends ViewPaneContainer {
+// 	constructor(
+// 		@IInstantiationService instantiationService: IInstantiationService,
+// 		@IConfigurationService configurationService: IConfigurationService,
+// 		@IWorkbenchLayoutService layoutService: IWorkbenchLayoutService,
+// 		@IContextMenuService contextMenuService: IContextMenuService,
+// 		@ITelemetryService telemetryService: ITelemetryService,
+// 		@IExtensionService extensionService: IExtensionService,
+// 		@IThemeService themeService: IThemeService,
+// 		@IStorageService storageService: IStorageService,
+// 		@IWorkspaceContextService contextService: IWorkspaceContextService,
+// 		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
+// 		@ILogService logService: ILogService,
+// 	) {
+// 		super(
+// 			AGENT_SESSIONS_VIEWLET_ID,
+// 			{
+// 				mergeViewWithContainerWhenSingleView: false,
+// 			},
+// 			instantiationService,
+// 			configurationService,
+// 			layoutService,
+// 			contextMenuService,
+// 			telemetryService,
+// 			extensionService,
+// 			themeService,
+// 			storageService,
+// 			contextService,
+// 			viewDescriptorService,
+// 			logService
+// 		);
+// 	}
+//
+// 	override getTitle(): string {
+// 		const title = nls.localize('chat.agent.sessions.title', "Agent Sessions");
+// 		return title;
+// 	}
+// }

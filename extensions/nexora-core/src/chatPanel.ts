@@ -384,6 +384,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					platform: message.platform
 				});
 			}
+
+			// Forward user escalation to webview (Week 10 completion)
+			if (message.type === 'user_escalation') {
+				this._view.webview.postMessage({
+					type: 'userEscalation',
+					planId: message.plan_id,
+					taskId: message.task_id,
+					taskName: message.task_name,
+					platform: message.platform,
+					operation: message.operation,
+					platformsTried: message.platforms_tried,
+					totalAttempts: message.total_attempts,
+					error: message.error,
+					message: message.message
+				});
+			}
 		});
 	}
 
@@ -1168,6 +1184,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			// Update task tree sidebar with plan data
 			vscode.commands.executeCommand('nexora.updateTaskTreeFromPlan', plan);
 
+			// Week 11: Update workflow panel with plan visualization
+			vscode.commands.executeCommand('nexora.updateWorkflowPlan', plan);
+
 		} catch (error) {
 			const errMsg = `Error generating plan: ${error instanceof Error ? error.message : 'Unknown error'}`;
 			const sessionErr = this._getActiveSession();
@@ -1275,6 +1294,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				plan: result,
 				message: response
 			});
+
+			// Week 11: Update workflow panel with modified plan
+			vscode.commands.executeCommand('nexora.updateWorkflowPlan', result);
 
 		} catch (error) {
 			this._view.webview.postMessage({
@@ -1646,6 +1668,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Update task tree sidebar with plan data
 			vscode.commands.executeCommand('nexora.updateTaskTreeFromPlan', plan);
+
+			// Week 11: Update workflow panel with plan visualization
+			vscode.commands.executeCommand('nexora.updateWorkflowPlan', plan);
 
 			// Immediately approve and execute
 			this._view.webview.postMessage({

@@ -7,8 +7,10 @@ import * as vscode from 'vscode';
 import { ChatPanelProvider } from './chatPanel';
 import { PlatformBrowserProvider } from './platformPanel';
 import { TaskTreeProvider } from './taskTreeProvider';
+import { WorkflowPanelProvider } from './workflowPanel';
+import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { getBackendClient } from './services/backendClient';
-import { getOrchestrationWebSocket, disposeWebSocket } from './services/websocketClient';
+import { getOrchestrationWebSocket, disposeWebSocket, type WebSocketMessage } from './services/websocketClient';
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Nexora Core extension is now active!');
@@ -28,6 +30,18 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerWebviewViewProvider('nexora.chatPanel', chatProvider)
 	);
 
+	// Week 11: Workflow Panel (DAG visualization)
+	const workflowProvider = new WorkflowPanelProvider(context.extensionUri);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider('nexora.workflowViewer', workflowProvider)
+	);
+
+	// Week 11: Output Panel (task results and logs)
+	const outputProvider = new OutputPanelProvider(context.extensionUri);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider('nexora.outputViewer', outputProvider)
+	);
+
 	const platformProvider = new PlatformBrowserProvider();
 	context.subscriptions.push(
 		vscode.window.registerTreeDataProvider('nexora.platformBrowser', platformProvider)
@@ -38,6 +52,48 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		vscode.window.registerTreeDataProvider('nexora.taskTree', taskTreeProvider)
 	);
+
+	// Week 11: Wire WebSocket updates to workflow and output panels
+	wsClient.onMessage((message: WebSocketMessage) => {
+		// Update workflow panel with task status changes
+		if (message.type === 'task_running' || message.type === 'task_success' ||
+			message.type === 'task_failed' || message.type === 'task_skipped') {
+			const status = message.type.replace('task_', '');
+			workflowProvider.updateTaskStatus(
+				message.task_id || '',
+				status,
+				message.result,
+				message.error,
+				message.cost
+			);
+
+			// Update output panel
+			const taskOutput: TaskOutput = {
+				taskId: message.task_id || '',
+				taskName: message.task_name || message.task_id || 'Unknown',
+				platform: message.platform || 'unknown',
+				operation: message.operation || 'unknown',
+				status: status,
+				result: message.result,
+				error: message.error,
+				logs: []
+			};
+			outputProvider.updateTaskOutput(taskOutput);
+
+			// Add log entry for this status change
+			outputProvider.addLog(message.task_id || '', {
+				timestamp: new Date().toISOString(),
+				level: status === 'failed' ? 'error' : 'info',
+				message: `Task ${status}: ${message.task_name || message.task_id}`
+			});
+		}
+
+		// Handle plan updates for workflow panel
+		if (message.type === 'plan_completed') {
+			// The workflow panel will reflect completion via task status updates
+			console.log(`[Nexora] Plan ${message.plan_id} completed with status: ${message.status}`);
+		}
+	});
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('nexora.openChat', () => {
@@ -112,6 +168,26 @@ export function activate(context: vscode.ExtensionContext) {
 		}),
 		vscode.commands.registerCommand('nexora.updateTaskStatus', (taskId: string, status: string) => {
 			taskTreeProvider.updateTaskStatus(taskId, status);
+		}),
+		// Week 11: Show task output command
+		vscode.commands.registerCommand('nexora.showTaskOutput', (taskId: string) => {
+			outputProvider.showTaskOutput(taskId);
+		}),
+		// Week 11: Open workflow viewer
+		vscode.commands.registerCommand('nexora.openWorkflow', () => {
+			vscode.commands.executeCommand('nexora.workflowViewer.focus');
+		}),
+		// Week 11: Open output viewer
+		vscode.commands.registerCommand('nexora.openOutput', () => {
+			vscode.commands.executeCommand('nexora.outputViewer.focus');
+		}),
+		// Week 11: Update workflow panel from chat panel
+		vscode.commands.registerCommand('nexora.updateWorkflowPlan', (plan: any) => {
+			if (plan && plan.tasks) {
+				workflowProvider.updatePlan(plan);
+				// Also clear previous outputs and prepare for new execution
+				outputProvider.clearOutputs();
+			}
 		})
 	);
 
