@@ -13,11 +13,12 @@
 	--wf-radius: 6px;
 	--wf-space: 8px;
 
-	--wf-pending: #6b7280;
-	--wf-running: #f59e0b;
-	--wf-success: #10b981;
-	--wf-failed: #ef4444;
-	--wf-skipped: #9ca3af;
+	--wf-pending: var(--vscode-descriptionForeground, #6b7280);
+	--wf-running: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #f59e0b));
+	--wf-success: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #10b981));
+	--wf-failed: var(--vscode-testing-iconFailed, var(--vscode-errorForeground, #ef4444));
+	--wf-skipped: var(--vscode-disabledForeground, #9ca3af);
+	--wf-info: var(--vscode-charts-blue, #3b82f6);
 }
 
 * {
@@ -100,10 +101,10 @@ body {
 	letter-spacing: 0.5px;
 }
 
-.wf-status-awaiting-approval { background: #3b82f6; color: white; }
-.wf-status-planning { background: var(--wf-pending); color: white; }
-.wf-status-approved { background: #3b82f6; color: white; }
-.wf-status-executing { background: var(--wf-running); color: white; }
+.wf-status-awaiting-approval { background: var(--wf-info); color: var(--vscode-button-foreground, white); }
+.wf-status-planning { background: var(--wf-pending); color: var(--vscode-button-foreground, white); }
+.wf-status-approved { background: var(--wf-info); color: var(--vscode-button-foreground, white); }
+.wf-status-executing { background: var(--wf-running); color: var(--vscode-button-foreground, white); }
 .wf-status-completed { background: var(--wf-success); color: white; }
 .wf-status-failed { background: var(--wf-failed); color: white; }
 .wf-status-cancelled { background: var(--wf-skipped); color: white; }
@@ -169,7 +170,12 @@ body {
 }
 
 .wf-node-pending { border-left-color: var(--wf-pending); }
-.wf-node-queued { border-left-color: #3b82f6; }
+.wf-node-queued { border-left-color: var(--wf-info); }
+
+.wf-node:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
 .wf-node-running { 
 	border-left-color: var(--wf-running);
 	animation: wf-pulse 2s infinite;

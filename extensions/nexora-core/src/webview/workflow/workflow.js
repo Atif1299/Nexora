@@ -137,6 +137,9 @@
 		node.className = 'wf-node wf-node-' + status;
 		node.id = 'wf-task-' + task.task_id;
 		node.setAttribute('data-task-id', task.task_id);
+		node.setAttribute('role', 'button');
+		node.setAttribute('tabindex', '0');
+		node.setAttribute('aria-label', `Task ${task.name || task.task_id}, status ${status}`);
 
 		node.innerHTML = `
 			<div class="wf-nodeHeader">
@@ -162,8 +165,16 @@
 			${status === 'running' ? '<div class="wf-spinner"></div>' : ''}
 		`;
 
-		node.addEventListener('click', function () {
+		function openTask() {
 			vscode.postMessage({ type: 'taskClicked', taskId: task.task_id });
+		}
+
+		node.addEventListener('click', openTask);
+		node.addEventListener('keydown', function (e) {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				openTask();
+			}
 		});
 
 		return node;

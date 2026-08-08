@@ -43,6 +43,9 @@ function main() {
 
 	// Week 11: Output panel assets
 	copyWebviewFolder(root, 'output', ['output.css', 'output.js']);
+
+	// Week 12: Settings panel assets
+	copyWebviewFolder(root, 'settings', ['settings.css', 'settings.js']);
 }
 
 main();

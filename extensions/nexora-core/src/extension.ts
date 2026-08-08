@@ -9,11 +9,46 @@ import { PlatformBrowserProvider } from './platformPanel';
 import { TaskTreeProvider } from './taskTreeProvider';
 import { WorkflowPanelProvider } from './workflowPanel';
 import { OutputPanelProvider, type TaskOutput } from './outputPanel';
-import { getBackendClient } from './services/backendClient';
+import { SettingsPanelProvider } from './settingsPanel';
+import { getBackendClient, setApiKeyHeaderProvider } from './services/backendClient';
+import { getSettingsService } from './services/settingsService';
+import { getNotificationService } from './services/notificationService';
 import { getOrchestrationWebSocket, disposeWebSocket, type WebSocketMessage } from './services/websocketClient';
+
+async function setOperationInProgress(value: boolean): Promise<void> {
+	await vscode.commands.executeCommand('setContext', 'nexora.operationInProgress', value);
+}
+
+async function setChatFocused(value: boolean): Promise<void> {
+	await vscode.commands.executeCommand('setContext', 'nexora.chatFocused', value);
+}
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Nexora Core extension is now active!');
+
+	// Initialize settings singleton (SecretStorage + preferences)
+	const settingsService = getSettingsService(context);
+	// Wire IDE keys into every backend HTTP call (primary runtime credentials)
+	setApiKeyHeaderProvider(async () => {
+		const headers: Record<string, string> = {};
+		const openai = await settingsService.getApiKey('openai');
+		const anthropic = await settingsService.getApiKey('anthropic');
+		const openrouter = await settingsService.getApiKey('openrouter');
+		if (openai) {
+			headers['X-Nexora-OpenAI-Key'] = openai;
+		}
+		if (anthropic) {
+			headers['X-Nexora-Anthropic-Key'] = anthropic;
+		}
+		if (openrouter) {
+			headers['X-Nexora-OpenRouter-Key'] = openrouter;
+		}
+		return headers;
+	});
+	const notifications = getNotificationService();
+
+	void setOperationInProgress(false);
+	void setChatFocused(false);
 
 	// Initialize WebSocket connection for real-time updates
 	const wsClient = getOrchestrationWebSocket('default');
@@ -42,6 +77,12 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerWebviewViewProvider('nexora.outputViewer', outputProvider)
 	);
 
+	// Week 12: Settings Panel
+	const settingsProvider = new SettingsPanelProvider(context.extensionUri, context);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(SettingsPanelProvider.viewType, settingsProvider)
+	);
+
 	const platformProvider = new PlatformBrowserProvider();
 	context.subscriptions.push(
 		vscode.window.registerTreeDataProvider('nexora.platformBrowser', platformProvider)
@@ -53,9 +94,8 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.registerTreeDataProvider('nexora.taskTree', taskTreeProvider)
 	);
 
-	// Week 11: Wire WebSocket updates to workflow and output panels
+	// Week 11 + 12: Wire WebSocket updates to panels + notifications + context keys
 	wsClient.onMessage((message: WebSocketMessage) => {
-		// Update workflow panel with task status changes
 		if (message.type === 'task_running' || message.type === 'task_success' ||
 			message.type === 'task_failed' || message.type === 'task_skipped') {
 			const status = message.type.replace('task_', '');
@@ -67,7 +107,6 @@ export function activate(context: vscode.ExtensionContext) {
 				message.cost
 			);
 
-			// Update output panel
 			const taskOutput: TaskOutput = {
 				taskId: message.task_id || '',
 				taskName: message.task_name || message.task_id || 'Unknown',
@@ -80,24 +119,27 @@ export function activate(context: vscode.ExtensionContext) {
 			};
 			outputProvider.updateTaskOutput(taskOutput);
 
-			// Add log entry for this status change
 			outputProvider.addLog(message.task_id || '', {
 				timestamp: new Date().toISOString(),
 				level: status === 'failed' ? 'error' : 'info',
 				message: `Task ${status}: ${message.task_name || message.task_id}`
 			});
+
+			void setOperationInProgress(true);
+			notifications.handleOrchestrationEvent(message);
 		}
 
-		// Handle plan updates for workflow panel
 		if (message.type === 'plan_completed') {
-			// The workflow panel will reflect completion via task status updates
 			console.log(`[Nexora] Plan ${message.plan_id} completed with status: ${message.status}`);
+			void setOperationInProgress(false);
+			notifications.handleOrchestrationEvent(message);
 		}
 	});
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand('nexora.openChat', () => {
-			vscode.commands.executeCommand('nexora.chatPanel.focus');
+		vscode.commands.registerCommand('nexora.openChat', async () => {
+			await vscode.commands.executeCommand('nexora.chatPanel.focus');
+			await setChatFocused(true);
 		}),
 		vscode.commands.registerCommand('nexora.openTaskPlan', () => {
 			vscode.commands.executeCommand('nexora.taskTree.focus');
@@ -110,18 +152,18 @@ export function activate(context: vscode.ExtensionContext) {
 			const count = platformProvider.getPlatformCount();
 			const connected = platformProvider.isBackendConnected();
 			if (connected) {
-				vscode.window.showInformationMessage(`Platforms refreshed! (${count} platforms from backend)`);
+				void notifications.showInfo(`Platforms refreshed! (${count} platforms from backend)`);
 			} else {
-				vscode.window.showWarningMessage(`Using cached platforms (${count}). Backend offline.`);
+				void notifications.showWarning(`Using cached platforms (${count}). Backend offline.`);
 			}
 		}),
 		vscode.commands.registerCommand('nexora.checkBackend', async () => {
 			const client = getBackendClient();
 			const isConnected = await client.checkHealth();
 			if (isConnected) {
-				vscode.window.showInformationMessage('Backend is connected! API docs: http://localhost:8000/docs');
+				void notifications.showSuccess('Backend is connected! API docs: http://localhost:8000/docs');
 			} else {
-				vscode.window.showErrorMessage('Backend is offline. Start it with: uvicorn app.main:app --reload --port 8000');
+				void notifications.showError('Backend is offline. Start it with: uvicorn app.main:app --reload --port 8000');
 			}
 		}),
 		vscode.commands.registerCommand('nexora.decomposeRequest', async () => {
@@ -138,22 +180,20 @@ export function activate(context: vscode.ExtensionContext) {
 
 					if (result.tasks && result.tasks.length > 0) {
 						taskTreeProvider.setDecomposition(result);
-						vscode.window.showInformationMessage(
-							`Decomposed into ${result.tasks.length} tasks`
-						);
+						void notifications.showInfo(`Decomposed into ${result.tasks.length} tasks`);
 					} else if (result.error) {
-						vscode.window.showErrorMessage(`Decomposition failed: ${result.error}`);
+						void notifications.showError(`Decomposition failed: ${result.error}`);
 					} else {
-						vscode.window.showWarningMessage('No tasks generated for this request');
+						void notifications.showWarning('No tasks generated for this request');
 					}
 				} catch (error) {
-					vscode.window.showErrorMessage(`Failed to decompose request: ${error}`);
+					void notifications.showError(`Failed to decompose request: ${error}`);
 				}
 			}
 		}),
 		vscode.commands.registerCommand('nexora.clearTasks', () => {
 			taskTreeProvider.clear();
-			vscode.window.showInformationMessage('Task plan cleared');
+			void notifications.showInfo('Task plan cleared');
 		}),
 		vscode.commands.registerCommand('nexora.updateTaskTree', (result: any) => {
 			if (result && result.tasks && result.tasks.length > 0) {
@@ -169,39 +209,74 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.updateTaskStatus', (taskId: string, status: string) => {
 			taskTreeProvider.updateTaskStatus(taskId, status);
 		}),
-		// Week 11: Show task output command
 		vscode.commands.registerCommand('nexora.showTaskOutput', (taskId: string) => {
 			outputProvider.showTaskOutput(taskId);
 		}),
-		// Week 11: Open workflow viewer
 		vscode.commands.registerCommand('nexora.openWorkflow', () => {
 			vscode.commands.executeCommand('nexora.workflowViewer.focus');
 		}),
-		// Week 11: Open output viewer
 		vscode.commands.registerCommand('nexora.openOutput', () => {
 			vscode.commands.executeCommand('nexora.outputViewer.focus');
 		}),
-		// Week 11: Update workflow panel from chat panel
 		vscode.commands.registerCommand('nexora.updateWorkflowPlan', (plan: any) => {
 			if (plan && plan.tasks) {
 				workflowProvider.updatePlan(plan);
-				// Also clear previous outputs and prepare for new execution
 				outputProvider.clearOutputs();
+				void setOperationInProgress(true);
 			}
+		}),
+		vscode.commands.registerCommand('nexora.newSession', async () => {
+			await chatProvider.createNewSession();
+			void notifications.showInfo('New chat session created');
+		}),
+		vscode.commands.registerCommand('nexora.cancelOperation', async () => {
+			if (chatProvider.isOperationInProgress()) {
+				await chatProvider.cancelCurrentOperation();
+				await setOperationInProgress(false);
+				void notifications.showInfo('Operation cancelled');
+			} else {
+				void notifications.showInfo('No operation in progress');
+			}
+		}),
+		// Week 12: Settings + shortcuts
+		vscode.commands.registerCommand('nexora.openSettings', async () => {
+			await vscode.commands.executeCommand('nexora.settings.focus');
+			await settingsProvider.refresh();
+		}),
+		vscode.commands.registerCommand('nexora.refreshSettings', async () => {
+			await settingsProvider.refresh();
+			void notifications.showInfo('Settings status refreshed');
+		}),
+		vscode.commands.registerCommand('nexora.showKeyboardShortcuts', async () => {
+			const lines = [
+				'Nexora Keyboard Shortcuts',
+				'',
+				'Ctrl+K          Open Chat',
+				'Ctrl+Shift+K    New Session',
+				'Ctrl+Alt+I      Open Chat (legacy)',
+				'Ctrl+Alt+,      Open Nexora Settings',
+				'Escape          Cancel operation (when in progress)',
+				'Ctrl+Shift+/    Show this help'
+			];
+			await vscode.window.showInformationMessage(lines.join('\n'), { modal: true });
+		}),
+		// Internal: chat panel can sync operation context
+		vscode.commands.registerCommand('nexora.setOperationInProgress', async (value: boolean) => {
+			await setOperationInProgress(!!value);
 		})
 	);
 
-	checkBackendOnStartup();
+	checkBackendOnStartup(notifications);
 }
 
-async function checkBackendOnStartup(): Promise<void> {
+async function checkBackendOnStartup(notifications: ReturnType<typeof getNotificationService>): Promise<void> {
 	const client = getBackendClient();
 	const isConnected = await client.checkHealth();
 
 	if (isConnected) {
-		vscode.window.showInformationMessage('Nexora: Backend connected');
+		void notifications.showInfo('Nexora: Backend connected');
 	} else {
-		vscode.window.showWarningMessage('Nexora: Backend offline. Run backend for full functionality.');
+		void notifications.showWarning('Nexora: Backend offline. Run backend for full functionality.');
 	}
 }
 

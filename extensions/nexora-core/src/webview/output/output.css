@@ -13,11 +13,11 @@
 	--out-radius: 6px;
 	--out-space: 8px;
 
-	--out-success: #10b981;
-	--out-failed: #ef4444;
-	--out-running: #f59e0b;
-	--out-info: #3b82f6;
-	--out-warn: #f59e0b;
+	--out-success: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #10b981));
+	--out-failed: var(--vscode-testing-iconFailed, var(--vscode-errorForeground, #ef4444));
+	--out-running: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #f59e0b));
+	--out-info: var(--vscode-charts-blue, #3b82f6);
+	--out-warn: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #f59e0b));
 }
 
 * {
@@ -161,8 +161,14 @@ body {
 .out-status-success { background: var(--out-success); color: white; }
 .out-status-failed { background: var(--out-failed); color: white; }
 .out-status-running { background: var(--out-running); color: white; }
-.out-status-pending { background: #6b7280; color: white; }
-.out-status-skipped { background: #9ca3af; color: white; }
+.out-status-pending { background: var(--vscode-descriptionForeground, #6b7280); color: var(--vscode-button-foreground, white); }
+.out-status-skipped { background: var(--vscode-disabledForeground, #9ca3af); color: var(--vscode-button-foreground, white); }
+
+.out-taskItem:focus-visible,
+.copy-btn:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
 
 /* Meta info */
 .out-meta {

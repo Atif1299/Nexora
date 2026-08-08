@@ -51,8 +51,11 @@
 
 			return `
 				<div class="out-taskItem ${isSelected ? 'out-taskSelected' : ''} out-task-${statusClass}"
-					 data-task-id="${task.taskId}">
-					<span class="out-taskIcon">${statusIcon}</span>
+					 data-task-id="${task.taskId}"
+					 role="button"
+					 tabindex="0"
+					 aria-label="Task ${escapeHtml(task.taskName || task.taskId)}, status ${escapeHtml(statusClass)}">
+					<span class="out-taskIcon" aria-hidden="true">${statusIcon}</span>
 					<div class="out-taskInfo">
 						<span class="out-taskName">${escapeHtml(task.taskName || task.taskId)}</span>
 						<span class="out-taskPlatform">${escapeHtml(task.platform || 'unknown')}</span>
@@ -63,9 +66,16 @@
 		}).join('');
 
 		container.querySelectorAll('.out-taskItem').forEach(function (item) {
-			item.addEventListener('click', function () {
+			function select() {
 				const taskId = item.getAttribute('data-task-id');
 				vscode.postMessage({ type: 'selectTask', taskId: taskId });
+			}
+			item.addEventListener('click', select);
+			item.addEventListener('keydown', function (e) {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					select();
+				}
 			});
 		});
 	}
