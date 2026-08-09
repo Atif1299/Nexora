@@ -1314,3 +1314,101 @@ body
 {
 	word-break: break-word;
 }
+
+/* User escalation notification (Week 10/11) */
+.nx-escalation
+{
+	background: color-mix(in srgb, var(--vscode-inputValidation-warningBackground, #5c4813) 30%, var(--nx-surface));
+	border: 1px solid var(--vscode-inputValidation-warningBorder, #856d00);
+	border-radius: var(--nx-radius-1);
+	overflow: hidden;
+}
+
+.nx-escalationHeader
+{
+	display: flex;
+	align-items: center;
+	gap: var(--nx-space-2);
+	padding: var(--nx-space-2) var(--nx-space-3);
+	background: color-mix(in srgb, var(--vscode-inputValidation-warningBackground, #5c4813) 50%, transparent);
+	border-bottom: 1px solid var(--vscode-inputValidation-warningBorder, #856d00);
+}
+
+.nx-escalationIcon
+{
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	background: var(--vscode-inputValidation-warningBorder, #856d00);
+	color: var(--nx-bg);
+	border-radius: 50%;
+	font-size: 12px;
+	font-weight: 700;
+}
+
+.nx-escalationHeader strong
+{
+	color: var(--vscode-inputValidation-warningForeground, #cca700);
+	font-size: 12px;
+}
+
+.nx-escalationBody
+{
+	padding: var(--nx-space-3);
+}
+
+.nx-escalationTask
+{
+	display: flex;
+	align-items: center;
+	gap: var(--nx-space-2);
+	margin-bottom: var(--nx-space-2);
+}
+
+.nx-escalationTask strong
+{
+	font-size: 13px;
+}
+
+.nx-escalationOp
+{
+	font-family: var(--nx-font-mono);
+	font-size: 10px;
+	color: var(--nx-muted);
+	background: var(--nx-surface-2);
+	padding: 2px 6px;
+	border-radius: var(--nx-radius-1);
+}
+
+.nx-escalationDetails
+{
+	font-size: 11px;
+	color: var(--nx-muted);
+	margin-bottom: var(--nx-space-2);
+}
+
+.nx-escalationDetails > div
+{
+	padding: 2px 0;
+}
+
+.nx-escalationLabel
+{
+	color: var(--nx-fg);
+	font-weight: 500;
+}
+
+.nx-escalationError
+{
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.nx-escalationMessage
+{
+	font-size: 12px;
+	color: var(--nx-fg);
+	padding-top: var(--nx-space-2);
+	border-top: 1px solid var(--nx-border);
+}

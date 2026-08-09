@@ -18,6 +18,10 @@ export interface WebSocketMessage {
 	attempt?: number;
 	max_attempts?: number;
 	platform?: string;
+	operation?: string;
+	platforms_tried?: string[];
+	total_attempts?: number;
+	message?: string;
 }
 
 export type MessageCallback = (message: WebSocketMessage) => void;

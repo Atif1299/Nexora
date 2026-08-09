@@ -671,6 +671,37 @@
 		retryEl.textContent = `Retry ${attempt}/${maxAttempts} on ${platform}...`;
 	}
 
+	function showUserEscalation(data) {
+		// Show escalation notification as an assistant message
+		const platformsTried = data.platformsTried || [data.platform];
+		const platformList = platformsTried.join(', ');
+		
+		const escalationHtml = `
+			<div class="nx-escalation">
+				<div class="nx-escalationHeader">
+					<span class="nx-escalationIcon">!</span>
+					<strong>Task Failed - User Attention Required</strong>
+				</div>
+				<div class="nx-escalationBody">
+					<div class="nx-escalationTask">
+						<strong>${escapeHtml(data.taskName || data.taskId)}</strong>
+						<span class="nx-escalationOp">${escapeHtml(data.operation || 'unknown')}</span>
+					</div>
+					<div class="nx-escalationDetails">
+						<div><span class="nx-escalationLabel">Platforms tried:</span> ${escapeHtml(platformList)}</div>
+						<div><span class="nx-escalationLabel">Total attempts:</span> ${data.totalAttempts || 'multiple'}</div>
+						<div class="nx-escalationError"><span class="nx-escalationLabel">Error:</span> ${escapeHtml(data.error || 'Unknown error')}</div>
+					</div>
+					<div class="nx-escalationMessage">
+						${escapeHtml(data.message || 'All retry and fallback attempts have been exhausted.')}
+					</div>
+				</div>
+			</div>
+		`;
+		
+		addMessage('assistant', escalationHtml, true);
+	}
+
 	function showPlanExecuting(planId) {
 		const actionsEl = document.getElementById('plan-actions-' + planId);
 		if (actionsEl) {
@@ -886,6 +917,10 @@
 
 			case 'taskRetry':
 				showTaskRetry(data.taskId, data.taskName, data.attempt, data.maxAttempts, data.platform);
+				break;
+
+			case 'userEscalation':
+				showUserEscalation(data);
 				break;
 
 			case 'planExecutionStarted':

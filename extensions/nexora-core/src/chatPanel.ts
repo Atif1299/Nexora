@@ -272,6 +272,30 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/** Week 12: Public method to create a new session from command */
+	public async createNewSession(): Promise<void> {
+		await this._handleNewSession();
+		// Focus the chat panel
+		vscode.commands.executeCommand('nexora.chatPanel.focus');
+	}
+
+	/** Week 12: Public method to cancel current operation from command */
+	public async cancelCurrentOperation(): Promise<void> {
+		if (this._currentPlanId) {
+			await this._handleCancelPlan(this._currentPlanId);
+			await vscode.commands.executeCommand('nexora.setOperationInProgress', false);
+		}
+	}
+
+	/** Week 12: Check if an operation is in progress */
+	public isOperationInProgress(): boolean {
+		return !!this._currentPlanId;
+	}
+
+	private async _syncOperationContext(): Promise<void> {
+		await vscode.commands.executeCommand('nexora.setOperationInProgress', !!this._currentPlanId);
+	}
+
 	private async _handleSwitchSession(sessionId: string): Promise<void> {
 		if (!sessionId || !this._sessions.some(s => s.id === sessionId)) {
 			return;
@@ -382,6 +406,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					attempt: message.attempt,
 					maxAttempts: message.max_attempts,
 					platform: message.platform
+				});
+			}
+
+			// Forward user escalation to webview (Week 10 completion)
+			if (message.type === 'user_escalation') {
+				this._view.webview.postMessage({
+					type: 'userEscalation',
+					planId: message.plan_id,
+					taskId: message.task_id,
+					taskName: message.task_name,
+					platform: message.platform,
+					operation: message.operation,
+					platformsTried: message.platforms_tried,
+					totalAttempts: message.total_attempts,
+					error: message.error,
+					message: message.message
 				});
 			}
 		});
@@ -1146,6 +1186,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Store current plan ID and subscribe to WebSocket updates
 			this._currentPlanId = plan.plan_id;
+			await this._syncOperationContext();
 			const wsClient = getOrchestrationWebSocket('default');
 			if (wsClient.isConnected()) {
 				wsClient.subscribeToPlan(plan.plan_id);
@@ -1167,6 +1208,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Update task tree sidebar with plan data
 			vscode.commands.executeCommand('nexora.updateTaskTreeFromPlan', plan);
+
+			// Week 11: Update workflow panel with plan visualization
+			vscode.commands.executeCommand('nexora.updateWorkflowPlan', plan);
 
 		} catch (error) {
 			const errMsg = `Error generating plan: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -1233,7 +1277,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		try {
 			const client = getBackendClient();
-			const result = await client.cancelPlan(planId);
+			await client.cancelPlan(planId);
+
+			if (this._currentPlanId === planId) {
+				this._currentPlanId = undefined;
+			}
+			await this._syncOperationContext();
 
 			this._view.webview.postMessage({
 				type: 'addMessage',
@@ -1275,6 +1324,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				plan: result,
 				message: response
 			});
+
+			// Week 11: Update workflow panel with modified plan
+			vscode.commands.executeCommand('nexora.updateWorkflowPlan', result);
 
 		} catch (error) {
 			this._view.webview.postMessage({
@@ -1594,6 +1646,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				});
 
 				this._currentPlanId = undefined;
+				await this._syncOperationContext();
 				return;
 			} catch (error) {
 				const errMsg = `Error executing plan: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -1646,6 +1699,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Update task tree sidebar with plan data
 			vscode.commands.executeCommand('nexora.updateTaskTreeFromPlan', plan);
+
+			// Week 11: Update workflow panel with plan visualization
+			vscode.commands.executeCommand('nexora.updateWorkflowPlan', plan);
 
 			// Immediately approve and execute
 			this._view.webview.postMessage({

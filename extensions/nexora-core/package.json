@@ -34,6 +34,18 @@
           "visibility": "visible"
         },
         {
+          "type": "webview",
+          "id": "nexora.workflowViewer",
+          "name": "Workflow",
+          "visibility": "collapsed"
+        },
+        {
+          "type": "webview",
+          "id": "nexora.outputViewer",
+          "name": "Output",
+          "visibility": "collapsed"
+        },
+        {
           "id": "nexora.taskTree",
           "name": "Task Plan",
           "visibility": "collapsed"
@@ -41,6 +53,12 @@
         {
           "id": "nexora.platformBrowser",
           "name": "Platform Browser",
+          "visibility": "collapsed"
+        },
+        {
+          "type": "webview",
+          "id": "nexora.settings",
+          "name": "Settings",
           "visibility": "collapsed"
         }
       ]
@@ -83,6 +101,46 @@
         "title": "Clear Task Plan",
         "category": "Nexora",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "nexora.showTaskOutput",
+        "title": "Show Task Output",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.openWorkflow",
+        "title": "Open Workflow Viewer",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.openOutput",
+        "title": "Open Output Viewer",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.newSession",
+        "title": "New Chat Session",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.cancelOperation",
+        "title": "Cancel Current Operation",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.openSettings",
+        "title": "Open Settings",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.showKeyboardShortcuts",
+        "title": "Show Keyboard Shortcuts",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.refreshSettings",
+        "title": "Refresh Settings Status",
+        "category": "Nexora"
       }
     ],
     "menus": {
@@ -101,9 +159,47 @@
           "command": "nexora.clearTasks",
           "when": "view == nexora.taskTree",
           "group": "navigation"
+        },
+        {
+          "command": "nexora.refreshSettings",
+          "when": "view == nexora.settings",
+          "group": "navigation"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "nexora.openChat",
+        "key": "ctrl+alt+i",
+        "mac": "cmd+ctrl+i"
+      },
+      {
+        "command": "nexora.openChat",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
+        "when": "!terminalFocus"
+      },
+      {
+        "command": "nexora.newSession",
+        "key": "ctrl+shift+k",
+        "mac": "cmd+shift+k"
+      },
+      {
+        "command": "nexora.cancelOperation",
+        "key": "escape",
+        "when": "nexora.operationInProgress"
+      },
+      {
+        "command": "nexora.openSettings",
+        "key": "ctrl+alt+,",
+        "mac": "cmd+alt+,"
+      },
+      {
+        "command": "nexora.showKeyboardShortcuts",
+        "key": "ctrl+shift+/",
+        "mac": "cmd+shift+/"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

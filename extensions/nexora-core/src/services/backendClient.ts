@@ -8,7 +8,7 @@ export interface BackendConfig {
 	timeout: number;
 }
 
-import { createTransport } from './backend/transport';
+import { createTransport, type HeaderProvider } from './backend/transport';
 import { createPlatformsApi } from './backend/platforms';
 import { createMemoryApi } from './backend/memory';
 import { createCognitiveApi } from './backend/cognitive';
@@ -17,9 +17,29 @@ import { createOrchestrateApi } from './backend/orchestrate';
 import { createHistoryApi, type HistoryItem, type RollbackableItem, type RollbackInfo, type RollbackResponse, type HistoryStats } from './backend/history';
 import { createAgentApi, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './backend/agent';
 import { createSessionsApi, type ChatSession, type ChatMessage, type SessionSummary, type SessionListResponse } from './backend/sessions';
+import { createStatusApi, type ConnectionsResponse, type TestResult, type ProviderStatus } from './backend/status';
 
 export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
 export type { ChatSession, ChatMessage, SessionSummary, SessionListResponse };
+export type { ConnectionsResponse, TestResult, ProviderStatus };
+
+/** Mutable provider so SettingsService can register after activate(). */
+let _apiKeyHeaderProvider: HeaderProvider | undefined;
+
+export function setApiKeyHeaderProvider(provider: HeaderProvider): void {
+	_apiKeyHeaderProvider = provider;
+}
+
+async function resolveApiKeyHeaders(): Promise<Record<string, string>> {
+	if (!_apiKeyHeaderProvider) {
+		return {};
+	}
+	try {
+		return (await _apiKeyHeaderProvider()) || {};
+	} catch {
+		return {};
+	}
+}
 
 export class BackendClient {
 	private config: BackendConfig;
@@ -32,7 +52,11 @@ export class BackendClient {
 			timeout: config?.timeout || 30000
 		};
 
-		this.transport = createTransport(this.config, (endpoint) => this._getMockResponse(endpoint));
+		this.transport = createTransport(
+			this.config,
+			(endpoint) => this._getMockResponse(endpoint),
+			resolveApiKeyHeaders
+		);
 	}
 
 	async checkHealth(): Promise<boolean> {
@@ -334,6 +358,29 @@ export class BackendClient {
 	 */
 	async disconnectVercel(userId: string = 'default'): Promise<{ status: string }> {
 		return createAuthApi(this.transport).disconnectVercel(userId);
+	}
+
+	/**
+	 * Week 12: Get connection status for LLM / deployment / database providers.
+	 * Reflects backend .env + OAuth tokens (Option A - not IDE SecretStorage).
+	 */
+	async getConnectionStatus(userId: string = 'default'): Promise<ConnectionsResponse | null> {
+		return createStatusApi(this.transport).getConnections(userId);
+	}
+
+	/**
+	 * Week 12: Test a configured provider using backend env / OAuth.
+	 */
+	async testProviderConnection(provider: string, userId: string = 'default'): Promise<TestResult | null> {
+		return createStatusApi(this.transport).testProvider(provider, userId);
+	}
+
+	/**
+	 * Week 12 Option A: Validate a key before saving to SecretStorage.
+	 * Backend does not persist the key.
+	 */
+	async validateApiKey(provider: string, apiKey: string): Promise<TestResult | null> {
+		return createStatusApi(this.transport).validateApiKey(provider, apiKey);
 	}
 
 	/**

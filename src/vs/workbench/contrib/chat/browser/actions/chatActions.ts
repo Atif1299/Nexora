@@ -46,12 +46,14 @@ import { ITelemetryService } from '../../../../../platform/telemetry/common/tele
 import { ToggleTitleBarConfigAction } from '../../../../browser/parts/titlebar/titlebarActions.js';
 import { ActiveEditorContext, IsCompactTitleBarContext } from '../../../../common/contextkeys.js';
 import { IWorkbenchContribution } from '../../../../common/contributions.js';
-import { IViewDescriptorService, ViewContainerLocation } from '../../../../common/views.js';
+// NEXORA: Removed IViewDescriptorService - unused after modifying ToggleChatAction
+import { ViewContainerLocation } from '../../../../common/views.js';
 import { ChatEntitlement, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
 import { GroupDirection, IEditorGroupsService } from '../../../../services/editor/common/editorGroupsService.js';
 import { ACTIVE_GROUP, AUX_WINDOW_GROUP, IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
-import { IWorkbenchLayoutService, Parts } from '../../../../services/layout/browser/layoutService.js';
+// NEXORA: Removed Parts - unused after modifying ToggleChatAction
+import { IWorkbenchLayoutService } from '../../../../services/layout/browser/layoutService.js';
 import { IPreferencesService } from '../../../../services/preferences/common/preferences.js';
 import { IViewsService } from '../../../../services/views/common/viewsService.js';
 import { EXTENSIONS_CATEGORY, IExtensionsWorkbenchService } from '../../../extensions/common/extensions.js';
@@ -459,6 +461,7 @@ export function registerChatActions() {
 		constructor() { super(ChatMode.Edit); }
 	});
 
+	// NEXORA: Modified Toggle Chat to open Nexora AI panel instead of built-in chat
 	registerAction2(class ToggleChatAction extends Action2 {
 		constructor() {
 			super({
@@ -469,37 +472,9 @@ export function registerChatActions() {
 		}
 
 		async run(accessor: ServicesAccessor) {
-			const layoutService = accessor.get(IWorkbenchLayoutService);
-			const viewsService = accessor.get(IViewsService);
-			const viewDescriptorService = accessor.get(IViewDescriptorService);
-
-			const chatLocation = viewDescriptorService.getViewLocationById(ChatViewId);
-
-			if (viewsService.isViewVisible(ChatViewId)) {
-				this.updatePartVisibility(layoutService, chatLocation, false);
-			} else {
-				this.updatePartVisibility(layoutService, chatLocation, true);
-				(await showChatView(viewsService, layoutService))?.focusInput();
-			}
-		}
-
-		private updatePartVisibility(layoutService: IWorkbenchLayoutService, location: ViewContainerLocation | null, visible: boolean): void {
-			let part: Parts.PANEL_PART | Parts.SIDEBAR_PART | Parts.AUXILIARYBAR_PART | undefined;
-			switch (location) {
-				case ViewContainerLocation.Panel:
-					part = Parts.PANEL_PART;
-					break;
-				case ViewContainerLocation.Sidebar:
-					part = Parts.SIDEBAR_PART;
-					break;
-				case ViewContainerLocation.AuxiliaryBar:
-					part = Parts.AUXILIARYBAR_PART;
-					break;
-			}
-
-			if (part) {
-				layoutService.setPartHidden(!visible, part);
-			}
+			const commandService = accessor.get(ICommandService);
+			// Open Nexora AI panel instead of built-in chat
+			await commandService.executeCommand('nexora.chatPanel.focus');
 		}
 	});
 

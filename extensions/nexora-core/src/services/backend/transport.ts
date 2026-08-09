@@ -12,17 +12,42 @@ export type Transport = {
 	delete: (endpoint: string) => Promise<any>;
 };
 
+/** Optional async provider for IDE SecretStorage API key headers. */
+export type HeaderProvider = () => Promise<Record<string, string>>;
+
 export function createTransport(
 	config: BackendConfig,
-	getMockResponse: (endpoint: string) => any
+	getMockResponse: (endpoint: string) => any,
+	getExtraHeaders?: HeaderProvider
 ): Transport {
+	async function buildHeaders(): Promise<Record<string, string>> {
+		const headers: Record<string, string> = {
+			'Content-Type': 'application/json'
+		};
+		if (getExtraHeaders) {
+			try {
+				const extra = await getExtraHeaders();
+				if (extra) {
+					for (const [key, value] of Object.entries(extra)) {
+						if (value) {
+							headers[key] = value;
+						}
+					}
+				}
+			} catch {
+				// Settings not ready - continue without IDE keys (.env fallback on backend)
+			}
+		}
+		return headers;
+	}
+
 	return {
 		get: async (endpoint: string) => {
 			const url = `${config.baseUrl}${endpoint}`;
 			try {
 				const response = await fetch(url, {
 					method: 'GET',
-					headers: { 'Content-Type': 'application/json' }
+					headers: await buildHeaders()
 				});
 
 				if (!response.ok) {
@@ -39,7 +64,7 @@ export function createTransport(
 
 			const response = await fetch(url, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: await buildHeaders(),
 				body: JSON.stringify(data)
 			});
 
@@ -54,7 +79,7 @@ export function createTransport(
 
 			const response = await fetch(url, {
 				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
+				headers: await buildHeaders(),
 				body: data ? JSON.stringify(data) : undefined
 			});
 
@@ -69,7 +94,7 @@ export function createTransport(
 
 			const response = await fetch(url, {
 				method: 'DELETE',
-				headers: { 'Content-Type': 'application/json' }
+				headers: await buildHeaders()
 			});
 
 			if (!response.ok) {
@@ -80,4 +105,3 @@ export function createTransport(
 		}
 	};
 }
-

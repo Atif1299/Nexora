@@ -1,0 +1,289 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+:root {
+	--wf-bg: var(--vscode-editor-background);
+	--wf-fg: var(--vscode-editor-foreground);
+	--wf-muted: var(--vscode-descriptionForeground, #888);
+	--wf-border: var(--vscode-panel-border, #3c3c3c);
+	--wf-surface: var(--vscode-input-background, #3c3c3c);
+	--wf-surface-2: var(--vscode-sideBar-background, #252526);
+	--wf-radius: 6px;
+	--wf-space: 8px;
+
+	--wf-pending: var(--vscode-descriptionForeground, #6b7280);
+	--wf-running: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #f59e0b));
+	--wf-success: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #10b981));
+	--wf-failed: var(--vscode-testing-iconFailed, var(--vscode-errorForeground, #ef4444));
+	--wf-skipped: var(--vscode-disabledForeground, #9ca3af);
+	--wf-info: var(--vscode-charts-blue, #3b82f6);
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	padding: 0;
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size, 13px);
+	color: var(--wf-fg);
+	background: var(--wf-bg);
+}
+
+#workflow-root {
+	padding: var(--wf-space);
+	min-height: 100vh;
+}
+
+/* Empty state */
+.wf-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	height: 300px;
+	text-align: center;
+	color: var(--wf-muted);
+}
+
+.wf-emptyIcon {
+	margin-bottom: 16px;
+	opacity: 0.5;
+}
+
+.wf-emptyTitle {
+	margin: 0 0 8px 0;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--wf-fg);
+}
+
+.wf-emptyText {
+	margin: 0;
+	font-size: 12px;
+}
+
+/* Header */
+.wf-header {
+	margin-bottom: 16px;
+	padding-bottom: 12px;
+	border-bottom: 1px solid var(--wf-border);
+}
+
+.wf-title {
+	margin: 0 0 8px 0;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1.3;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+}
+
+.wf-meta {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.wf-status {
+	padding: 2px 8px;
+	border-radius: var(--wf-radius);
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.wf-status-awaiting-approval { background: var(--wf-info); color: var(--vscode-button-foreground, white); }
+.wf-status-planning { background: var(--wf-pending); color: var(--vscode-button-foreground, white); }
+.wf-status-approved { background: var(--wf-info); color: var(--vscode-button-foreground, white); }
+.wf-status-executing { background: var(--wf-running); color: var(--vscode-button-foreground, white); }
+.wf-status-completed { background: var(--wf-success); color: white; }
+.wf-status-failed { background: var(--wf-failed); color: white; }
+.wf-status-cancelled { background: var(--wf-skipped); color: white; }
+
+.wf-cost {
+	font-size: 11px;
+	color: var(--wf-muted);
+}
+
+/* Container */
+.wf-container {
+	position: relative;
+	min-height: 200px;
+	overflow: auto;
+}
+
+.wf-connections {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+	z-index: 0;
+}
+
+.wf-line {
+	fill: none;
+	stroke: var(--wf-border);
+	stroke-width: 2;
+}
+
+.wf-levels {
+	position: relative;
+	display: flex;
+	gap: 24px;
+	padding: 8px 0;
+	z-index: 1;
+}
+
+.wf-level {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-width: 160px;
+}
+
+/* Task nodes */
+.wf-node {
+	background: var(--wf-surface);
+	border: 1px solid var(--wf-border);
+	border-left: 4px solid var(--wf-pending);
+	border-radius: var(--wf-radius);
+	cursor: pointer;
+	transition: transform 0.15s ease, box-shadow 0.15s ease;
+	position: relative;
+	overflow: hidden;
+}
+
+.wf-node:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.wf-node-pending { border-left-color: var(--wf-pending); }
+.wf-node-queued { border-left-color: var(--wf-info); }
+
+.wf-node:focus-visible {
+	outline: 2px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+.wf-node-running { 
+	border-left-color: var(--wf-running);
+	animation: wf-pulse 2s infinite;
+}
+.wf-node-success { border-left-color: var(--wf-success); }
+.wf-node-failed { border-left-color: var(--wf-failed); }
+.wf-node-skipped { border-left-color: var(--wf-skipped); }
+.wf-node-cancelled { border-left-color: var(--wf-skipped); }
+
+@keyframes wf-pulse {
+	0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+	50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+}
+
+.wf-nodeHeader {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	background: var(--wf-surface-2);
+	border-bottom: 1px solid var(--wf-border);
+}
+
+.wf-nodeIcon {
+	font-size: 14px;
+	flex-shrink: 0;
+}
+
+.wf-node-success .wf-nodeIcon { color: var(--wf-success); }
+.wf-node-failed .wf-nodeIcon { color: var(--wf-failed); }
+.wf-node-running .wf-nodeIcon { color: var(--wf-running); }
+
+.wf-nodeName {
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.wf-nodeBody {
+	padding: 8px 10px;
+}
+
+.wf-nodeRow {
+	display: flex;
+	justify-content: space-between;
+	font-size: 10px;
+	margin-bottom: 4px;
+}
+
+.wf-nodeRow:last-child {
+	margin-bottom: 0;
+}
+
+.wf-nodeLabel {
+	color: var(--wf-muted);
+}
+
+.wf-nodeValue {
+	font-weight: 500;
+	max-width: 80px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Spinner */
+.wf-spinner {
+	position: absolute;
+	bottom: 8px;
+	right: 8px;
+	width: 14px;
+	height: 14px;
+	border: 2px solid var(--wf-running);
+	border-top-color: transparent;
+	border-radius: 50%;
+	animation: wf-spin 1s linear infinite;
+}
+
+@keyframes wf-spin {
+	to { transform: rotate(360deg); }
+}
+
+/* Legend */
+.wf-legend {
+	display: flex;
+	gap: 16px;
+	margin-top: 16px;
+	padding-top: 12px;
+	border-top: 1px solid var(--wf-border);
+}
+
+.wf-legendItem {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 10px;
+	color: var(--wf-muted);
+}
+
+.wf-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+}
+
+.wf-dot-pending { background: var(--wf-pending); }
+.wf-dot-running { background: var(--wf-running); }
+.wf-dot-success { background: var(--wf-success); }
+.wf-dot-failed { background: var(--wf-failed); }

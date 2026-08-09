@@ -7,14 +7,18 @@ import './media/agentsessionsview.css';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
-import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
-import { Registry } from '../../../../../platform/registry/common/platform.js';
-import { registerIcon } from '../../../../../platform/theme/common/iconRegistry.js';
+// NEXORA: Commented out - unused after disabling agent sessions view
+// import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
+// import { Registry } from '../../../../../platform/registry/common/platform.js';
+// import { registerIcon } from '../../../../../platform/theme/common/iconRegistry.js';
 import { IViewPaneOptions, ViewAction, ViewPane } from '../../../../browser/parts/views/viewPane.js';
-import { ViewPaneContainer } from '../../../../browser/parts/views/viewPaneContainer.js';
-import { IViewContainersRegistry, Extensions as ViewExtensions, ViewContainerLocation, IViewsRegistry, IViewDescriptor, IViewDescriptorService } from '../../../../common/views.js';
+// NEXORA: Commented out - unused after disabling agent sessions view
+// import { ViewPaneContainer } from '../../../../browser/parts/views/viewPaneContainer.js';
+// import { IViewContainersRegistry, Extensions as ViewExtensions, ViewContainerLocation, IViewsRegistry, IViewDescriptor, IViewDescriptorService } from '../../../../common/views.js';
+import { IViewDescriptorService } from '../../../../common/views.js';
 import { ChatContextKeys } from '../../common/chatContextKeys.js';
-import { ChatConfiguration } from '../../common/constants.js';
+// NEXORA: Commented out - unused after disabling agent sessions view
+// import { ChatConfiguration } from '../../common/constants.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
@@ -49,7 +53,8 @@ import { MarshalledId } from '../../../../../base/common/marshallingIds.js';
 import { getActionBarActions } from '../../../../../platform/actions/browser/menuEntryActionViewItem.js';
 import { IChatService } from '../../common/chatService.js';
 import { IChatWidgetService } from '../chat.js';
-import { AGENT_SESSIONS_VIEW_ID, AGENT_SESSIONS_VIEW_CONTAINER_ID, AgentSessionProviders } from './agentSessions.js';
+// NEXORA: Commented out AGENT_SESSIONS_VIEW_CONTAINER_ID - unused after disabling agent sessions view
+import { AGENT_SESSIONS_VIEW_ID, AgentSessionProviders } from './agentSessions.js';
 import { TreeFindMode } from '../../../../../base/browser/ui/tree/abstractTree.js';
 
 export class AgentSessionsView extends ViewPane {
@@ -399,7 +404,8 @@ export class AgentSessionsView extends ViewPane {
 }
 
 //#region View Registration
-
+// NEXORA: Disable built-in Agent Sessions view - Nexora uses its own chat panel
+/*
 const chatAgentsIcon = registerIcon('chat-sessions-icon', Codicon.commentDiscussionSparkle, 'Icon for Agent Sessions View');
 
 const AGENT_SESSIONS_VIEW_TITLE = localize2('agentSessions.view.label', "Agent Sessions");
@@ -434,5 +440,5 @@ const agentSessionsViewDescriptor: IViewDescriptor = {
 	)
 };
 Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([agentSessionsViewDescriptor], agentSessionsViewContainer);
-
+*/
 //#endregion
