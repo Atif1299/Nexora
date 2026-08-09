@@ -672,11 +672,24 @@
 	}
 
 	function showUserEscalation(data) {
-		// Show escalation notification as an assistant message
+		// Show escalation card as structured HTML (do not route through isLoading text path)
 		const platformsTried = data.platformsTried || [data.platform];
-		const platformList = platformsTried.join(', ');
-		
-		const escalationHtml = `
+		const platformList = (platformsTried || []).join(', ');
+
+		if (welcome) {
+			welcome.style.display = 'none';
+		}
+
+		const div = document.createElement('div');
+		div.className = 'nx-msg nx-assistant';
+
+		const header = document.createElement('div');
+		header.className = 'nx-msgHeader';
+		header.textContent = 'Nexora';
+
+		const body = document.createElement('div');
+		body.className = 'nx-msgBody';
+		body.innerHTML = `
 			<div class="nx-escalation">
 				<div class="nx-escalationHeader">
 					<span class="nx-escalationIcon">!</span>
@@ -698,8 +711,11 @@
 				</div>
 			</div>
 		`;
-		
-		addMessage('assistant', escalationHtml, true);
+
+		div.appendChild(header);
+		div.appendChild(body);
+		messages.appendChild(div);
+		messages.scrollTop = messages.scrollHeight;
 	}
 
 	function showPlanExecuting(planId) {

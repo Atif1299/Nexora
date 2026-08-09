@@ -24,6 +24,8 @@ export interface PlanResponse {
 	status: string;
 	tasks: ExecutionTask[];
 	estimated_cost: number;
+	estimated_total_cost?: number;
+	user_request?: string;
 	message: string;
 }
 

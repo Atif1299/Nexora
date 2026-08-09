@@ -11,6 +11,7 @@ import { getChatWebviewHtml } from './webview/chat';
 import type { ChatActivityItem, ChatInitialState, WebviewInboundMessage } from './webview/chat/types';
 import { getOrchestrationWebSocket, type WebSocketMessage } from './services/websocketClient';
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
+import { getSettingsService } from './services/settingsService';
 
 type ChatMode = 'chat' | 'ask' | 'plan' | 'execute' | 'agent';
 
@@ -145,9 +146,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			'claude-haiku': 'anthropic/claude-3-haiku-20240307',
 			'claude-sonnet': 'anthropic/claude-3-5-sonnet-20241022',
 			'gpt-4o-mini': 'openai/gpt-4o-mini',
-			'gpt-4o': 'openai/gpt-4o'
+			'gpt-4o': 'openai/gpt-4o',
+			// Settings panel preference values use marketing names; normalise to
+			// ids LiteLLM accepts when calling Anthropic directly.
+			'anthropic/claude-3.5-sonnet': 'anthropic/claude-3-5-sonnet-20241022'
 		};
-		const raw = (model || '').trim();
+		// Fall back to the Week 12 Settings preference when the chat UI sends no model
+		const raw = (model || '').trim() || getSettingsService().getPreferences().defaultModel.trim();
 		if (!raw) {
 			return undefined;
 		}

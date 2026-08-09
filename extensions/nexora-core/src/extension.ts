@@ -113,6 +113,9 @@ export function activate(context: vscode.ExtensionContext) {
 				platform: message.platform || 'unknown',
 				operation: message.operation || 'unknown',
 				status: status,
+				startedAt: message.started_at,
+				completedAt: message.completed_at,
+				duration: message.duration_ms,
 				result: message.result,
 				error: message.error,
 				logs: []
@@ -125,7 +128,11 @@ export function activate(context: vscode.ExtensionContext) {
 				message: `Task ${status}: ${message.task_name || message.task_id}`
 			});
 
-			void setOperationInProgress(true);
+			// Only a running task counts as an in-progress operation. Setting this on
+			// terminal events would leave Escape bound to cancel after execution ends.
+			if (message.type === 'task_running') {
+				void setOperationInProgress(true);
+			}
 			notifications.handleOrchestrationEvent(message);
 		}
 
@@ -222,7 +229,6 @@ export function activate(context: vscode.ExtensionContext) {
 			if (plan && plan.tasks) {
 				workflowProvider.updatePlan(plan);
 				outputProvider.clearOutputs();
-				void setOperationInProgress(true);
 			}
 		}),
 		vscode.commands.registerCommand('nexora.newSession', async () => {
@@ -235,7 +241,8 @@ export function activate(context: vscode.ExtensionContext) {
 				await setOperationInProgress(false);
 				void notifications.showInfo('Operation cancelled');
 			} else {
-				void notifications.showInfo('No operation in progress');
+				// Nothing to cancel: clear the context key so Escape returns to VS Code
+				await setOperationInProgress(false);
 			}
 		}),
 		// Week 12: Settings + shortcuts

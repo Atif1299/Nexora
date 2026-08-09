@@ -103,7 +103,21 @@ export class OutputPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	public updateTaskOutput(output: TaskOutput): void {
-		this._taskOutputs.set(output.taskId, output);
+		// Merge with existing entry so prior logs are not wiped on each status event
+		const existing = this._taskOutputs.get(output.taskId);
+		const merged: TaskOutput = existing
+			? {
+				...existing,
+				...output,
+				logs: existing.logs.length > 0 && output.logs.length === 0
+					? existing.logs
+					: output.logs.length > 0
+						? output.logs
+						: existing.logs
+			}
+			: { ...output, logs: output.logs ? [...output.logs] : [] };
+
+		this._taskOutputs.set(output.taskId, merged);
 
 		if (this._view) {
 			this._view.webview.postMessage({
