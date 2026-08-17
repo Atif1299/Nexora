@@ -12,11 +12,18 @@
 		{ id: 'openrouter', label: 'OpenRouter' }
 	];
 
+	const SAAS_PROVIDERS = [
+		{ id: 'supabase_url', label: 'Supabase URL', placeholder: 'https://xxx.supabase.co', isUrl: true },
+		{ id: 'supabase_key', label: 'Supabase Service Key', placeholder: 'eyJhbGciOiJIUzI1NiIs...' },
+		{ id: 'stripe', label: 'Stripe Secret Key', placeholder: 'sk_test_... or sk_live_...' },
+		{ id: 'v0', label: 'v0.dev API Key', placeholder: 'Optional - LLM fallback available' }
+	];
+
 	let state = {
 		keyMasks: {},
 		configured: {},
 		preferences: {
-			defaultModel: 'anthropic/claude-3.5-sonnet',
+			defaultModel: 'openrouter/openrouter/free',
 			autoIndexWorkspace: true,
 			showCostEstimates: true,
 			theme: 'auto'
@@ -101,6 +108,70 @@
 					vscode.postMessage({ type: 'saveApiKey', provider, key });
 				} else if (action === 'clear') {
 					vscode.postMessage({ type: 'clearApiKey', provider });
+				}
+			});
+		});
+	}
+
+	function renderSaasKeys() {
+		const root = document.getElementById('saas-keys');
+		if (!root) {
+			return;
+		}
+
+		root.innerHTML = SAAS_PROVIDERS.map(p => {
+			const mask = state.keyMasks[p.id];
+			const configured = !!state.configured[p.id];
+			const statusText = configured ? `Saved (${escapeHtml(mask || '••••')})` : 'Not configured';
+			return `
+				<div class="nx-card" data-provider="${p.id}">
+					<div class="nx-row">
+						<span class="nx-label">${escapeHtml(p.label)}</span>
+						<span class="nx-status">${statusDot(configured ? 'connected' : 'not_configured')}${statusText}</span>
+					</div>
+					<label class="sr-only" for="key-${p.id}">${escapeHtml(p.label)}</label>
+					<input
+						id="key-${p.id}"
+						class="nx-input"
+						type="${p.isUrl ? 'text' : 'password'}"
+						autocomplete="off"
+						spellcheck="false"
+						aria-label="${escapeHtml(p.label)}"
+						placeholder="${configured ? 'Enter new value to replace...' : (p.placeholder || 'Enter value...')}"
+					/>
+					<div class="nx-actions">
+						<button type="button" class="nx-btn nx-btn-secondary" data-saas-action="test" data-provider="${p.id}" aria-label="Test ${escapeHtml(p.label)}">Test</button>
+						<button type="button" class="nx-btn" data-saas-action="save" data-provider="${p.id}" aria-label="Save ${escapeHtml(p.label)}">Save</button>
+						<button type="button" class="nx-btn nx-btn-danger" data-saas-action="clear" data-provider="${p.id}" aria-label="Clear ${escapeHtml(p.label)}" ${configured ? '' : 'disabled'}>Clear</button>
+					</div>
+					<div class="nx-msg" id="msg-${p.id}" role="status"></div>
+				</div>
+			`;
+		}).join('');
+
+		root.querySelectorAll('button[data-saas-action]').forEach(btn => {
+			btn.addEventListener('click', () => {
+				const action = btn.getAttribute('data-saas-action');
+				const provider = btn.getAttribute('data-provider');
+				const input = document.getElementById(`key-${provider}`);
+				const value = input ? input.value.trim() : '';
+
+				if (action === 'test') {
+					if (!value) {
+						setMsg(provider, 'Enter a value to test', 'err');
+						return;
+					}
+					setMsg(provider, 'Testing...', '');
+					vscode.postMessage({ type: 'testSaasKey', provider, value });
+				} else if (action === 'save') {
+					if (!value) {
+						setMsg(provider, 'Enter a value to save', 'err');
+						return;
+					}
+					setMsg(provider, 'Saving...', '');
+					vscode.postMessage({ type: 'saveSaasKey', provider, value });
+				} else if (action === 'clear') {
+					vscode.postMessage({ type: 'clearSaasKey', provider });
 				}
 			});
 		});
@@ -218,10 +289,11 @@
 			<div class="nx-card">
 				<label class="nx-label" for="pref-model">Default model</label>
 				<select id="pref-model" class="nx-select" aria-label="Default model">
-					<option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
-					<option value="openai/gpt-4o">GPT-4o</option>
-					<option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+					<option value="openrouter/openrouter/free">OpenRouter Free</option>
 					<option value="openrouter/auto">OpenRouter Auto</option>
+					<option value="openai/gpt-4o-mini">GPT-4o Mini (fallback)</option>
+					<option value="openai/gpt-4o">GPT-4o</option>
+					<option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
 				</select>
 			</div>
 			<div class="nx-card">
@@ -287,6 +359,7 @@
 					connections: msg.connections !== undefined ? msg.connections : state.connections
 				};
 				renderApiKeys();
+				renderSaasKeys();
 				renderConnections();
 				renderPreferences();
 				break;
@@ -308,11 +381,34 @@
 			case 'oauthResult':
 				announce(msg.message || 'OAuth update');
 				break;
+			// Week 13: SaaS connector key handling
+			case 'saasTestResult':
+				setMsg(msg.provider, msg.success ? (msg.details || 'Connection successful') : (msg.error || 'Connection failed'), msg.success ? 'ok' : 'err');
+				break;
+			case 'saasSaveResult':
+				setMsg(msg.provider, msg.success ? 'Saved to backend .env' : (msg.error || 'Save failed'), msg.success ? 'ok' : 'err');
+				if (msg.success) {
+					const input = document.getElementById(`key-${msg.provider}`);
+					if (input) {
+						input.value = '';
+					}
+					state.configured[msg.provider] = true;
+					renderSaasKeys();
+				}
+				break;
+			case 'saasClearResult':
+				setMsg(msg.provider, msg.success ? 'Cleared from backend' : (msg.error || 'Clear failed'), msg.success ? 'ok' : 'err');
+				if (msg.success) {
+					state.configured[msg.provider] = false;
+					renderSaasKeys();
+				}
+				break;
 		}
 	});
 
 	bindChrome();
 	renderApiKeys();
+	renderSaasKeys();
 	renderConnections();
 	renderPreferences();
 	vscode.postMessage({ type: 'ready' });

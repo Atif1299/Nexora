@@ -16,7 +16,7 @@ export interface NexoraPreferences {
 
 const PREFERENCES_KEY = 'nexora.preferences';
 const DEFAULT_PREFERENCES: NexoraPreferences = {
-	defaultModel: 'anthropic/claude-3.5-sonnet',
+	defaultModel: 'openrouter/openrouter/free',
 	autoIndexWorkspace: true,
 	showCostEstimates: true,
 	theme: 'auto'

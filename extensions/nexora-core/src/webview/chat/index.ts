@@ -62,6 +62,18 @@ export function getChatWebviewHtml(
 					<span class="nx-badgeLabel">Vc</span>
 					<span class="nx-badgeDot" aria-hidden="true"></span>
 				</button>
+				<button class="nx-badge" id="supabaseBadge" type="button" title="Supabase - click to enable/disable">
+					<span class="nx-badgeLabel">SB</span>
+					<span class="nx-badgeDot" aria-hidden="true"></span>
+				</button>
+				<button class="nx-badge" id="stripeBadge" type="button" title="Stripe - click to enable/disable">
+					<span class="nx-badgeLabel">St</span>
+					<span class="nx-badgeDot" aria-hidden="true"></span>
+				</button>
+				<button class="nx-badge" id="v0Badge" type="button" title="v0.dev - click to enable/disable">
+					<span class="nx-badgeLabel">v0</span>
+					<span class="nx-badgeDot" aria-hidden="true"></span>
+				</button>
 			</div>
 		</header>
 

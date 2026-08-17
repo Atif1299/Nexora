@@ -5,14 +5,40 @@
 
 import type { Transport } from './transport';
 
+export interface AuthStatus {
+	github_connected: boolean;
+	vercel_connected: boolean;
+	supabase_connected: boolean;
+	stripe_connected: boolean;
+	v0_connected: boolean;
+	supabase_configured?: boolean;
+	stripe_configured?: boolean;
+	v0_configured?: boolean;
+	supabase_enabled?: boolean;
+	stripe_enabled?: boolean;
+	v0_enabled?: boolean;
+}
+
 export function createAuthApi(transport: Transport) {
 	return {
-		getAuthStatus: async (userId: string = 'default'): Promise<{ github_connected: boolean; vercel_connected: boolean }> => {
+		getAuthStatus: async (userId: string = 'default'): Promise<AuthStatus> => {
 			try {
 				const response = await transport.get(`/api/auth/status?user_id=${userId}`);
-				return response || { github_connected: false, vercel_connected: false };
+				return response || {
+					github_connected: false,
+					vercel_connected: false,
+					supabase_connected: false,
+					stripe_connected: false,
+					v0_connected: false
+				};
 			} catch {
-				return { github_connected: false, vercel_connected: false };
+				return {
+					github_connected: false,
+					vercel_connected: false,
+					supabase_connected: false,
+					stripe_connected: false,
+					v0_connected: false
+				};
 			}
 		},
 
@@ -43,6 +69,32 @@ export function createAuthApi(transport: Transport) {
 		disconnectVercel: async (userId: string = 'default'): Promise<{ status: string }> => {
 			try {
 				return await transport.post(`/api/auth/vercel/disconnect?user_id=${userId}`, {});
+			} catch {
+				return { status: 'error' };
+			}
+		},
+
+		toggleSaasConnector: async (
+			provider: 'supabase' | 'stripe' | 'v0',
+			enabled: boolean,
+			userId: string = 'default'
+		): Promise<{ status: string; connected: boolean } | null> => {
+			try {
+				return await transport.post(
+					`/api/auth/${provider}/toggle?user_id=${userId}`,
+					{ enabled }
+				);
+			} catch {
+				return null;
+			}
+		},
+
+		disconnectSaasConnector: async (
+			provider: 'supabase' | 'stripe' | 'v0',
+			userId: string = 'default'
+		): Promise<{ status: string }> => {
+			try {
+				return await transport.post(`/api/auth/${provider}/disconnect?user_id=${userId}`, {});
 			} catch {
 				return { status: 'error' };
 			}

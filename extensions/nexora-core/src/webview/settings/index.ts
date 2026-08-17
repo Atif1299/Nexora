@@ -48,9 +48,15 @@ export function getSettingsWebviewHtml(
 		</div>
 
 		<section class="nx-section" aria-labelledby="api-keys-heading">
-			<h2 id="api-keys-heading">API Keys</h2>
+			<h2 id="api-keys-heading">LLM API Keys</h2>
 			<p class="nx-hint">Test a key, then Save. That key becomes the primary credential for this IDE.</p>
 			<div id="api-keys" class="nx-stack"></div>
+		</section>
+
+		<section class="nx-section" aria-labelledby="saas-keys-heading">
+			<h2 id="saas-keys-heading">SaaS Connectors</h2>
+			<p class="nx-hint">Configure Supabase, Stripe, and v0.dev credentials for full-stack orchestration.</p>
+			<div id="saas-keys" class="nx-stack"></div>
 		</section>
 
 		<section class="nx-section" aria-labelledby="connections-heading">

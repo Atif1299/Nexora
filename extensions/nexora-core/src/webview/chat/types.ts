@@ -11,6 +11,8 @@ export type WebviewInboundMessage =
 	| { type: 'generateCode'; prompt: string; connector: string }
 	| { type: 'connectGitHub' }
 	| { type: 'connectVercel' }
+	| { type: 'toggleSaas'; provider: 'supabase' | 'stripe' | 'v0' }
+	| { type: 'openSettings'; section?: string }  // Week 13: SaaS connector settings
 	| { type: 'deployProject'; prompt: string; repoName: string; projectName: string }
 	| { type: 'checkAuthStatus' }
 	| { type: 'generatePlan'; request: string; model?: string }
@@ -35,7 +37,7 @@ export type WebviewOutboundMessage =
 	| { type: 'chatActivity'; items: ChatActivityItem[] }
 	| { type: 'chatActivityClear' }
 	| { type: 'backendStatus'; connected: boolean }
-	| { type: 'authStatus'; github: boolean; vercel: boolean }
+	| { type: 'authStatus'; github: boolean; vercel: boolean; supabase?: boolean; stripe?: boolean; v0?: boolean }
 	| { type: 'showPlanApproval'; plan: any }
 	| { type: 'loadSession'; sessionId: string; messages: Array<{ role: 'user' | 'assistant'; content: string }> }
 	| { type: 'updateSessions'; sessions: Array<{ id: string; name: string }>; activeSessionId: string }
@@ -50,6 +52,9 @@ export type ChatInitialState = {
 	auth: {
 		github: boolean;
 		vercel: boolean;
+		supabase?: boolean;
+		stripe?: boolean;
+		v0?: boolean;
 	};
 	messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 	sessions?: Array<{ id: string; name: string }>;

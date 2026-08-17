@@ -10,9 +10,15 @@ import { getBackendClient } from './services/backendClient';
 import { getNotificationService } from './services/notificationService';
 
 const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'openrouter'];
+const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0'] as const;
+type SaasProvider = (typeof SAAS_PROVIDERS)[number];
 
 function isApiKeyProvider(value: string): value is ApiKeyProvider {
 	return (LLM_PROVIDERS as string[]).includes(value);
+}
+
+function isSaasProvider(value: string): value is SaasProvider {
+	return (SAAS_PROVIDERS as readonly string[]).includes(value);
 }
 
 export class SettingsPanelProvider implements vscode.WebviewViewProvider {
@@ -70,6 +76,16 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 				case 'showShortcuts':
 					await vscode.commands.executeCommand('nexora.showKeyboardShortcuts');
 					break;
+				// Week 13: SaaS connector key handlers
+				case 'testSaasKey':
+					await this._testSaasKey(msg.provider, msg.value);
+					break;
+				case 'saveSaasKey':
+					await this._saveSaasKey(msg.provider, msg.value);
+					break;
+				case 'clearSaasKey':
+					await this._clearSaasKey(msg.provider);
+					break;
 			}
 		});
 
@@ -100,6 +116,13 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 		}
 
 		const connections = await client.getConnectionStatus('default');
+
+		// Week 13: Check SaaS connector status from auth status endpoint
+		const authStatus = await client.getAuthStatus('default');
+		configured['supabase_url'] = !!authStatus.supabase_configured;
+		configured['supabase_key'] = !!authStatus.supabase_configured;
+		configured['stripe'] = !!authStatus.stripe_configured;
+		configured['v0'] = !!authStatus.v0_configured;
 
 		this._view.webview.postMessage({
 			type: 'updateState',
@@ -263,5 +286,95 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 			);
 		}
 		await this._pushState();
+	}
+
+	// Week 13: SaaS connector key handlers
+	private async _testSaasKey(provider: string, value: string): Promise<void> {
+		if (!this._view || !isSaasProvider(provider)) {
+			return;
+		}
+
+		const client = getBackendClient();
+		// Map provider to backend test endpoint
+		const testProvider = provider === 'supabase_url' || provider === 'supabase_key' ? 'supabase' : provider;
+		const result = await client.testProviderConnection(testProvider, 'default');
+
+		this._view.webview.postMessage({
+			type: 'saasTestResult',
+			provider,
+			success: !!result?.success,
+			details: result?.details,
+			error: result?.error
+		});
+	}
+
+	private async _saveSaasKey(provider: string, value: string): Promise<void> {
+		if (!this._view || !isSaasProvider(provider)) {
+			return;
+		}
+
+		const notifications = getNotificationService();
+		const client = getBackendClient();
+
+		try {
+			// Save to backend .env via API
+			const envKey = this._getEnvKeyName(provider);
+			const result = await client.setSaasCredential(envKey, value);
+
+			if (result?.success) {
+				this._view.webview.postMessage({
+					type: 'saasSaveResult',
+					provider,
+					success: true
+				});
+				void notifications.showSuccess(`${provider} saved to backend`);
+				await this._pushState();
+			} else {
+				this._view.webview.postMessage({
+					type: 'saasSaveResult',
+					provider,
+					success: false,
+					error: result?.error || 'Save failed'
+				});
+			}
+		} catch (error) {
+			this._view.webview.postMessage({
+				type: 'saasSaveResult',
+				provider,
+				success: false,
+				error: error instanceof Error ? error.message : 'Save failed'
+			});
+		}
+	}
+
+	private async _clearSaasKey(provider: string): Promise<void> {
+		if (!this._view || !isSaasProvider(provider)) {
+			return;
+		}
+
+		const client = getBackendClient();
+		try {
+			const envKey = this._getEnvKeyName(provider);
+			await client.setSaasCredential(envKey, '');
+			this._view.webview.postMessage({ type: 'saasClearResult', provider, success: true });
+			await this._pushState();
+		} catch (error) {
+			this._view.webview.postMessage({
+				type: 'saasClearResult',
+				provider,
+				success: false,
+				error: error instanceof Error ? error.message : 'Clear failed'
+			});
+		}
+	}
+
+	private _getEnvKeyName(provider: string): string {
+		const envKeyMap: Record<string, string> = {
+			'supabase_url': 'SUPABASE_URL',
+			'supabase_key': 'SUPABASE_SERVICE_KEY',
+			'stripe': 'STRIPE_SECRET_KEY',
+			'v0': 'V0_API_KEY'
+		};
+		return envKeyMap[provider] || provider.toUpperCase();
 	}
 }

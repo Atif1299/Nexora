@@ -177,7 +177,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		const initialState: ChatInitialState = {
 			connected: false,
-			auth: { github: false, vercel: false },
+			auth: { github: false, vercel: false, supabase: false, stripe: false, v0: false },
 			messages: this._getActiveSession()?.messages || [],
 			sessions: this._sessionSummaries(),
 			activeSessionId: this._activeSessionId
@@ -221,6 +221,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._handleGitHubConnect();
 			} else if (data.type === 'connectVercel') {
 				await this._handleVercelConnect();
+			} else if (data.type === 'toggleSaas') {
+				await this._handleSaasToggle(data.provider);
+			} else if (data.type === 'openSettings') {
+				await this._handleOpenSettings(data.section);
 			} else if (data.type === 'deployProject') {
 				await this._handleDeployment(data.prompt, data.repoName, data.projectName);
 			} else if (data.type === 'checkAuthStatus') {
@@ -975,7 +979,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		this._view.webview.postMessage({
 			type: 'authStatus',
 			github: status.github_connected,
-			vercel: status.vercel_connected
+			vercel: status.vercel_connected,
+			supabase: status.supabase_connected,
+			stripe: status.stripe_connected,
+			v0: status.v0_connected
 		});
 	}
 
@@ -1034,6 +1041,81 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				type: 'addMessage',
 				role: 'assistant',
 				content: 'Failed to get Vercel authorization URL. Please check backend configuration.',
+				isLoading: false
+			});
+		}
+	}
+
+	private async _handleSaasToggle(provider: 'supabase' | 'stripe' | 'v0'): Promise<void> {
+		if (!this._view) {
+			return;
+		}
+
+		const client = getBackendClient();
+		const status = await client.getAuthStatus();
+		const connected = provider === 'supabase'
+			? status.supabase_connected
+			: provider === 'stripe'
+				? status.stripe_connected
+				: status.v0_connected;
+		const configured = provider === 'supabase'
+			? status.supabase_configured
+			: provider === 'stripe'
+				? status.stripe_configured
+				: status.v0_configured;
+
+		const names: Record<string, string> = {
+			supabase: 'Supabase',
+			stripe: 'Stripe',
+			v0: 'v0.dev'
+		};
+		const label = names[provider] || provider;
+
+		if (!configured) {
+			await this._handleOpenSettings(provider);
+			return;
+		}
+
+		const result = await client.toggleSaasConnector(provider, !connected);
+		await this._checkAuthStatus();
+
+		if (!result) {
+			this._view.webview.postMessage({
+				type: 'addMessage',
+				role: 'assistant',
+				content: `Failed to update ${label} status. Check that the backend is running.`,
+				isLoading: false
+			});
+			return;
+		}
+
+		this._view.webview.postMessage({
+			type: 'addMessage',
+			role: 'assistant',
+			content: result.connected
+				? `**${label}** is now enabled for orchestration.`
+				: `**${label}** is now disabled. Credentials remain in backend settings.`,
+			isLoading: false
+		});
+	}
+
+	private async _handleOpenSettings(section?: string): Promise<void> {
+		// Open Nexora settings panel with optional section hint
+		await vscode.commands.executeCommand('nexora.openSettings');
+
+		if (this._view && section) {
+			// Show a message about which connector needs configuration
+			const connectorNames: Record<string, string> = {
+				'supabase': 'Supabase',
+				'stripe': 'Stripe',
+				'v0': 'v0.dev'
+			};
+			const name = connectorNames[section] || section;
+
+			this._view.webview.postMessage({
+				type: 'addMessage',
+				role: 'assistant',
+				content: `**Configure ${name}**\n\nOpen Settings panel and add your ${name} credentials in the API Keys section.`,
 				isLoading: false
 			});
 		}

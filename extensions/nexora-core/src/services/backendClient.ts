@@ -308,14 +308,20 @@ export class BackendClient {
 	}
 
 	/**
-	 * Get OAuth authentication status for all providers.
+	 * Get authentication status for all providers.
 	 * 
 	 * @param userId User identifier
-	 * @returns Status of GitHub and Vercel connections
+	 * @returns Status of all connections (OAuth + SaaS)
 	 */
 	async getAuthStatus(userId: string = 'default'): Promise<{
 		github_connected: boolean;
 		vercel_connected: boolean;
+		supabase_connected: boolean;
+		stripe_connected: boolean;
+		v0_connected: boolean;
+		supabase_configured?: boolean;
+		stripe_configured?: boolean;
+		v0_configured?: boolean;
 	}> {
 		return createAuthApi(this.transport).getAuthStatus(userId);
 	}
@@ -360,6 +366,21 @@ export class BackendClient {
 		return createAuthApi(this.transport).disconnectVercel(userId);
 	}
 
+	async toggleSaasConnector(
+		provider: 'supabase' | 'stripe' | 'v0',
+		enabled: boolean,
+		userId: string = 'default'
+	): Promise<{ status: string; connected: boolean } | null> {
+		return createAuthApi(this.transport).toggleSaasConnector(provider, enabled, userId);
+	}
+
+	async disconnectSaasConnector(
+		provider: 'supabase' | 'stripe' | 'v0',
+		userId: string = 'default'
+	): Promise<{ status: string }> {
+		return createAuthApi(this.transport).disconnectSaasConnector(provider, userId);
+	}
+
 	/**
 	 * Week 12: Get connection status for LLM / deployment / database providers.
 	 * Reflects backend .env + OAuth tokens (Option A - not IDE SecretStorage).
@@ -373,6 +394,21 @@ export class BackendClient {
 	 */
 	async testProviderConnection(provider: string, userId: string = 'default'): Promise<TestResult | null> {
 		return createStatusApi(this.transport).testProvider(provider, userId);
+	}
+
+	/**
+	 * Week 13: Save a SaaS connector credential to backend .env
+	 */
+	async setSaasCredential(envKey: string, value: string): Promise<{ success: boolean; error?: string }> {
+		try {
+			const result = await this.transport.post(
+				'/api/settings/credential',
+				{ key: envKey, value }
+			) as { success: boolean; error?: string } | null;
+			return result || { success: false, error: 'No response' };
+		} catch (error) {
+			return { success: false, error: error instanceof Error ? error.message : 'Request failed' };
+		}
 	}
 
 	/**
