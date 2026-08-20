@@ -55,7 +55,7 @@ export function getSettingsWebviewHtml(
 
 		<section class="nx-section" aria-labelledby="saas-keys-heading">
 			<h2 id="saas-keys-heading">SaaS Connectors</h2>
-			<p class="nx-hint">Configure Supabase, Stripe, and v0.dev credentials for full-stack orchestration.</p>
+			<p class="nx-hint">Configure Supabase, Stripe, v0.dev, ElevenLabs, and Tavily credentials for orchestration.</p>
 			<div id="saas-keys" class="nx-stack"></div>
 		</section>
 

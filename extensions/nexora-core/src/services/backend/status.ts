@@ -17,6 +17,7 @@ export interface ConnectionsResponse {
 	llm: Record<string, ProviderStatus>;
 	deployment: Record<string, ProviderStatus>;
 	database: Record<string, ProviderStatus>;
+	saas?: Record<string, ProviderStatus>;
 }
 
 export interface TestResult {

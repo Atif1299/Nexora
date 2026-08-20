@@ -177,7 +177,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		const initialState: ChatInitialState = {
 			connected: false,
-			auth: { github: false, vercel: false, supabase: false, stripe: false, v0: false },
+			auth: { github: false, vercel: false, supabase: false, stripe: false, v0: false, elevenlabs: false, tavily: false },
 			messages: this._getActiveSession()?.messages || [],
 			sessions: this._sessionSummaries(),
 			activeSessionId: this._activeSessionId
@@ -982,7 +982,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			vercel: status.vercel_connected,
 			supabase: status.supabase_connected,
 			stripe: status.stripe_connected,
-			v0: status.v0_connected
+			v0: status.v0_connected,
+			elevenlabs: !!status.elevenlabs_connected,
+			tavily: !!status.tavily_connected
 		});
 	}
 
@@ -1046,28 +1048,36 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	private async _handleSaasToggle(provider: 'supabase' | 'stripe' | 'v0'): Promise<void> {
+	private async _handleSaasToggle(provider: 'supabase' | 'stripe' | 'v0' | 'elevenlabs' | 'tavily'): Promise<void> {
 		if (!this._view) {
 			return;
 		}
 
 		const client = getBackendClient();
 		const status = await client.getAuthStatus();
-		const connected = provider === 'supabase'
-			? status.supabase_connected
-			: provider === 'stripe'
-				? status.stripe_connected
-				: status.v0_connected;
-		const configured = provider === 'supabase'
-			? status.supabase_configured
-			: provider === 'stripe'
-				? status.stripe_configured
-				: status.v0_configured;
+		const connectedByProvider: Record<string, boolean> = {
+			supabase: status.supabase_connected,
+			stripe: status.stripe_connected,
+			v0: status.v0_connected,
+			elevenlabs: !!status.elevenlabs_connected,
+			tavily: !!status.tavily_connected
+		};
+		const configuredByProvider: Record<string, boolean> = {
+			supabase: !!status.supabase_configured,
+			stripe: !!status.stripe_configured,
+			v0: !!status.v0_configured,
+			elevenlabs: !!status.elevenlabs_configured,
+			tavily: !!status.tavily_configured
+		};
+		const connected = connectedByProvider[provider];
+		const configured = configuredByProvider[provider];
 
 		const names: Record<string, string> = {
 			supabase: 'Supabase',
 			stripe: 'Stripe',
-			v0: 'v0.dev'
+			v0: 'v0.dev',
+			elevenlabs: 'ElevenLabs',
+			tavily: 'Tavily'
 		};
 		const label = names[provider] || provider;
 
@@ -1108,7 +1118,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			const connectorNames: Record<string, string> = {
 				'supabase': 'Supabase',
 				'stripe': 'Stripe',
-				'v0': 'v0.dev'
+				'v0': 'v0.dev',
+				'elevenlabs': 'ElevenLabs',
+				'tavily': 'Tavily'
 			};
 			const name = connectorNames[section] || section;
 

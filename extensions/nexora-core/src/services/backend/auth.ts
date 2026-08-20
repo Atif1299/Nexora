@@ -5,18 +5,26 @@
 
 import type { Transport } from './transport';
 
+export type SaasConnector = 'supabase' | 'stripe' | 'v0' | 'elevenlabs' | 'tavily';
+
 export interface AuthStatus {
 	github_connected: boolean;
 	vercel_connected: boolean;
 	supabase_connected: boolean;
 	stripe_connected: boolean;
 	v0_connected: boolean;
+	elevenlabs_connected?: boolean;
+	tavily_connected?: boolean;
 	supabase_configured?: boolean;
 	stripe_configured?: boolean;
 	v0_configured?: boolean;
+	elevenlabs_configured?: boolean;
+	tavily_configured?: boolean;
 	supabase_enabled?: boolean;
 	stripe_enabled?: boolean;
 	v0_enabled?: boolean;
+	elevenlabs_enabled?: boolean;
+	tavily_enabled?: boolean;
 }
 
 export function createAuthApi(transport: Transport) {
@@ -29,7 +37,9 @@ export function createAuthApi(transport: Transport) {
 					vercel_connected: false,
 					supabase_connected: false,
 					stripe_connected: false,
-					v0_connected: false
+					v0_connected: false,
+					elevenlabs_connected: false,
+					tavily_connected: false
 				};
 			} catch {
 				return {
@@ -37,7 +47,9 @@ export function createAuthApi(transport: Transport) {
 					vercel_connected: false,
 					supabase_connected: false,
 					stripe_connected: false,
-					v0_connected: false
+					v0_connected: false,
+					elevenlabs_connected: false,
+					tavily_connected: false
 				};
 			}
 		},
@@ -75,7 +87,7 @@ export function createAuthApi(transport: Transport) {
 		},
 
 		toggleSaasConnector: async (
-			provider: 'supabase' | 'stripe' | 'v0',
+			provider: SaasConnector,
 			enabled: boolean,
 			userId: string = 'default'
 		): Promise<{ status: string; connected: boolean } | null> => {
@@ -90,7 +102,7 @@ export function createAuthApi(transport: Transport) {
 		},
 
 		disconnectSaasConnector: async (
-			provider: 'supabase' | 'stripe' | 'v0',
+			provider: SaasConnector,
 			userId: string = 'default'
 		): Promise<{ status: string }> => {
 			try {

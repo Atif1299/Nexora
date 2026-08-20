@@ -12,7 +12,7 @@ import { createTransport, type HeaderProvider } from './backend/transport';
 import { createPlatformsApi } from './backend/platforms';
 import { createMemoryApi } from './backend/memory';
 import { createCognitiveApi } from './backend/cognitive';
-import { createAuthApi } from './backend/auth';
+import { createAuthApi, type SaasConnector } from './backend/auth';
 import { createOrchestrateApi } from './backend/orchestrate';
 import { createHistoryApi, type HistoryItem, type RollbackableItem, type RollbackInfo, type RollbackResponse, type HistoryStats } from './backend/history';
 import { createAgentApi, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './backend/agent';
@@ -22,6 +22,7 @@ import { createStatusApi, type ConnectionsResponse, type TestResult, type Provid
 export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
 export type { ChatSession, ChatMessage, SessionSummary, SessionListResponse };
 export type { ConnectionsResponse, TestResult, ProviderStatus };
+export type { SaasConnector };
 
 /** Mutable provider so SettingsService can register after activate(). */
 let _apiKeyHeaderProvider: HeaderProvider | undefined;
@@ -319,9 +320,13 @@ export class BackendClient {
 		supabase_connected: boolean;
 		stripe_connected: boolean;
 		v0_connected: boolean;
+		elevenlabs_connected?: boolean;
+		tavily_connected?: boolean;
 		supabase_configured?: boolean;
 		stripe_configured?: boolean;
 		v0_configured?: boolean;
+		elevenlabs_configured?: boolean;
+		tavily_configured?: boolean;
 	}> {
 		return createAuthApi(this.transport).getAuthStatus(userId);
 	}
@@ -367,7 +372,7 @@ export class BackendClient {
 	}
 
 	async toggleSaasConnector(
-		provider: 'supabase' | 'stripe' | 'v0',
+		provider: SaasConnector,
 		enabled: boolean,
 		userId: string = 'default'
 	): Promise<{ status: string; connected: boolean } | null> {
@@ -375,7 +380,7 @@ export class BackendClient {
 	}
 
 	async disconnectSaasConnector(
-		provider: 'supabase' | 'stripe' | 'v0',
+		provider: SaasConnector,
 		userId: string = 'default'
 	): Promise<{ status: string }> {
 		return createAuthApi(this.transport).disconnectSaasConnector(provider, userId);
@@ -656,7 +661,9 @@ export class BackendClient {
 			{ id: 'claude', name: 'Anthropic Claude', category: 'LLM', status: 'available' },
 			{ id: 'v0-dev', name: 'v0.dev', category: 'UI Generation', status: 'available' },
 			{ id: 'github', name: 'GitHub', category: 'Version Control', status: 'connected' },
-			{ id: 'vercel', name: 'Vercel', category: 'Deployment', status: 'available' }
+			{ id: 'vercel', name: 'Vercel', category: 'Deployment', status: 'available' },
+			{ id: 'elevenlabs', name: 'ElevenLabs', category: 'Voice/Audio', status: 'available' },
+			{ id: 'tavily', name: 'Tavily', category: 'Research', status: 'available' }
 		];
 	}
 }

@@ -16,7 +16,9 @@
 		{ id: 'supabase_url', label: 'Supabase URL', placeholder: 'https://xxx.supabase.co', isUrl: true },
 		{ id: 'supabase_key', label: 'Supabase Service Key', placeholder: 'eyJhbGciOiJIUzI1NiIs...' },
 		{ id: 'stripe', label: 'Stripe Secret Key', placeholder: 'sk_test_... or sk_live_...' },
-		{ id: 'v0', label: 'v0.dev API Key', placeholder: 'Optional - LLM fallback available' }
+		{ id: 'v0', label: 'v0.dev API Key', placeholder: 'Optional - LLM fallback available' },
+		{ id: 'elevenlabs', label: 'ElevenLabs API Key', placeholder: 'sk_...' },
+		{ id: 'tavily', label: 'Tavily API Key', placeholder: 'tvly-...' }
 	];
 
 	let state = {
@@ -204,6 +206,7 @@
 		const llmRows = Object.entries(c.llm || {}).map(([id, info]) => providerRow(id, info, 'llm'));
 		const deployRows = Object.entries(c.deployment || {}).map(([id, info]) => providerRow(id, info, 'deployment'));
 		const dbRows = Object.entries(c.database || {}).map(([id, info]) => providerRow(id, info, 'database'));
+		const saasRows = Object.entries(c.saas || {}).map(([id, info]) => providerRow(id, info, 'saas'));
 
 		root.innerHTML = `
 			<div class="nx-card">
@@ -217,6 +220,10 @@
 			<div class="nx-card">
 				<div class="nx-label" style="margin-bottom:8px">Database</div>
 				${dbRows.join('') || '<p class="nx-hint">None</p>'}
+			</div>
+			<div class="nx-card">
+				<div class="nx-label" style="margin-bottom:8px">SaaS (API keys in backend .env)</div>
+				${saasRows.join('') || '<p class="nx-hint">None</p>'}
 			</div>
 		`;
 
@@ -263,7 +270,7 @@
 			} else {
 				actions = `<button type="button" class="nx-btn" data-oauth="connectOAuth" data-provider="${escapeHtml(id)}" aria-label="Connect ${escapeHtml(id)}">Connect</button>`;
 			}
-		} else if (category === 'llm') {
+		} else if (category === 'llm' || category === 'saas') {
 			actions = `<button type="button" class="nx-btn nx-btn-secondary" data-test-env="1" data-provider="${escapeHtml(id)}" aria-label="Test ${escapeHtml(id)} connection">Test</button>`;
 		}
 
