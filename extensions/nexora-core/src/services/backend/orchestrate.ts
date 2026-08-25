@@ -27,6 +27,12 @@ export interface PlanResponse {
 	estimated_total_cost?: number;
 	user_request?: string;
 	message: string;
+	cost_breakdown?: Array<{
+		task: string;
+		platform: string;
+		operation: string;
+		estimated_cost: number;
+	}>;
 }
 
 export interface PlanModification {
@@ -107,6 +113,20 @@ export function createOrchestrateApi(transport: Transport) {
 			modification: PlanModification
 		): Promise<PlanResponse> => {
 			return await transport.post(`/api/orchestrate/modify/${planId}`, modification);
+		},
+
+		estimatePlan: async (
+			request: string,
+			userId: string = 'default',
+			workspacePath?: string,
+			model?: string
+		): Promise<PlanResponse> => {
+			return await transport.post('/api/orchestrate/estimate', {
+				request,
+				user_id: userId,
+				workspace_path: workspacePath,
+				model
+			});
 		},
 
 		listPlans: async (userId?: string): Promise<{

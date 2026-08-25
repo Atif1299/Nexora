@@ -46,6 +46,9 @@ function main() {
 
 	// Week 12: Settings panel assets
 	copyWebviewFolder(root, 'settings', ['settings.css', 'settings.js']);
+
+	// Week 15: Analytics panel assets
+	copyWebviewFolder(root, 'analytics', ['analytics.css', 'analytics.js']);
 }
 
 main();

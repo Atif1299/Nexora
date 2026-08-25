@@ -15,6 +15,7 @@ import { createCognitiveApi } from './backend/cognitive';
 import { createAuthApi, type SaasConnector } from './backend/auth';
 import { createOrchestrateApi } from './backend/orchestrate';
 import { createHistoryApi, type HistoryItem, type RollbackableItem, type RollbackInfo, type RollbackResponse, type HistoryStats } from './backend/history';
+import { createAnalyticsApi, type AnalyticsDashboardData, type CostSummary, type MemoryInsights } from './backend/analytics';
 import { createAgentApi, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './backend/agent';
 import { createSessionsApi, type ChatSession, type ChatMessage, type SessionSummary, type SessionListResponse } from './backend/sessions';
 import { createStatusApi, type ConnectionsResponse, type TestResult, type ProviderStatus } from './backend/status';
@@ -513,6 +514,27 @@ export class BackendClient {
 	 */
 	async listPlans(userId?: string): Promise<any> {
 		return createOrchestrateApi(this.transport).listPlans(userId);
+	}
+
+	async estimatePlan(
+		request: string,
+		userId: string = 'default',
+		workspacePath?: string,
+		model?: string
+	): Promise<any> {
+		return createOrchestrateApi(this.transport).estimatePlan(request, userId, workspacePath, model);
+	}
+
+	async getAnalyticsDashboard(userId: string = 'default'): Promise<AnalyticsDashboardData> {
+		return createAnalyticsApi(this.transport).getDashboard(userId);
+	}
+
+	async getCostSummary(userId: string = 'default'): Promise<CostSummary> {
+		return createAnalyticsApi(this.transport).getCostSummary(userId);
+	}
+
+	async getMemoryInsights(userId: string = 'default'): Promise<MemoryInsights> {
+		return createAnalyticsApi(this.transport).getMemoryInsights(userId);
 	}
 
 	// ============================================================================
