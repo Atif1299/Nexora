@@ -40,6 +40,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	private readonly _context: vscode.ExtensionContext;
 	private _sessions: ChatSessionRecord[] = [];
 	private _activeSessionId: string = '';
+	private _backendOffline = false;
 
 	constructor(private readonly _extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
 		this._context = context;
@@ -984,8 +985,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			stripe: status.stripe_connected,
 			v0: status.v0_connected,
 			elevenlabs: !!status.elevenlabs_connected,
-			tavily: !!status.tavily_connected
+			tavily: !!status.tavily_connected,
+			backendOffline: !!status.backend_offline
 		});
+
+		// Distinguish "backend is down" from "nothing is connected". Announce it once
+		// per transition so a stopped backend does not look like revoked credentials.
+		if (status.backend_offline !== this._backendOffline) {
+			this._backendOffline = !!status.backend_offline;
+			if (status.backend_offline) {
+				this._view.webview.postMessage({
+					type: 'addMessage',
+					role: 'assistant',
+					content: 'Cannot reach the Nexora backend, so connection badges may be inaccurate. Start it with `uvicorn app.main:app --reload` in `backend/`.',
+					isLoading: false
+				});
+			}
+		}
 	}
 
 	private async _handleGitHubConnect(): Promise<void> {

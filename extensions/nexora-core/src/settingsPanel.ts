@@ -8,6 +8,7 @@ import { getSettingsWebviewHtml } from './webview/settings';
 import { getSettingsService, type ApiKeyProvider, type NexoraPreferences } from './services/settingsService';
 import { getBackendClient } from './services/backendClient';
 import { getNotificationService } from './services/notificationService';
+import type { SaasConnector } from './services/backend/auth';
 
 const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'openrouter'];
 const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0', 'elevenlabs', 'tavily'] as const;
@@ -290,13 +291,32 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 		await this._pushState();
 	}
 
-	// Week 13: SaaS connector key handlers
+	// Week 13/14: SaaS connector key handlers
 	private async _testSaasKey(provider: string, value: string): Promise<void> {
 		if (!this._view || !isSaasProvider(provider)) {
 			return;
 		}
 
 		const client = getBackendClient();
+
+		// The backend can only test the key it has stored, so a freshly typed value
+		// has to be saved first. Otherwise Test reports on the previous key while
+		// the user is looking at a new one.
+		const typed = (value || '').trim();
+		if (typed && !typed.includes('•')) {
+			const envKey = this._getEnvKeyName(provider);
+			const saved = await client.setSaasCredential(envKey, typed);
+			if (!saved?.success) {
+				this._view.webview.postMessage({
+					type: 'saasTestResult',
+					provider,
+					success: false,
+					error: saved?.error || 'Could not save the entered key before testing'
+				});
+				return;
+			}
+		}
+
 		// Map provider to backend test endpoint
 		const testProvider = provider === 'supabase_url' || provider === 'supabase_key' ? 'supabase' : provider;
 		const result = await client.testProviderConnection(testProvider, 'default');
@@ -358,6 +378,14 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 		try {
 			const envKey = this._getEnvKeyName(provider);
 			await client.setSaasCredential(envKey, '');
+
+			// Clearing the credential must also drop the connection server-side,
+			// otherwise the badge keeps reporting the provider as connected.
+			const connector = provider === 'supabase_url' || provider === 'supabase_key'
+				? 'supabase'
+				: provider;
+			await client.disconnectSaasConnector(connector as SaasConnector, 'default');
+
 			this._view.webview.postMessage({ type: 'saasClearResult', provider, success: true });
 			await this._pushState();
 		} catch (error) {

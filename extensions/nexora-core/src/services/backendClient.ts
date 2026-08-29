@@ -12,7 +12,7 @@ import { createTransport, type HeaderProvider } from './backend/transport';
 import { createPlatformsApi } from './backend/platforms';
 import { createMemoryApi } from './backend/memory';
 import { createCognitiveApi } from './backend/cognitive';
-import { createAuthApi, type SaasConnector } from './backend/auth';
+import { createAuthApi, type AuthStatus, type SaasConnector } from './backend/auth';
 import { createOrchestrateApi } from './backend/orchestrate';
 import { createHistoryApi, type HistoryItem, type RollbackableItem, type RollbackInfo, type RollbackResponse, type HistoryStats } from './backend/history';
 import { createAnalyticsApi, type AnalyticsDashboardData, type CostSummary, type MemoryInsights } from './backend/analytics';
@@ -315,20 +315,7 @@ export class BackendClient {
 	 * @param userId User identifier
 	 * @returns Status of all connections (OAuth + SaaS)
 	 */
-	async getAuthStatus(userId: string = 'default'): Promise<{
-		github_connected: boolean;
-		vercel_connected: boolean;
-		supabase_connected: boolean;
-		stripe_connected: boolean;
-		v0_connected: boolean;
-		elevenlabs_connected?: boolean;
-		tavily_connected?: boolean;
-		supabase_configured?: boolean;
-		stripe_configured?: boolean;
-		v0_configured?: boolean;
-		elevenlabs_configured?: boolean;
-		tavily_configured?: boolean;
-	}> {
+	async getAuthStatus(userId: string = 'default'): Promise<AuthStatus> {
 		return createAuthApi(this.transport).getAuthStatus(userId);
 	}
 
