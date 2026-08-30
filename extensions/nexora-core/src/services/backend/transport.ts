@@ -7,6 +7,15 @@ import type { BackendConfig } from '../backendClient';
 
 export type Transport = {
 	get: (endpoint: string) => Promise<any>;
+	/**
+	 * GET that rejects instead of falling back to a mock response.
+	 *
+	 * `get` returns mock data when the backend is unreachable, which is fine for panels
+	 * that only need something to render. It is wrong for the analytics dashboard: a
+	 * cost readout of $0.00 is a factual claim, and showing it when the backend is
+	 * simply down is worse than showing nothing.
+	 */
+	getStrict: (endpoint: string) => Promise<any>;
 	post: (endpoint: string, data: any) => Promise<any>;
 	put: (endpoint: string, data?: any) => Promise<any>;
 	delete: (endpoint: string) => Promise<any>;
@@ -58,6 +67,19 @@ export function createTransport(
 			} catch {
 				return getMockResponse(endpoint);
 			}
+		},
+		getStrict: async (endpoint: string) => {
+			const url = `${config.baseUrl}${endpoint}`;
+			const response = await fetch(url, {
+				method: 'GET',
+				headers: await buildHeaders()
+			});
+
+			if (!response.ok) {
+				throw new Error(`HTTP ${response.status}`);
+			}
+
+			return await response.json();
 		},
 		post: async (endpoint: string, data: any) => {
 			const url = `${config.baseUrl}${endpoint}`;

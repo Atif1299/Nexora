@@ -166,6 +166,42 @@ h1 {
 	padding: 8px 0;
 }
 
+.nx-banner {
+	margin: 8px 0 12px;
+	padding: 8px 10px;
+	border-radius: 4px;
+	font-size: 12px;
+	background: var(--vscode-inputValidation-warningBackground, rgba(255, 190, 80, 0.15));
+	border: 1px solid var(--vscode-inputValidation-warningBorder, rgba(255, 190, 80, 0.5));
+	color: var(--vscode-foreground);
+}
+
+.nx-recentRow {
+	display: grid;
+	grid-template-columns: 1fr 1.2fr auto auto auto auto;
+	gap: 8px;
+	align-items: center;
+	font-size: 12px;
+	padding: 4px 0;
+	border-bottom: 1px solid var(--nx-border, rgba(128, 128, 128, 0.2));
+}
+
+.nx-recentRow:last-child {
+	border-bottom: none;
+}
+
+.nx-recentPlatform {
+	font-weight: 600;
+}
+
+.nx-recentStatus {
+	text-transform: capitalize;
+}
+
+.nx-recentRow-failed .nx-recentStatus {
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
 .sr-only {
 	position: absolute;
 	width: 1px;

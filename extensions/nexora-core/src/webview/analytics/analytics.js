@@ -119,23 +119,81 @@
 				<div>Workspaces<br><strong>${escapeHtml(String(memory.workspaces_indexed || 0))}</strong></div>
 				<div>Indexed files<br><strong>${escapeHtml(String(memory.total_files || 0))}</strong></div>
 				<div>Retrievals (7d)<br><strong>${escapeHtml(String(memory.retrievals_this_week || 0))}</strong></div>
-				<div>Hit rate<br><strong>${escapeHtml(String(memory.pct_requests_using_memory || 0))}%</strong></div>
+				<div>Avg retrieval<br><strong>${escapeHtml(String(memory.avg_latency_ms || 0))} ms</strong></div>
+				<div>Requests using memory<br><strong>${escapeHtml(String(memory.pct_requests_using_memory || 0))}%</strong></div>
+				<div>Lookup hit rate<br><strong>${escapeHtml(String(memory.memory_hit_rate || 0))}%</strong></div>
 			</div>
-			<p class="nx-hint" style="margin-top:10px">Hit rate is the share of memory queries that returned context, not all chat requests.</p>
+			<p class="nx-hint" style="margin-top:10px">
+				Requests using memory counts ${escapeHtml(String(memory.requests_using_memory || 0))} of
+				${escapeHtml(String(memory.total_requests || 0))} requests this week. Lookup hit rate is the
+				share of memory queries that returned context.
+			</p>
 			<div style="margin-top:8px">${files}</div>
 		`;
+	}
+
+	function renderRecent(rows) {
+		const root = document.getElementById('recent-executions');
+		if (!root) {
+			return;
+		}
+		const items = rows || [];
+		if (!items.length) {
+			root.innerHTML = '<div class="nx-empty">No executions yet.</div>';
+			return;
+		}
+		root.innerHTML = items.map(row => {
+			const failed = String(row.status || '').toLowerCase() !== 'success';
+			const when = row.completed_at ? String(row.completed_at).slice(11, 16) : '';
+			// Show the quote next to the charge only when they disagree, so the row stays
+			// readable but a bad estimate is still visible.
+			const estimate = Number(row.estimated_cost_usd || 0);
+			const actual = Number(row.cost_usd || 0);
+			const drift = Math.abs(actual - estimate) > 0.0001
+				? `<span class="nx-muted"> (est ${money(estimate)})</span>`
+				: '';
+			return `
+				<div class="nx-recentRow${failed ? ' nx-recentRow-failed' : ''}">
+					<span class="nx-recentPlatform">${escapeHtml(row.platform)}</span>
+					<span class="nx-muted">${escapeHtml(row.operation)}</span>
+					<span class="nx-recentStatus">${escapeHtml(row.status)}</span>
+					<span class="nx-muted">${escapeHtml(String(row.duration_ms || 0))} ms</span>
+					<span>${money(actual)}${drift}</span>
+					<span class="nx-muted">${escapeHtml(when)}</span>
+				</div>
+			`;
+		}).join('');
+	}
+
+	function renderAvailability(data) {
+		const banner = document.getElementById('offline-banner');
+		if (!banner) {
+			return;
+		}
+		if (data.available === false) {
+			// Zeros would otherwise read as "you have spent nothing" when the truth is
+			// "we could not ask the backend".
+			banner.textContent = 'Backend unreachable - figures below are not current. '
+				+ (data.error ? `(${data.error})` : '');
+			banner.hidden = false;
+		} else {
+			banner.textContent = '';
+			banner.hidden = true;
+		}
 	}
 
 	function render(data) {
 		if (!data) {
 			return;
 		}
+		renderAvailability(data);
 		renderSummary(data.summary || {});
 		renderDaily(data.daily || []);
 		renderPlatforms(data.byPlatform || []);
 		renderStats(data.stats || {});
+		renderRecent(data.recent || []);
 		renderMemory(data.memory || {});
-		announce('Analytics updated');
+		announce(data.available === false ? 'Backend unreachable' : 'Analytics updated');
 	}
 
 	window.addEventListener('message', (event) => {

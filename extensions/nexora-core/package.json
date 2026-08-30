@@ -244,7 +244,7 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./ && node scripts/copyWebviewAssets.js",
-    "watch": "tsc -watch -p ./"
+    "watch": "node scripts/copyWebviewAssets.js && tsc -watch -p ./"
   },
   "devDependencies": {
     "@types/node": "^18.x",

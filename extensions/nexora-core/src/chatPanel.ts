@@ -1343,6 +1343,44 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/**
+	 * Summarise an execution result, comparing the charge against the quote.
+	 *
+	 * The approval card asks the user to accept an estimate, so the result is where that
+	 * estimate is either vindicated or shown to have been wrong. Reporting only the final
+	 * cost leaves the estimate unaccountable.
+	 */
+	private _formatExecutionResult(result: {
+		status: string;
+		actual_cost?: number;
+		estimated_cost?: number;
+		cost_delta?: number;
+	}): string {
+		const actual = result.actual_cost ?? 0;
+		const lines = [
+			'**Execution Complete**',
+			'',
+			`Status: ${result.status}`,
+			`Cost: $${actual.toFixed(4)}`
+		];
+
+		if (result.estimated_cost !== undefined && result.cost_delta !== undefined) {
+			const delta = result.cost_delta;
+			lines.push(`Estimated: $${result.estimated_cost.toFixed(4)}`);
+			if (Math.abs(delta) >= 0.0001) {
+				lines.push(
+					delta < 0
+						? `Saved $${Math.abs(delta).toFixed(4)} vs estimate`
+						: `Over estimate by $${delta.toFixed(4)}`
+				);
+			} else {
+				lines.push('Matched the estimate');
+			}
+		}
+
+		return lines.join('\n');
+	}
+
 	private async _handleApprovePlan(planId: string): Promise<void> {
 		if (!this._view) {
 			return;
@@ -1745,7 +1783,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 				const result = await client.approvePlan(this._currentPlanId);
 
-				const resultMsg = `**Execution Complete**\n\nStatus: ${result.status}\nCost: $${result.actual_cost?.toFixed(4) || '0.0000'}`;
+				const resultMsg = this._formatExecutionResult(result);
 				const sessionAfter = this._getActiveSession();
 				if (sessionAfter) {
 					sessionAfter.messages.push({ role: 'assistant', content: resultMsg, mode: 'execute', timestamp: Date.now() });
@@ -1826,7 +1864,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			const result = await client.approvePlan(plan.plan_id);
 
-			const resultMsg = `**Execution Complete**\n\nStatus: ${result.status}\nCost: $${result.actual_cost?.toFixed(4) || '0.0000'}`;
+			const resultMsg = this._formatExecutionResult(result);
 			const sessionAfter = this._getActiveSession();
 			if (sessionAfter) {
 				sessionAfter.messages.push({ role: 'assistant', content: resultMsg, mode: 'execute', timestamp: Date.now() });

@@ -47,6 +47,8 @@ export function getAnalyticsWebviewHtml(
 		</div>
 		<p class="nx-hint">Totals come from execution history. Memory retrievals are tracked separately and do not inflate cost.</p>
 
+		<div id="offline-banner" class="nx-banner" role="alert" hidden></div>
+
 		<section class="nx-section" aria-labelledby="summary-heading">
 			<h2 id="summary-heading">Spend</h2>
 			<div id="summary-cards" class="nx-cards"></div>
@@ -65,6 +67,11 @@ export function getAnalyticsWebviewHtml(
 		<section class="nx-section" aria-labelledby="stats-heading">
 			<h2 id="stats-heading">Executions</h2>
 			<div id="execution-stats" class="nx-stats"></div>
+		</section>
+
+		<section class="nx-section" aria-labelledby="recent-heading">
+			<h2 id="recent-heading">Recent executions</h2>
+			<div id="recent-executions" class="nx-recent"></div>
 		</section>
 
 		<section class="nx-section" aria-labelledby="memory-heading">

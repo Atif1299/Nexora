@@ -95,6 +95,10 @@ export function createOrchestrateApi(transport: Transport) {
 			status: string;
 			tasks: ExecutionTask[];
 			actual_cost: number;
+			/** What the approval card quoted, so the result can be compared against it. */
+			estimated_cost?: number;
+			/** actual - estimated. Negative means it came in under the quote. */
+			cost_delta?: number;
 			message: string;
 		}> => {
 			return await transport.post(`/api/orchestrate/approve/${planId}`, {});

@@ -29,16 +29,24 @@ export class AnalyticsPanelProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.options = webviewOpts;
 		webviewView.webview.html = getAnalyticsWebviewHtml(webviewView.webview, this._extensionUri);
 
-		webviewView.webview.onDidReceiveMessage(async (msg) => {
-			if (msg.type === 'ready' || msg.type === 'refresh') {
-				await this._pushState();
-			}
-		});
+		const disposables: vscode.Disposable[] = [
+			webviewView.webview.onDidReceiveMessage(async (msg) => {
+				if (msg.type === 'ready' || msg.type === 'refresh') {
+					await this._pushState();
+				}
+			}),
+			webviewView.onDidChangeVisibility(() => {
+				if (webviewView.visible) {
+					void this._pushState();
+				}
+			})
+		];
 
-		webviewView.onDidChangeVisibility(() => {
-			if (webviewView.visible) {
-				void this._pushState();
+		webviewView.onDidDispose(() => {
+			for (const disposable of disposables) {
+				disposable.dispose();
 			}
+			this._view = undefined;
 		});
 	}
 
