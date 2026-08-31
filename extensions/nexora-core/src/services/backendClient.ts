@@ -10,7 +10,8 @@ export interface BackendConfig {
 
 import { createTransport, type HeaderProvider } from './backend/transport';
 import { createPlatformsApi } from './backend/platforms';
-import { createMemoryApi } from './backend/memory';
+import { createMemoryApi, type MemorySuggestion, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
+import { createWorkflowsApi, type WorkflowTemplate, type TemplateListResponse, type SuggestFromPlanResponse, type SaveFromPlanRequest, type ImportPreview } from './backend/workflows';
 import { createCognitiveApi } from './backend/cognitive';
 import { createAuthApi, type AuthStatus, type SaasConnector } from './backend/auth';
 import { createOrchestrateApi } from './backend/orchestrate';
@@ -24,6 +25,8 @@ export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
 export type { ChatSession, ChatMessage, SessionSummary, SessionListResponse };
 export type { ConnectionsResponse, TestResult, ProviderStatus };
 export type { SaasConnector };
+export type { MemorySuggestion, SuggestionsResponse, TimelineEntry, TimelineResponse, TimelineDiff };
+export type { WorkflowTemplate, TemplateListResponse, SuggestFromPlanResponse, SaveFromPlanRequest, ImportPreview };
 
 /** Mutable provider so SettingsService can register after activate(). */
 let _apiKeyHeaderProvider: HeaderProvider | undefined;
@@ -522,6 +525,91 @@ export class BackendClient {
 
 	async getMemoryInsights(userId: string = 'default'): Promise<MemoryInsights> {
 		return createAnalyticsApi(this.transport).getMemoryInsights(userId);
+	}
+
+	// ============================================================================
+	// Workflow Templates API (Week 16)
+	// ============================================================================
+
+	async listTemplates(category?: string): Promise<TemplateListResponse> {
+		return createWorkflowsApi(this.transport).listTemplates(category);
+	}
+
+	async getTemplate(templateId: string): Promise<WorkflowTemplate> {
+		return createWorkflowsApi(this.transport).getTemplate(templateId);
+	}
+
+	async instantiateTemplate(
+		templateId: string,
+		params: Record<string, unknown> = {},
+		userId: string = 'default',
+		workspacePath?: string
+	): Promise<any> {
+		return createWorkflowsApi(this.transport).instantiateTemplate(templateId, params, userId, workspacePath);
+	}
+
+	async suggestTemplateFromPlan(planId: string): Promise<SuggestFromPlanResponse> {
+		return createWorkflowsApi(this.transport).suggestFromPlan(planId);
+	}
+
+	async saveTemplateFromPlan(planId: string, body: SaveFromPlanRequest): Promise<WorkflowTemplate> {
+		return createWorkflowsApi(this.transport).saveFromPlan(planId, body);
+	}
+
+	async exportTemplate(templateId: string): Promise<Record<string, unknown>> {
+		return createWorkflowsApi(this.transport).exportTemplate(templateId);
+	}
+
+	async previewImportTemplate(bundle: Record<string, unknown>): Promise<ImportPreview> {
+		return createWorkflowsApi(this.transport).previewImport(bundle);
+	}
+
+	async importTemplate(bundle: Record<string, unknown>): Promise<WorkflowTemplate> {
+		return createWorkflowsApi(this.transport).importTemplate(bundle);
+	}
+
+	async getMemorySuggestions(
+		workspaceId: string,
+		workspacePath?: string,
+		userId?: string
+	): Promise<SuggestionsResponse> {
+		return createMemoryApi(this.transport).getSuggestions(workspaceId, workspacePath, userId);
+	}
+
+	async dismissSuggestion(
+		suggestionId: string,
+		workspaceId: string,
+		permanent: boolean = false
+	): Promise<any> {
+		return createMemoryApi(this.transport).dismissSuggestion(suggestionId, workspaceId, permanent);
+	}
+
+	async acceptSuggestion(
+		suggestionId: string,
+		workspaceId: string,
+		workspacePath?: string,
+		userId: string = 'default',
+		params: Record<string, unknown> = {}
+	): Promise<any> {
+		return createMemoryApi(this.transport).acceptSuggestion(
+			suggestionId,
+			workspaceId,
+			workspacePath,
+			userId,
+			params
+		);
+	}
+
+	async getTimeline(workspaceId: string): Promise<TimelineResponse> {
+		return createMemoryApi(this.transport).getTimeline(workspaceId);
+	}
+
+	async getTimelineSnapshot(snapshotId: string, workspaceId?: string): Promise<TimelineEntry> {
+		return createMemoryApi(this.transport).getTimelineSnapshot(snapshotId, workspaceId);
+	}
+
+	async getTimelineDiff(fromId: string, toId: string, workspaceId?: string): Promise<TimelineDiff> {
+		return createMemoryApi(this.transport).getTimelineDiff(fromId, toId, workspaceId);
 	}
 
 	// ============================================================================
