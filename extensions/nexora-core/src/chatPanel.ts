@@ -12,6 +12,7 @@ import type { ChatActivityItem, ChatInitialState, WebviewInboundMessage } from '
 import { getOrchestrationWebSocket, type WebSocketMessage } from './services/websocketClient';
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
 import { getSettingsService } from './services/settingsService';
+import { getNotificationService } from './services/notificationService';
 
 type ChatMode = 'chat' | 'ask' | 'plan' | 'execute' | 'agent';
 
@@ -36,6 +37,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	private _view?: vscode.WebviewView;
 	private _wsUnsubscribe?: () => void;
 	private _currentPlanId?: string;
+	private _saveTemplateOfferedFor?: string;
 
 	private readonly _context: vscode.ExtensionContext;
 	private _sessions: ChatSessionRecord[] = [];
@@ -196,12 +198,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 			this._pushActiveSessionToWebview();
 			void this._broadcastSessions();
+			void this._pushSuggestions();
 		});
 
 		webviewView.webview.onDidReceiveMessage(async (data: WebviewInboundMessage) => {
 			if (data.type === 'chatWebviewReady') {
 				this._pushActiveSessionToWebview();
 				void this._broadcastSessions();
+				void this._pushSuggestions();
 				return;
 			}
 			if (data.type === 'sendMessage') {
@@ -252,6 +256,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._handleExecuteRequest(data.request, data.model);
 			} else if (data.type === 'runAgent') {
 				await this._handleRunAgent(data.request, data.model);
+			} else if (data.type === 'confirmSaveTemplate') {
+				await this._handleConfirmSaveTemplate(data);
+			} else if (data.type === 'cancelSaveTemplate') {
+				return;
+			} else if (data.type === 'acceptSuggestion') {
+				await this._handleAcceptSuggestion(data.id);
+			} else if (data.type === 'dismissSuggestion') {
+				await this._handleDismissSuggestion(data.id, data.permanent);
+			} else if (data.type === 'requestSuggestions') {
+				void this._pushSuggestions();
 			}
 		});
 
@@ -304,6 +318,158 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 	private async _syncOperationContext(): Promise<void> {
 		await vscode.commands.executeCommand('nexora.setOperationInProgress', !!this._currentPlanId);
+	}
+
+	public showPlanApproval(plan: any): void {
+		if (!this._view || !plan) {
+			return;
+		}
+		if (plan.plan_id) {
+			this._currentPlanId = plan.plan_id;
+			void this._syncOperationContext();
+			const wsClient = getOrchestrationWebSocket('default');
+			if (wsClient.isConnected()) {
+				wsClient.subscribeToPlan(plan.plan_id);
+			}
+		}
+		this._view.webview.postMessage({
+			type: 'showPlanApproval',
+			plan
+		});
+		void vscode.commands.executeCommand('nexora.updateTaskTreeFromPlan', plan);
+		void vscode.commands.executeCommand('nexora.updateWorkflowPlan', plan);
+		void vscode.commands.executeCommand('nexora.chatPanel.focus');
+	}
+
+	private async _workspaceContext(): Promise<{ workspaceId?: string; workspacePath?: string }> {
+		const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const active = this._getActiveSession();
+		if (active?.memoryWorkspaceId) {
+			return { workspaceId: active.memoryWorkspaceId, workspacePath: active.memoryWorkspacePath || workspacePath };
+		}
+		if (!workspacePath) {
+			return {};
+		}
+		try {
+			const mapped = await getBackendClient().getWorkspaceIdForPath(workspacePath);
+			if (active && mapped?.workspace_id) {
+				active.memoryWorkspaceId = mapped.workspace_id;
+				active.memoryWorkspacePath = workspacePath;
+				await this._persistSessions();
+			}
+			return { workspaceId: mapped?.workspace_id, workspacePath };
+		} catch {
+			return { workspacePath };
+		}
+	}
+
+	private async _pushSuggestions(): Promise<void> {
+		if (!this._view) {
+			return;
+		}
+		const { workspaceId, workspacePath } = await this._workspaceContext();
+		if (!workspaceId) {
+			this._view.webview.postMessage({ type: 'showSuggestion', suggestion: null });
+			return;
+		}
+		try {
+			const result = await getBackendClient().getMemorySuggestions(workspaceId, workspacePath, 'default');
+			const first = (result.suggestions || [])[0] || null;
+			this._view.webview.postMessage({ type: 'showSuggestion', suggestion: first });
+		} catch {
+			this._view.webview.postMessage({ type: 'showSuggestion', suggestion: null });
+		}
+	}
+
+	private async _offerSaveAsTemplate(planId: string, status: string): Promise<void> {
+		if (!planId || this._saveTemplateOfferedFor === planId) {
+			return;
+		}
+		const ok = status === 'completed' || status === 'success';
+		if (!ok) {
+			return;
+		}
+		this._saveTemplateOfferedFor = planId;
+		const action = await getNotificationService().showInfo(
+			'Save this workflow as a reusable template?',
+			'Save as Template'
+		);
+		if (action !== 'Save as Template') {
+			return;
+		}
+		try {
+			const suggested = await getBackendClient().suggestTemplateFromPlan(planId);
+			this._view?.webview.postMessage({
+				type: 'showSaveTemplate',
+				planId,
+				parameters: suggested.parameters || []
+			});
+			void vscode.commands.executeCommand('nexora.chatPanel.focus');
+		} catch (error) {
+			void getNotificationService().showError(
+				`Could not infer template parameters: ${error instanceof Error ? error.message : String(error)}`
+			);
+		}
+	}
+
+	private async _handleConfirmSaveTemplate(data: {
+		planId: string;
+		name: string;
+		description: string;
+		category: string;
+		parameters: Array<{ name: string; source_value: string; type?: string; required?: boolean; description?: string }>;
+	}): Promise<void> {
+		const notifications = getNotificationService();
+		try {
+			const saved = await getBackendClient().saveTemplateFromPlan(data.planId, {
+				name: data.name,
+				description: data.description,
+				category: data.category,
+				parameters: data.parameters
+			});
+			void notifications.showSuccess(`Saved template "${saved.name}"`);
+			void vscode.commands.executeCommand('nexora.refreshTemplates');
+		} catch (error) {
+			void notifications.showError(
+				`Failed to save template: ${error instanceof Error ? error.message : String(error)}`
+			);
+		}
+	}
+
+	private async _handleAcceptSuggestion(suggestionId: string): Promise<void> {
+		const notifications = getNotificationService();
+		const { workspaceId, workspacePath } = await this._workspaceContext();
+		if (!workspaceId) {
+			void notifications.showWarning('Index this workspace before running a suggestion.');
+			return;
+		}
+		try {
+			const plan = await getBackendClient().acceptSuggestion(
+				suggestionId,
+				workspaceId,
+				workspacePath,
+				'default'
+			);
+			this.showPlanApproval(plan);
+		} catch (error) {
+			void notifications.showError(
+				`Could not accept suggestion: ${error instanceof Error ? error.message : String(error)}`
+			);
+			void this._pushSuggestions();
+		}
+	}
+
+	private async _handleDismissSuggestion(suggestionId: string, permanent: boolean): Promise<void> {
+		const { workspaceId } = await this._workspaceContext();
+		if (!workspaceId) {
+			return;
+		}
+		try {
+			await getBackendClient().dismissSuggestion(suggestionId, workspaceId, permanent);
+		} catch {
+			// Strip already hidden; next fetch will honour persisted dismissals when the call succeeded.
+		}
+		void this._pushSuggestions();
 	}
 
 	private async _handleSwitchSession(sessionId: string): Promise<void> {
@@ -1412,6 +1578,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				tasks: result.tasks,
 				actualCost: result.actual_cost
 			});
+			await this._offerSaveAsTemplate(planId, result.status);
 
 		} catch (error) {
 			this._view.webview.postMessage({
@@ -1797,6 +1964,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					tasks: result.tasks,
 					actualCost: result.actual_cost
 				});
+				await this._offerSaveAsTemplate(this._currentPlanId, result.status);
 
 				this._currentPlanId = undefined;
 				await this._syncOperationContext();
@@ -1878,6 +2046,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				tasks: result.tasks,
 				actualCost: result.actual_cost
 			});
+			await this._offerSaveAsTemplate(plan.plan_id, result.status);
 
 		} catch (error) {
 			const errMsg = `Error executing request: ${error instanceof Error ? error.message : 'Unknown error'}`;
