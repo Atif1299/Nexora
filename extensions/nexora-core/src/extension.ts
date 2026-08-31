@@ -11,6 +11,8 @@ import { WorkflowPanelProvider } from './workflowPanel';
 import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { SettingsPanelProvider } from './settingsPanel';
 import { AnalyticsPanelProvider } from './analyticsPanel';
+import { TemplatesPanelProvider } from './templatesPanel';
+import { TimelinePanelProvider } from './timelinePanel';
 import { getBackendClient, setApiKeyHeaderProvider } from './services/backendClient';
 import { getSettingsService } from './services/settingsService';
 import { getNotificationService } from './services/notificationService';
@@ -89,6 +91,16 @@ export function activate(context: vscode.ExtensionContext) {
 	const analyticsProvider = new AnalyticsPanelProvider(context.extensionUri);
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(AnalyticsPanelProvider.viewType, analyticsProvider, retainHidden)
+	);
+
+	const templatesProvider = new TemplatesPanelProvider(context.extensionUri);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(TemplatesPanelProvider.viewType, templatesProvider, retainHidden)
+	);
+
+	const timelineProvider = new TimelinePanelProvider(context.extensionUri);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(TimelinePanelProvider.viewType, timelineProvider, retainHidden)
 	);
 
 	const platformProvider = new PlatformBrowserProvider();
@@ -278,6 +290,23 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.refreshAnalytics', async () => {
 			await analyticsProvider.refresh();
 			void notifications.showInfo('Analytics refreshed');
+		}),
+		vscode.commands.registerCommand('nexora.openTemplates', async () => {
+			await vscode.commands.executeCommand('nexora.templates.focus');
+			await templatesProvider.refresh();
+		}),
+		vscode.commands.registerCommand('nexora.refreshTemplates', async () => {
+			await templatesProvider.refresh();
+		}),
+		vscode.commands.registerCommand('nexora.openTimeline', async () => {
+			await vscode.commands.executeCommand('nexora.timeline.focus');
+			await timelineProvider.refresh();
+		}),
+		vscode.commands.registerCommand('nexora.refreshTimeline', async () => {
+			await timelineProvider.refresh();
+		}),
+		vscode.commands.registerCommand('nexora.showPlanApproval', (plan: unknown) => {
+			chatProvider.showPlanApproval(plan);
 		}),
 		vscode.commands.registerCommand('nexora.showKeyboardShortcuts', async () => {
 			const lines = [
