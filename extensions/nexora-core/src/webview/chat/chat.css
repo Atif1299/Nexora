@@ -68,10 +68,145 @@ body
 {
 	height: 100vh;
 	display: grid;
-	grid-template-rows: auto 1fr auto;
+	grid-template-rows: auto auto 1fr auto;
 	width: 100%;
 	max-width: 100%;
 	overflow-x: hidden;
+}
+
+.nx-suggest
+{
+	display: flex;
+	align-items: center;
+	gap: var(--nx-space-2);
+	padding: 4px var(--nx-space-4);
+	border-bottom: 1px solid var(--nx-border);
+	background: var(--nx-surface);
+	min-height: 28px;
+}
+
+.nx-suggest[hidden]
+{
+	display: none;
+}
+
+.nx-suggestIcon
+{
+	flex: 0 0 auto;
+	display: flex;
+	color: var(--nx-primary);
+}
+
+.nx-suggestBody
+{
+	flex: 1 1 auto;
+	min-width: 0;
+	line-height: 1.25;
+}
+
+.nx-suggestTitle
+{
+	font-size: 12px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.nx-suggestReason
+{
+	font-size: 10px;
+	color: var(--nx-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.nx-suggestActions
+{
+	display: flex;
+	flex: 0 0 auto;
+	gap: 4px;
+}
+
+.nx-suggestRun,
+.nx-suggestLater,
+.nx-suggestNever
+{
+	border: none;
+	border-radius: var(--nx-radius-1);
+	padding: 2px 8px;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.nx-suggestRun
+{
+	background: var(--nx-primary);
+	color: var(--nx-primaryFg);
+}
+
+.nx-suggestLater,
+.nx-suggestNever
+{
+	background: var(--nx-secondary);
+	color: var(--nx-secondaryFg);
+}
+
+.nx-saveCard
+{
+	margin: var(--nx-space-3) 0;
+	padding: var(--nx-space-3);
+	border: 1px solid var(--nx-border);
+	border-radius: var(--nx-radius-2);
+	background: var(--nx-surface);
+	display: flex;
+	flex-direction: column;
+	gap: var(--nx-space-2);
+}
+
+.nx-saveTitle
+{
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.nx-saveField
+{
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.nx-saveField label
+{
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-saveField input
+{
+	background: var(--nx-inputBg);
+	color: var(--nx-inputFg);
+	border: 1px solid var(--nx-inputBorder, var(--nx-border));
+	border-radius: var(--nx-radius-1);
+	padding: 4px 8px;
+	font-size: 12px;
+	font-family: inherit;
+}
+
+.nx-saveParam
+{
+	display: grid;
+	grid-template-columns: auto 1fr 1fr;
+	gap: 6px;
+	align-items: center;
+	font-size: 11px;
+}
+
+.nx-saveActions
+{
+	display: flex;
+	gap: 6px;
 }
 
 /* Header */
@@ -1212,7 +1347,9 @@ body
 
 /* Buttons for approval */
 .nx-approveBtn,
-.nx-cancelBtn
+.nx-cancelBtn,
+.nx-saveConfirm,
+.nx-saveCancel
 {
 	padding: 8px 16px;
 	border: none;
@@ -1222,25 +1359,29 @@ body
 	font-weight: 500;
 }
 
-.nx-approveBtn
+.nx-approveBtn,
+.nx-saveConfirm
 {
 	background: var(--nx-primary);
 	color: var(--nx-primaryFg);
 }
 
-.nx-approveBtn:hover
+.nx-approveBtn:hover,
+.nx-saveConfirm:hover
 {
 	background: var(--nx-primaryHover);
 }
 
-.nx-cancelBtn
+.nx-cancelBtn,
+.nx-saveCancel
 {
 	background: transparent;
 	border: 1px solid var(--nx-border);
 	color: var(--nx-fg);
 }
 
-.nx-cancelBtn:hover
+.nx-cancelBtn:hover,
+.nx-saveCancel:hover
 {
 	background: color-mix(in srgb, var(--nx-surface) 85%, white);
 }
