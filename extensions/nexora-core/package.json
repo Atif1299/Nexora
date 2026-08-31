@@ -64,6 +64,20 @@
           "visibility": "visible"
         },
         {
+          "type": "webview",
+          "id": "nexora.templates",
+          "name": "Templates",
+          "icon": "$(notebook-template)",
+          "visibility": "visible"
+        },
+        {
+          "type": "webview",
+          "id": "nexora.timeline",
+          "name": "Timeline",
+          "icon": "$(history)",
+          "visibility": "visible"
+        },
+        {
           "id": "nexora.taskTree",
           "name": "Task Plan",
           "icon": "$(list-tree)",
@@ -171,6 +185,28 @@
         "title": "Refresh Analytics",
         "category": "Nexora",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "nexora.openTemplates",
+        "title": "Open Templates",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.refreshTemplates",
+        "title": "Refresh Templates",
+        "category": "Nexora",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "nexora.openTimeline",
+        "title": "Open Timeline",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.refreshTimeline",
+        "title": "Refresh Timeline",
+        "category": "Nexora",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -198,6 +234,16 @@
         {
           "command": "nexora.refreshAnalytics",
           "when": "view == nexora.analytics",
+          "group": "navigation"
+        },
+        {
+          "command": "nexora.refreshTemplates",
+          "when": "view == nexora.templates",
+          "group": "navigation"
+        },
+        {
+          "command": "nexora.refreshTimeline",
+          "when": "view == nexora.timeline",
           "group": "navigation"
         }
       ]
