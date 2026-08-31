@@ -1,0 +1,230 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+:root {
+	--nx-bg: var(--vscode-editor-background);
+	--nx-fg: var(--vscode-editor-foreground);
+	--nx-muted: var(--vscode-descriptionForeground);
+	--nx-border: var(--vscode-panel-border);
+	--nx-surface: var(--vscode-input-background);
+	--nx-btn-bg: var(--vscode-button-background);
+	--nx-btn-fg: var(--vscode-button-foreground);
+	--nx-btn-hover: var(--vscode-button-hoverBackground);
+	--nx-btn2-bg: var(--vscode-button-secondaryBackground);
+	--nx-btn2-fg: var(--vscode-button-secondaryForeground);
+	--nx-focus: var(--vscode-focusBorder);
+	--nx-input-bg: var(--vscode-input-background);
+	--nx-input-fg: var(--vscode-input-foreground);
+	--nx-input-border: var(--vscode-input-border);
+}
+
+* { box-sizing: border-box; }
+
+body {
+	margin: 0;
+	padding: 0;
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
+	color: var(--nx-fg);
+	background: var(--nx-bg);
+}
+
+#templates-root {
+	padding: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+h1 {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.nx-section h2 {
+	margin: 0 0 8px 0;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.nx-section-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.nx-head-actions {
+	display: flex;
+	gap: 6px;
+}
+
+.nx-hint {
+	margin: 0;
+	font-size: 11px;
+	color: var(--nx-muted);
+	line-height: 1.4;
+}
+
+.nx-btn {
+	border: none;
+	border-radius: 4px;
+	padding: 4px 10px;
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.nx-btn-primary {
+	background: var(--nx-btn-bg);
+	color: var(--nx-btn-fg);
+}
+
+.nx-btn-primary:hover {
+	background: var(--nx-btn-hover);
+}
+
+.nx-btn-secondary {
+	background: var(--nx-btn2-bg);
+	color: var(--nx-btn2-fg);
+}
+
+.nx-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.nx-card {
+	border: 1px solid var(--nx-border);
+	border-radius: 6px;
+	background: var(--nx-surface);
+	padding: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.nx-cardHead {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.nx-cardTitle {
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.nx-badge {
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--nx-muted);
+	border: 1px solid var(--nx-border);
+	border-radius: 4px;
+	padding: 1px 6px;
+}
+
+.nx-cardMeta {
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-cardActions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.nx-form {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding-top: 4px;
+	border-top: 1px solid var(--nx-border);
+}
+
+.nx-field {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.nx-field label {
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-field input,
+.nx-field select {
+	background: var(--nx-input-bg);
+	color: var(--nx-input-fg);
+	border: 1px solid var(--nx-input-border, var(--nx-border));
+	border-radius: 4px;
+	padding: 4px 8px;
+	font-size: 12px;
+	font-family: inherit;
+}
+
+.nx-field input:focus,
+.nx-field select:focus {
+	outline: 1px solid var(--nx-focus);
+	outline-offset: 1px;
+}
+
+.nx-formActions {
+	display: flex;
+	gap: 6px;
+}
+
+.nx-preview {
+	border: 1px solid var(--nx-border);
+	border-radius: 6px;
+	background: var(--nx-surface);
+	padding: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	font-size: 12px;
+}
+
+.nx-previewTitle {
+	font-weight: 600;
+	font-size: 13px;
+}
+
+.nx-banner {
+	margin: 0;
+	padding: 8px 10px;
+	border-radius: 4px;
+	font-size: 12px;
+	background: var(--vscode-inputValidation-warningBackground, rgba(255, 190, 80, 0.15));
+	border: 1px solid var(--vscode-inputValidation-warningBorder, rgba(255, 190, 80, 0.5));
+	color: var(--vscode-foreground);
+}
+
+.nx-empty {
+	font-size: 12px;
+	color: var(--nx-muted);
+	padding: 8px 0;
+}
+
+.nx-muted {
+	color: var(--nx-muted);
+}
+
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
