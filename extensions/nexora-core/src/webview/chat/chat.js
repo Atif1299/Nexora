@@ -332,14 +332,70 @@
 		}, true);
 	}
 
+	function ensureOfflineBanner() {
+		let banner = document.getElementById('offline-banner');
+		if (banner) {
+			return banner;
+		}
+		banner = document.createElement('div');
+		banner.id = 'offline-banner';
+		banner.setAttribute('role', 'alert');
+		banner.hidden = true;
+		banner.style.cssText = 'grid-column:1/-1;margin:0;padding:8px 10px;border-radius:4px;font-size:12px;align-items:center;gap:8px;flex-wrap:wrap;background:var(--vscode-inputValidation-warningBackground, rgba(255,190,80,0.15));border:1px solid var(--vscode-inputValidation-warningBorder, rgba(255,190,80,0.5));color:var(--vscode-foreground);';
+
+		const text = document.createElement('span');
+		text.id = 'offline-banner-text';
+		banner.appendChild(text);
+
+		const retry = document.createElement('button');
+		retry.type = 'button';
+		retry.id = 'offline-banner-retry';
+		retry.textContent = 'Retry';
+		retry.setAttribute('aria-label', 'Retry backend connection');
+		retry.style.cssText = 'border:none;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);';
+		retry.addEventListener('click', () => {
+			vscode.postMessage({ type: 'checkBackend' });
+		});
+		banner.appendChild(retry);
+
+		const header = document.querySelector('.nx-header');
+		if (header) {
+			header.appendChild(banner);
+		} else {
+			document.body.insertBefore(banner, document.body.firstChild);
+		}
+		return banner;
+	}
+
+	function showOfflineBanner(show, errorText) {
+		const banner = ensureOfflineBanner();
+		const text = document.getElementById('offline-banner-text');
+		if (show) {
+			if (text) {
+				text.textContent = 'Backend unreachable - chat is not current. '
+					+ (errorText ? `(${errorText})` : '');
+			}
+			banner.hidden = false;
+			banner.style.display = 'flex';
+		} else {
+			if (text) {
+				text.textContent = '';
+			}
+			banner.hidden = true;
+			banner.style.display = 'none';
+		}
+	}
+
 	function updateStatus(connected) {
 		statusDot.classList.remove('nx-dotOk', 'nx-dotBad');
 		if (connected) {
 			statusDot.classList.add('nx-dotOk');
 			statusText.textContent = 'Backend connected';
+			showOfflineBanner(false);
 		} else {
 			statusDot.classList.add('nx-dotBad');
 			statusText.textContent = 'Backend disconnected';
+			showOfflineBanner(true);
 		}
 	}
 
@@ -777,6 +833,33 @@
 		messages.scrollTop = messages.scrollHeight;
 	}
 
+	function applyPlanSnapshot(plan) {
+		if (!plan || !plan.plan_id) {
+			return;
+		}
+		const planId = plan.plan_id;
+		if (!document.getElementById('plan-card-' + planId)) {
+			createPlanApprovalCard(plan);
+		}
+		const tasks = plan.tasks || [];
+		tasks.forEach(task => {
+			const st = (task.status || 'pending').toLowerCase();
+			updateTaskStatus(task.task_id, st, task.error, task.actual_cost);
+		});
+		const status = (plan.status || '').toLowerCase();
+		if (status === 'executing' || status === 'approved') {
+			showPlanExecuting(planId);
+		} else if (status === 'completed' || status === 'failed' || status === 'cancelled'
+			|| status === 'partially_completed' || status === 'timeout') {
+			const actual = typeof plan.actual_cost === 'number'
+				? plan.actual_cost
+				: typeof plan.actual_total_cost === 'number'
+					? plan.actual_total_cost
+					: tasks.reduce((sum, t) => sum + (Number(t.actual_cost) || 0), 0);
+			showPlanComplete(planId, status, tasks, actual);
+		}
+	}
+
 	function showPlanExecuting(planId) {
 		const actionsEl = document.getElementById('plan-actions-' + planId);
 		if (actionsEl) {
@@ -1127,8 +1210,15 @@
 				updateStatus(data.connected);
 				break;
 
+			case 'planSnapshot':
+				applyPlanSnapshot(data.plan);
+				break;
+
 			case 'authStatus':
 				updateAuthStatus(data.github, data.vercel, data.supabase, data.stripe, data.v0, data.elevenlabs, data.tavily);
+				if (data.backendOffline === true) {
+					updateStatus(false);
+				}
 				break;
 
 			case 'showPlanApproval':
