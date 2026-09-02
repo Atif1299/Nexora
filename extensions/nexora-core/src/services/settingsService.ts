@@ -58,16 +58,12 @@ export class SettingsService {
 		return !!key;
 	}
 
-	/** Masked preview for UI (never send full key to webview after save). */
+	/** Masked preview for UI: bullets only, never a key fragment. */
 	async getApiKeyMask(provider: ApiKeyProvider): Promise<string | null> {
-		const key = await this.getApiKey(provider);
-		if (!key) {
+		if (!(await this.hasApiKey(provider))) {
 			return null;
 		}
-		if (key.length <= 8) {
-			return '••••••••';
-		}
-		return `${'•'.repeat(Math.min(12, key.length - 4))}${key.slice(-4)}`;
+		return '••••••••';
 	}
 
 	async getConfiguredKeyProviders(): Promise<Record<ApiKeyProvider, boolean>> {
