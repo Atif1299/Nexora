@@ -13,8 +13,18 @@ import { getOrchestrationWebSocket, type WebSocketMessage } from './services/web
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
 import { getSettingsService } from './services/settingsService';
 import { getNotificationService } from './services/notificationService';
+import {
+	allLlmNotConfigured,
+	getCachedCapabilities,
+	onDidChangeCapabilities,
+	refreshCapabilities,
+	type CapabilitiesReport
+} from './services/backend/capabilities';
 
 type ChatMode = 'chat' | 'ask' | 'plan' | 'execute' | 'agent';
+
+const FIRST_RUN_DISMISSED_KEY = 'nexora.firstRunKeyCardDismissed';
+const FIRST_RUN_PROVIDERS = ['openai', 'anthropic', 'openrouter'] as const;
 
 type ChatSessionMessage = {
 	role: 'user' | 'assistant';
@@ -47,6 +57,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	constructor(private readonly _extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
 		this._context = context;
 		this._loadSessions();
+		onDidChangeCapabilities((report) => {
+			void this._pushFirstRunCard(report);
+		});
 	}
 
 	private _loadSessions(): void {
@@ -199,6 +212,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			this._pushActiveSessionToWebview();
 			void this._broadcastSessions();
 			void this._pushSuggestions();
+			void this._pushFirstRunCard();
 		});
 
 		webviewView.webview.onDidReceiveMessage(async (data: WebviewInboundMessage) => {
@@ -206,6 +220,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				this._pushActiveSessionToWebview();
 				void this._broadcastSessions();
 				void this._pushSuggestions();
+				void this._pushFirstRunCard();
 				return;
 			}
 			if (data.type === 'sendMessage') {
@@ -230,6 +245,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._handleSaasToggle(data.provider);
 			} else if (data.type === 'openSettings') {
 				await this._handleOpenSettings(data.section);
+			} else if (data.type === 'saveFirstRunKey') {
+				await this._handleSaveFirstRunKey(data.provider, data.key);
+			} else if (data.type === 'dismissFirstRunCard') {
+				await this._dismissFirstRunCard();
 			} else if (data.type === 'deployProject') {
 				await this._handleDeployment(data.prompt, data.repoName, data.projectName);
 			} else if (data.type === 'checkAuthStatus') {
@@ -272,6 +291,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		this._checkBackendStatus();
 		this._checkAuthStatus();
 		this._setupWebSocketListener();
+		void this._pushFirstRunCard();
 		void this._broadcastSessions();
 	}
 
@@ -360,6 +380,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return { workspaceId: mapped?.workspace_id, workspacePath };
 		} catch {
 			return { workspacePath };
+		}
+	}
+
+	private async _appendTranscript(
+		sessionId: string | undefined,
+		workspaceId: string | undefined,
+		role: string,
+		content: string,
+		mode: string
+	): Promise<void> {
+		if (!sessionId || !workspaceId) {
+			return;
+		}
+		try {
+			await getBackendClient().appendTranscript(workspaceId, sessionId, role, content, mode);
+		} catch {
+			// best-effort: local session persist is independent of jsonl
 		}
 	}
 
@@ -633,6 +670,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 
 		const session = this._getActiveSession();
+		const sessionId = session?.id;
 		if (session) {
 			session.messages.push({ role: 'user', content: message });
 			await this._persistSessions();
@@ -676,11 +714,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			const ctx = await this._workspaceContext();
 			const llmModel = this._mapUiModelToLiteLlm(model);
-			const sessionAfterCheck = this._getActiveSession();
+
+			await this._appendTranscript(sessionId, ctx.workspaceId, 'user', message, 'chat');
 
 			// Simple chat - no task decomposition
 			const chatResponse = await client.chat(message, ctx.workspacePath, llmModel, {
-				session_id: sessionAfterCheck?.id,
+				session_id: sessionId,
 				workspace_id: ctx.workspaceId
 			});
 
@@ -689,6 +728,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				sessionAfter.messages.push({ role: 'assistant', content: chatResponse.response });
 				await this._persistSessions();
 			}
+
+			await this._appendTranscript(sessionId, ctx.workspaceId, 'assistant', chatResponse.response, 'chat');
 
 			this._clearChatActivity();
 			this._view.webview.postMessage({
@@ -728,6 +769,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 
 		const session = this._getActiveSession();
+		const sessionId = session?.id;
 		if (session) {
 			session.messages.push({ role: 'user', content: message });
 			await this._persistSessions();
@@ -833,11 +875,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Run agent loop with tools
 			const llmModel = this._mapUiModelToLiteLlm(model);
+			await this._appendTranscript(sessionId, workspaceId, 'user', message, 'ask');
 			const finalAnswer = await this._runAgentLoop(
 				message,
 				workspaceId,
 				workspacePath,
-				llmModel
+				llmModel,
+				sessionId
 			);
 
 			const sessionAfter = this._getActiveSession();
@@ -845,6 +889,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				sessionAfter.messages.push({ role: 'assistant', content: finalAnswer });
 				await this._persistSessions();
 			}
+
+			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'ask');
 
 			this._clearChatActivity();
 			this._view.webview.postMessage({
@@ -878,7 +924,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		userMessage: string,
 		workspaceId: string,
 		workspacePath: string,
-		model?: string
+		model?: string,
+		sessionId?: string
 	): Promise<string> {
 		const client = getBackendClient();
 		const maxTurns = 10;
@@ -901,7 +948,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			turn++;
 
 			// Call backend agent turn
-			const response = await client.agentTurn(messages, workspaceId, workspacePath, model);
+			const response = await client.agentTurn(messages, workspaceId, workspacePath, model, 'ask', sessionId);
 
 			if (response.type === 'final') {
 				// Agent is done, return the answer
@@ -1182,7 +1229,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				this._view.webview.postMessage({
 					type: 'addMessage',
 					role: 'assistant',
-					content: 'Cannot reach the Nexora backend, so connection badges may be inaccurate. Start it with `uvicorn app.main:app --reload` in `backend/`.',
+					content: 'Cannot reach the Nexora engine, so connection badges may be inaccurate. Check the "Nexora Engine" output channel.',
 					isLoading: false
 				});
 			}
@@ -1312,7 +1359,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 	private async _handleOpenSettings(section?: string): Promise<void> {
 		// Open Nexora settings panel with optional section hint
-		await vscode.commands.executeCommand('nexora.openSettings');
+		await vscode.commands.executeCommand('nexora.openSettings', section);
 
 		if (this._view && section) {
 			// Show a message about which connector needs configuration
@@ -1330,6 +1377,76 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				role: 'assistant',
 				content: `**Configure ${name}**\n\nOpen Settings panel and add your ${name} credentials in the API Keys section.`,
 				isLoading: false
+			});
+		}
+	}
+
+	private async _pushFirstRunCard(report?: CapabilitiesReport): Promise<void> {
+		if (!this._view) {
+			return;
+		}
+		const caps = report || getCachedCapabilities() || await refreshCapabilities();
+		const dismissed = this._context.globalState.get<boolean>(FIRST_RUN_DISMISSED_KEY, false);
+		if (caps && !allLlmNotConfigured(caps) && dismissed) {
+			await this._context.globalState.update(FIRST_RUN_DISMISSED_KEY, false);
+		}
+		const show = allLlmNotConfigured(caps) && !this._context.globalState.get<boolean>(FIRST_RUN_DISMISSED_KEY, false);
+		this._view.webview.postMessage({ type: 'firstRunKeyCard', show });
+	}
+
+	private async _dismissFirstRunCard(): Promise<void> {
+		await this._context.globalState.update(FIRST_RUN_DISMISSED_KEY, true);
+		if (this._view) {
+			this._view.webview.postMessage({ type: 'firstRunKeyCard', show: false });
+		}
+	}
+
+	private async _handleSaveFirstRunKey(provider: string, key: string): Promise<void> {
+		if (!this._view) {
+			return;
+		}
+		if (!(FIRST_RUN_PROVIDERS as readonly string[]).includes(provider)) {
+			this._view.webview.postMessage({
+				type: 'firstRunKeyResult',
+				success: false,
+				error: 'Choose OpenAI, Anthropic, or OpenRouter'
+			});
+			return;
+		}
+		const trimmed = (key || '').trim();
+		if (!trimmed) {
+			this._view.webview.postMessage({
+				type: 'firstRunKeyResult',
+				success: false,
+				error: 'Paste a key to save'
+			});
+			return;
+		}
+
+		const client = getBackendClient();
+		const settings = getSettingsService(this._context);
+		try {
+			const result = await client.validateApiKey(provider, trimmed);
+			if (!result?.success) {
+				this._view.webview.postMessage({
+					type: 'firstRunKeyResult',
+					success: false,
+					error: result?.error || 'Key validation failed - not saved'
+				});
+				return;
+			}
+			await settings.setApiKey(provider as typeof FIRST_RUN_PROVIDERS[number], trimmed);
+			await refreshCapabilities();
+			this._view.webview.postMessage({ type: 'firstRunKeyResult', success: true });
+			void getNotificationService().showSuccess(
+				`${provider} key saved - used for Chat, Plan, and Agent`
+			);
+			await this._pushFirstRunCard();
+		} catch (error) {
+			this._view.webview.postMessage({
+				type: 'firstRunKeyResult',
+				success: false,
+				error: error instanceof Error ? error.message : 'Save failed'
 			});
 		}
 	}
@@ -1356,12 +1473,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				let errorMsg = '**Deployment Failed**\n\n';
 				errorMsg += 'OAuth connections required:\n';
 				if (!authStatus.github_connected) {
-					errorMsg += '- [ ] GitHub (click GH badge to connect)\n';
+					errorMsg += '- [ ] GitHub (open Settings → Connections)\n';
 				} else {
 					errorMsg += '- [x] GitHub connected\n';
 				}
 				if (!authStatus.vercel_connected) {
-					errorMsg += '- [ ] Vercel (click Vc badge to connect)\n';
+					errorMsg += '- [ ] Vercel (open Settings → Connections)\n';
 				} else {
 					errorMsg += '- [x] Vercel connected\n';
 				}
@@ -1434,7 +1551,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			if (error instanceof Error) {
 				if (error.message.includes('401')) {
 					errorMsg += 'OAuth authentication required. Please connect GitHub and Vercel.\n\n';
-					errorMsg += 'Click the GH and Vc badges in the status bar to connect.';
+					errorMsg += 'Open Settings → Connections to connect GitHub and Vercel.';
 				} else if (error.message.includes('400')) {
 					errorMsg += 'Invalid request. Check repo name and project name format.\n\n';
 					errorMsg += 'Use only alphanumeric characters, hyphens, and underscores.';
@@ -2090,6 +2207,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		// Persist user message with mode
 		const session = this._getActiveSession();
+		const sessionId = session?.id;
 		if (session) {
 			session.messages.push({ role: 'user', content: request, mode: 'agent', timestamp: Date.now() });
 			await this._persistSessions();
@@ -2182,12 +2300,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Run agent loop with write tools (mode='agent')
 			const llmModel = this._mapUiModelToLiteLlm(model);
+			await this._appendTranscript(sessionId, workspaceId, 'user', request, 'agent');
 			const finalAnswer = await this._runAgentLoopWithMode(
 				request,
 				workspaceId,
 				workspacePath,
 				llmModel,
-				'agent'
+				'agent',
+				sessionId
 			);
 
 			const sessionAfter = this._getActiveSession();
@@ -2195,6 +2315,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				sessionAfter.messages.push({ role: 'assistant', content: finalAnswer, mode: 'agent', timestamp: Date.now() });
 				await this._persistSessions();
 			}
+
+			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'agent');
 
 			this._clearChatActivity();
 			this._view.webview.postMessage({
@@ -2229,7 +2351,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		workspaceId: string,
 		workspacePath: string,
 		model: string | undefined,
-		mode: AgentMode
+		mode: AgentMode,
+		sessionId?: string
 	): Promise<string> {
 		const client = getBackendClient();
 		const maxTurns = 10;
@@ -2252,7 +2375,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			turn++;
 
 			// Call backend agent turn with mode
-			const response = await client.agentTurn(messages, workspaceId, workspacePath, model, mode);
+			const response = await client.agentTurn(messages, workspaceId, workspacePath, model, mode, sessionId);
 
 			if (response.type === 'final') {
 				// Agent is done, return the answer

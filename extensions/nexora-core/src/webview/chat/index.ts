@@ -53,36 +53,6 @@ export function getChatWebviewHtml(
 				<button class="nx-sessionNew" id="newSessionBtn" type="button" title="New chat">+</button>
 				<button class="nx-sessionDelete" id="deleteSessionBtn" type="button" title="Delete chat session">-</button>
 			</div>
-			<div class="nx-auth" aria-label="Authentication status">
-				<button class="nx-badge" id="githubBadge" type="button" title="Click to connect GitHub">
-					<span class="nx-badgeLabel">GH</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="vercelBadge" type="button" title="Click to connect Vercel">
-					<span class="nx-badgeLabel">Vc</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="supabaseBadge" type="button" title="Supabase - click to enable/disable">
-					<span class="nx-badgeLabel">SB</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="stripeBadge" type="button" title="Stripe - click to enable/disable">
-					<span class="nx-badgeLabel">St</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="v0Badge" type="button" title="v0.dev - click to enable/disable">
-					<span class="nx-badgeLabel">v0</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="elevenlabsBadge" type="button" title="ElevenLabs - click to enable/disable">
-					<span class="nx-badgeLabel">EL</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="tavilyBadge" type="button" title="Tavily - click to enable/disable">
-					<span class="nx-badgeLabel">Tv</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-			</div>
 		</header>
 
 		<div class="nx-suggest" id="suggestionStrip" hidden>
@@ -100,6 +70,28 @@ export function getChatWebviewHtml(
 				<button type="button" class="nx-suggestRun" id="suggestRun">Run</button>
 				<button type="button" class="nx-suggestLater" id="suggestLater">Not now</button>
 				<button type="button" class="nx-suggestNever" id="suggestNever">Never</button>
+			</div>
+		</div>
+
+		<div class="nx-firstRun" id="firstRunCard" hidden>
+			<div class="nx-firstRunBody">
+				<div class="nx-firstRunTitle">Add an API key to start</div>
+				<div class="nx-firstRunSub">Chat needs a provider key. Paste one here or open Settings. You can dismiss this and keep using the editor.</div>
+				<div class="nx-firstRunRow">
+					<label class="sr-only" for="firstRunProvider">Provider</label>
+					<select id="firstRunProvider" class="nx-firstRunSelect" aria-label="LLM provider">
+						<option value="openrouter">OpenRouter</option>
+						<option value="openai">OpenAI</option>
+						<option value="anthropic">Anthropic</option>
+					</select>
+					<input class="nx-firstRunInput" type="password" id="firstRunKey" autocomplete="off" spellcheck="false" placeholder="Paste API key…" aria-label="API key" />
+				</div>
+				<div class="nx-firstRunActions">
+					<button type="button" class="nx-firstRunSave" id="firstRunSave">Save key</button>
+					<button type="button" class="nx-firstRunSettings" id="firstRunSettings">Open Settings</button>
+					<button type="button" class="nx-firstRunDismiss" id="firstRunDismiss" title="Dismiss">Not now</button>
+				</div>
+				<div class="nx-firstRunMsg" id="firstRunMsg" role="status"></div>
 			</div>
 		</div>
 

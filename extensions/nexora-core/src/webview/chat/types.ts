@@ -13,6 +13,8 @@ export type WebviewInboundMessage =
 	| { type: 'connectVercel' }
 	| { type: 'toggleSaas'; provider: 'supabase' | 'stripe' | 'v0' | 'elevenlabs' | 'tavily' }
 	| { type: 'openSettings'; section?: string }  // Week 13: SaaS connector settings
+	| { type: 'saveFirstRunKey'; provider: 'openai' | 'anthropic' | 'openrouter'; key: string }
+	| { type: 'dismissFirstRunCard' }
 	| { type: 'deployProject'; prompt: string; repoName: string; projectName: string }
 	| { type: 'checkAuthStatus' }
 	| { type: 'generatePlan'; request: string; model?: string }
@@ -52,7 +54,9 @@ export type WebviewOutboundMessage =
 	| { type: 'planExecutionStarted'; planId: string }
 	| { type: 'planExecutionComplete'; planId: string; status: string; tasks: any[]; actualCost: number }
 	| { type: 'showSaveTemplate'; planId: string; parameters: any[] }
-	| { type: 'showSuggestion'; suggestion: any | null };
+	| { type: 'showSuggestion'; suggestion: any | null }
+	| { type: 'firstRunKeyCard'; show: boolean }
+	| { type: 'firstRunKeyResult'; success: boolean; error?: string };
 
 export type ChatInitialState = {
 	connected: boolean;

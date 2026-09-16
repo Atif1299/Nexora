@@ -46,6 +46,14 @@
 *
 {
 	box-sizing: border-box;
+	scrollbar-width: none;
+}
+
+*::-webkit-scrollbar
+{
+	width: 0;
+	height: 0;
+	display: none;
 }
 
 html,
@@ -66,12 +74,12 @@ body
 
 .nx-root
 {
-	height: 100vh;
-	display: grid;
-	grid-template-rows: auto auto 1fr auto;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
 	width: 100%;
 	max-width: 100%;
-	overflow-x: hidden;
+	overflow: hidden;
 }
 
 .nx-suggest
@@ -152,6 +160,128 @@ body
 	color: var(--nx-secondaryFg);
 }
 
+.nx-firstRun
+{
+	padding: var(--nx-space-3) var(--nx-space-4);
+	border-bottom: 1px solid var(--nx-border);
+	background: var(--nx-surface);
+}
+
+.nx-firstRun[hidden]
+{
+	display: none;
+}
+
+.nx-firstRunBody
+{
+	display: flex;
+	flex-direction: column;
+	gap: var(--nx-space-2);
+}
+
+.nx-firstRunTitle
+{
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.nx-firstRunSub
+{
+	font-size: 11px;
+	color: var(--nx-muted);
+	line-height: 1.4;
+}
+
+.nx-firstRunRow
+{
+	display: flex;
+	gap: 6px;
+}
+
+.nx-firstRunSelect,
+.nx-firstRunInput
+{
+	background: var(--nx-inputBg);
+	color: var(--nx-inputFg);
+	border: 1px solid var(--nx-inputBorder, var(--nx-border));
+	border-radius: var(--nx-radius-1);
+	padding: 4px 8px;
+	font-size: 12px;
+	font-family: inherit;
+}
+
+.nx-firstRunSelect
+{
+	flex: 0 0 auto;
+	max-width: 120px;
+}
+
+.nx-firstRunInput
+{
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.nx-firstRunActions
+{
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.nx-firstRunSave,
+.nx-firstRunSettings,
+.nx-firstRunDismiss
+{
+	border: none;
+	border-radius: var(--nx-radius-1);
+	padding: 4px 10px;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.nx-firstRunSave
+{
+	background: var(--nx-primary);
+	color: var(--nx-primaryFg);
+}
+
+.nx-firstRunSettings,
+.nx-firstRunDismiss
+{
+	background: var(--nx-secondary);
+	color: var(--nx-secondaryFg);
+}
+
+.nx-firstRunMsg
+{
+	font-size: 11px;
+	min-height: 14px;
+}
+
+.nx-firstRunMsg.ok
+{
+	color: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
+}
+
+.nx-firstRunMsg.err
+{
+	color: var(--vscode-errorForeground);
+}
+
+.sr-only
+{
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
 .nx-saveCard
 {
 	margin: var(--nx-space-3) 0;
@@ -213,11 +343,12 @@ body
 .nx-header
 {
 	display: grid;
-	grid-template-columns: 1fr auto auto;
+	grid-template-columns: 1fr auto;
 	gap: var(--nx-space-3);
 	padding: var(--nx-space-2) var(--nx-space-4);
 	border-bottom: 1px solid var(--nx-border);
 	background: var(--nx-surface-2);
+	flex: 0 0 auto;
 }
 
 .nx-sessions
@@ -316,58 +447,17 @@ body
 	text-overflow: ellipsis;
 }
 
-.nx-auth
+.nx-sessionSelect:focus
 {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	justify-content: flex-end;
-	gap: var(--nx-space-2);
-}
-
-.nx-badge
-{
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	padding: 4px 8px;
-	border-radius: 999px;
-	border: 1px solid var(--nx-border);
-	background: transparent;
-	color: var(--nx-fg);
-	cursor: pointer;
-	font-size: 10px;
-	letter-spacing: 0.03em;
-}
-
-.nx-badge:focus
-{
-	outline: 2px solid var(--nx-focus);
+	outline: 1px solid var(--vscode-focusBorder);
 	outline-offset: 1px;
 }
 
-.nx-badgeLabel
-{
-	opacity: 0.8;
-}
-
-.nx-badgeDot
-{
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: color-mix(in srgb, var(--nx-muted) 50%, transparent);
-}
-
-.nx-badge.nx-connected .nx-badgeDot
-{
-	background: var(--vscode-charts-green);
-}
-
-/* Main content */
 .nx-main
 {
+	flex: 1 1 auto;
 	min-height: 0;
+	overflow: hidden;
 }
 
 .nx-messages
@@ -437,7 +527,8 @@ body
 	justify-content: center;
 	text-align: center;
 	padding: var(--nx-space-6) var(--nx-space-4);
-	min-height: 300px;
+	min-height: 100%;
+	box-sizing: border-box;
 }
 
 .nx-welcomeIcon
@@ -630,6 +721,7 @@ body
 .nx-footer
 {
 	position: relative;
+	flex: 0 0 auto;
 	border-top: 1px solid color-mix(in srgb, var(--nx-border) 70%, transparent);
 	background: color-mix(in srgb, var(--nx-bg) 55%, var(--nx-surface-2));
 	padding: 10px 12px 12px;
@@ -692,19 +784,19 @@ body
 .nx-modeSelector
 {
 	display: flex;
-	gap: 8px;
+	gap: 6px;
 	align-items: center;
 	min-width: 0;
-	flex: 1;
+	flex: 0 1 auto;
 }
 
 /* Custom listboxes (mode / model): VS Code-style trigger + menu - native <select> cannot style the open panel */
 .nx-dd
 {
 	position: relative;
-	flex: 1;
+	flex: 0 0 auto;
 	min-width: 0;
-	max-width: 48%;
+	width: auto;
 	font-family: var(--nx-font-ui);
 	font-size: 12px;
 	line-height: 1.35;
@@ -715,10 +807,10 @@ body
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 8px;
-	width: 100%;
-	min-height: 28px;
-	padding: 6px 12px 6px 14px;
+	gap: 6px;
+	width: auto;
+	min-height: 24px;
+	padding: 4px 10px 4px 12px;
 	border-radius: 999px;
 	border: 1px solid color-mix(in srgb, var(--nx-inputBorder) 65%, transparent);
 	background: color-mix(in srgb, var(--nx-inputBg) 70%, var(--nx-surface));
@@ -754,7 +846,7 @@ body
 
 .nx-ddTriggerText
 {
-	flex: 1;
+	flex: 0 1 auto;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -1554,7 +1646,7 @@ body
 	margin-bottom: var(--nx-space-2);
 }
 
-.nx-escalationDetails > div
+.nx-escalationDetails>div
 {
 	padding: 2px 0;
 }

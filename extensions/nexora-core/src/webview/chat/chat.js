@@ -19,13 +19,6 @@
 	const modeHint = document.getElementById('modeHint');
 	const statusDot = document.getElementById('statusDot');
 	const statusText = document.getElementById('statusText');
-	const githubBadge = document.getElementById('githubBadge');
-	const vercelBadge = document.getElementById('vercelBadge');
-	const supabaseBadge = document.getElementById('supabaseBadge');
-	const stripeBadge = document.getElementById('stripeBadge');
-	const v0Badge = document.getElementById('v0Badge');
-	const elevenlabsBadge = document.getElementById('elevenlabsBadge');
-	const tavilyBadge = document.getElementById('tavilyBadge');
 	const welcome = document.getElementById('welcome');
 	const suggestionStrip = document.getElementById('suggestionStrip');
 	const suggestTitle = document.getElementById('suggestTitle');
@@ -36,6 +29,13 @@
 	const sessionSelect = document.getElementById('sessionSelect');
 	const newSessionBtn = document.getElementById('newSessionBtn');
 	const deleteSessionBtn = document.getElementById('deleteSessionBtn');
+	const firstRunCard = document.getElementById('firstRunCard');
+	const firstRunProvider = document.getElementById('firstRunProvider');
+	const firstRunKey = document.getElementById('firstRunKey');
+	const firstRunSave = document.getElementById('firstRunSave');
+	const firstRunSettings = document.getElementById('firstRunSettings');
+	const firstRunDismiss = document.getElementById('firstRunDismiss');
+	const firstRunMsg = document.getElementById('firstRunMsg');
 
 	let lastLoadingMessage = null;
 	let chatActivityCard = null;
@@ -399,45 +399,8 @@
 		}
 	}
 
-	function updateAuthStatus(github, vercel, supabase, stripe, v0, elevenlabs, tavily) {
-		githubBadge.classList.toggle('nx-connected', !!github);
-		githubBadge.title = github ? 'GitHub connected (click to reconnect)' : 'Click to connect GitHub';
-
-		vercelBadge.classList.toggle('nx-connected', !!vercel);
-		vercelBadge.title = vercel ? 'Vercel connected (click to reconnect)' : 'Click to connect Vercel';
-
-		supabaseBadge.classList.toggle('nx-connected', !!supabase);
-		supabaseBadge.title = supabase
-			? 'Supabase enabled (click to disable)'
-			: 'Supabase disabled (click to enable or configure)';
-
-		stripeBadge.classList.toggle('nx-connected', !!stripe);
-		stripeBadge.title = stripe
-			? 'Stripe enabled (click to disable)'
-			: 'Stripe disabled (click to enable or configure)';
-
-		v0Badge.classList.toggle('nx-connected', !!v0);
-		v0Badge.title = v0
-			? 'v0.dev enabled (click to disable)'
-			: 'v0.dev disabled (click to enable or configure)';
-
-		if (elevenlabsBadge) {
-			elevenlabsBadge.classList.toggle('nx-connected', !!elevenlabs);
-			elevenlabsBadge.title = elevenlabs
-				? 'ElevenLabs enabled (click to disable)'
-				: 'ElevenLabs disabled (click to enable or configure)';
-		}
-
-		if (tavilyBadge) {
-			tavilyBadge.classList.toggle('nx-connected', !!tavily);
-			tavilyBadge.title = tavily
-				? 'Tavily enabled (click to disable)'
-				: 'Tavily disabled (click to enable or configure)';
-		}
-	}
-
-	function toggleSaasBadge(provider) {
-		vscode.postMessage({ type: 'toggleSaas', provider: provider });
+	function updateAuthStatus() {
+		// Connector status lives in Settings, not the chat header.
 	}
 
 	function updateModeUI() {
@@ -1044,18 +1007,6 @@
 		};
 	}
 
-	githubBadge.onclick = () => vscode.postMessage({ type: 'connectGitHub' });
-	vercelBadge.onclick = () => vscode.postMessage({ type: 'connectVercel' });
-	supabaseBadge.onclick = () => toggleSaasBadge('supabase');
-	stripeBadge.onclick = () => toggleSaasBadge('stripe');
-	v0Badge.onclick = () => toggleSaasBadge('v0');
-	if (elevenlabsBadge) {
-		elevenlabsBadge.onclick = () => toggleSaasBadge('elevenlabs');
-	}
-	if (tavilyBadge) {
-		tavilyBadge.onclick = () => toggleSaasBadge('tavily');
-	}
-
 	// Quick action buttons
 	document.querySelectorAll('.nx-quickBtn').forEach(btn => {
 		btn.onclick = () => {
@@ -1186,6 +1137,50 @@
 		});
 	}
 
+	function setFirstRunMsg(text, cls) {
+		if (!firstRunMsg) {
+			return;
+		}
+		firstRunMsg.className = 'nx-firstRunMsg' + (cls ? ' ' + cls : '');
+		firstRunMsg.textContent = text || '';
+	}
+
+	function showFirstRunCard(show) {
+		if (!firstRunCard) {
+			return;
+		}
+		if (show) {
+			firstRunCard.hidden = false;
+		} else {
+			firstRunCard.hidden = true;
+			setFirstRunMsg('', '');
+		}
+	}
+
+	if (firstRunSave) {
+		firstRunSave.addEventListener('click', () => {
+			const provider = firstRunProvider ? firstRunProvider.value : 'openrouter';
+			const key = firstRunKey ? firstRunKey.value.trim() : '';
+			if (!key) {
+				setFirstRunMsg('Paste a key to save', 'err');
+				return;
+			}
+			setFirstRunMsg('Saving…', '');
+			vscode.postMessage({ type: 'saveFirstRunKey', provider: provider, key: key });
+		});
+	}
+	if (firstRunSettings) {
+		firstRunSettings.addEventListener('click', () => {
+			vscode.postMessage({ type: 'openSettings' });
+		});
+	}
+	if (firstRunDismiss) {
+		firstRunDismiss.addEventListener('click', () => {
+			showFirstRunCard(false);
+			vscode.postMessage({ type: 'dismissFirstRunCard' });
+		});
+	}
+
 	// Message handler from extension
 	window.addEventListener('message', (e) => {
 		if (!e || !e.data) {
@@ -1263,6 +1258,17 @@
 
 			case 'showSuggestion':
 				showSuggestion(data.suggestion);
+				break;
+
+			case 'firstRunKeyCard':
+				showFirstRunCard(!!data.show);
+				break;
+
+			case 'firstRunKeyResult':
+				setFirstRunMsg(data.success ? 'Key saved.' : (data.error || 'Save failed'), data.success ? 'ok' : 'err');
+				if (data.success && firstRunKey) {
+					firstRunKey.value = '';
+				}
 				break;
 		}
 	});
