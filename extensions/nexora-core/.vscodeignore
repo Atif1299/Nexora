@@ -1,0 +1,10 @@
+# Pack compiled output, webview assets, media, and production deps (ws).
+# Do not list `out/` here — main is ./out/extension.js and webview CSS/JS live under out/webview/.
+# Do not list node_modules/ — vsce includes production dependencies via npm.
+src/**
+scripts/**
+**/*.map
+tsconfig.json
+.gitignore
+.vscode/**
+.vscode-test/**

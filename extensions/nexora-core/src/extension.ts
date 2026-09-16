@@ -10,13 +10,22 @@ import { TaskTreeProvider } from './taskTreeProvider';
 import { WorkflowPanelProvider } from './workflowPanel';
 import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { SettingsPanelProvider } from './settingsPanel';
-import { AnalyticsPanelProvider } from './analyticsPanel';
 import { TemplatesPanelProvider } from './templatesPanel';
 import { TimelinePanelProvider } from './timelinePanel';
 import { getBackendClient, setApiKeyHeaderProvider } from './services/backendClient';
 import { getSettingsService } from './services/settingsService';
 import { getNotificationService } from './services/notificationService';
 import { getOrchestrationWebSocket, disposeWebSocket, type WebSocketMessage } from './services/websocketClient';
+import {
+	startNexoraEngine,
+	stopNexoraEngine,
+	toWebSocketUrl,
+	getEngineState,
+	onDidChangeEngineState,
+	showEngineOutput,
+	type EngineState
+} from './services/engineProcess';
+import { enginePlaceholderHtml, engineStateLabel } from './services/editorPage';
 
 async function setOperationInProgress(value: boolean): Promise<void> {
 	await vscode.commands.executeCommand('setContext', 'nexora.operationInProgress', value);
@@ -26,7 +35,152 @@ async function setChatFocused(value: boolean): Promise<void> {
 	await vscode.commands.executeCommand('setContext', 'nexora.chatFocused', value);
 }
 
-export function activate(context: vscode.ExtensionContext) {
+const NEVER_CANCELLED: vscode.CancellationToken = {
+	isCancellationRequested: false,
+	onCancellationRequested: () => ({ dispose() { /* noop */ } })
+};
+
+const NEXORA_PANEL_VIEWS = [
+	'nexora.workflowViewer',
+	'nexora.outputViewer',
+	'nexora.taskTree'
+] as const;
+
+type NexoraPanelViewId = (typeof NEXORA_PANEL_VIEWS)[number];
+
+async function showOnlyNexoraPanelView(viewId: NexoraPanelViewId): Promise<void> {
+	await vscode.commands.executeCommand(`${viewId}.focus`);
+	for (const id of NEXORA_PANEL_VIEWS) {
+		if (id === viewId) {
+			continue;
+		}
+		try {
+			await vscode.commands.executeCommand(`${id}.removeView`);
+		} catch {
+			// Not visible, or this is the last pane in the container.
+		}
+	}
+}
+
+class EngineGatedWebviewProvider implements vscode.WebviewViewProvider {
+	private innerResolved = false;
+	private clientConfigured = false;
+	private webviewView: vscode.WebviewView | undefined;
+	private resolveContext: vscode.WebviewViewResolveContext | undefined;
+	private resolveToken: vscode.CancellationToken | undefined;
+	private messageHandler: vscode.Disposable | undefined;
+
+	constructor(private readonly inner: vscode.WebviewViewProvider) { }
+
+	resolveWebviewView(
+		webviewView: vscode.WebviewView,
+		context: vscode.WebviewViewResolveContext,
+		token: vscode.CancellationToken
+	): void | Thenable<void> {
+		this.webviewView = webviewView;
+		this.resolveContext = context;
+		this.resolveToken = token;
+		if (!this.messageHandler) {
+			this.messageHandler = webviewView.webview.onDidReceiveMessage((data: { type?: string }) => {
+				if (data?.type === 'showEngineOutput') {
+					showEngineOutput();
+				}
+			});
+		}
+		if (!this.tryResolveInner()) {
+			this.renderPlaceholder(getEngineState());
+		}
+	}
+
+	onEngineState(state: EngineState): void {
+		if (this.tryResolveInner()) {
+			return;
+		}
+		if (!this.innerResolved) {
+			this.renderPlaceholder(state);
+		}
+	}
+
+	notifyClientConfigured(): void {
+		this.clientConfigured = true;
+		if (!this.tryResolveInner() && this.webviewView && !this.innerResolved) {
+			this.renderPlaceholder(getEngineState());
+		}
+	}
+
+	private tryResolveInner(): boolean {
+		if (this.innerResolved || !this.webviewView || !this.resolveContext) {
+			return this.innerResolved;
+		}
+		if (getEngineState() !== 'ready' || !this.clientConfigured) {
+			return false;
+		}
+		this.innerResolved = true;
+		void this.inner.resolveWebviewView(
+			this.webviewView,
+			this.resolveContext,
+			this.resolveToken ?? NEVER_CANCELLED
+		);
+		return true;
+	}
+
+	private renderPlaceholder(state: EngineState): void {
+		if (!this.webviewView) {
+			return;
+		}
+		this.webviewView.webview.options = { enableScripts: true };
+		this.webviewView.webview.html = enginePlaceholderHtml(state);
+	}
+}
+
+function gateWebview(
+	inner: vscode.WebviewViewProvider,
+	disposables: vscode.Disposable[],
+	gatedProviders: EngineGatedWebviewProvider[]
+): EngineGatedWebviewProvider {
+	const gated = new EngineGatedWebviewProvider(inner);
+	gatedProviders.push(gated);
+	disposables.push(onDidChangeEngineState((state) => gated.onEngineState(state)));
+	return gated;
+}
+
+function updateEngineStatusBar(item: vscode.StatusBarItem, state: EngineState): void {
+	item.command = 'nexora.showEngineOutput';
+	switch (state) {
+		case 'starting':
+			item.text = '$(sync~spin) Nexora Engine: starting';
+			item.tooltip = 'Nexora engine is starting. Click to open the Nexora Engine output channel.';
+			item.backgroundColor = undefined;
+			break;
+		case 'restarting':
+			item.text = '$(sync~spin) Nexora Engine: restarting';
+			item.tooltip = 'Nexora engine is restarting. Click to open the Nexora Engine output channel.';
+			item.backgroundColor = undefined;
+			break;
+		case 'ready':
+			item.text = '$(check) Nexora Engine: ready';
+			item.tooltip = 'Nexora engine is ready.';
+			item.backgroundColor = undefined;
+			break;
+		case 'failed':
+			item.text = '$(error) Nexora Engine: failed';
+			item.tooltip = 'Nexora engine failed. Click to open the Nexora Engine output channel.';
+			item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+			break;
+	}
+}
+
+function treeMessageForState(state: EngineState): string | undefined {
+	if (state === 'ready') {
+		return undefined;
+	}
+	if (state === 'failed') {
+		return `${engineStateLabel(state)} Open the Nexora Engine output channel for details.`;
+	}
+	return engineStateLabel(state);
+}
+
+export async function activate(context: vscode.ExtensionContext) {
 	console.log('Nexora Core extension is now active!');
 
 	// Initialize settings singleton (SecretStorage + preferences)
@@ -53,66 +207,112 @@ export function activate(context: vscode.ExtensionContext) {
 	void setOperationInProgress(false);
 	void setChatFocused(false);
 
-	// Initialize WebSocket connection for real-time updates
-	const wsClient = getOrchestrationWebSocket('default');
-	wsClient.connect().then(connected => {
-		if (connected) {
-			console.log('[Nexora] WebSocket connected for real-time updates');
-		} else {
-			console.log('[Nexora] WebSocket connection failed - will retry on plan execution');
-		}
+	const engineStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+	engineStatusBar.name = 'Nexora Engine';
+	updateEngineStatusBar(engineStatusBar, getEngineState());
+	engineStatusBar.show();
+	context.subscriptions.push(engineStatusBar);
+
+	const taskTreeProvider = new TaskTreeProvider();
+	const taskTree = vscode.window.createTreeView('nexora.taskTree', {
+		treeDataProvider: taskTreeProvider
 	});
+	context.subscriptions.push(taskTree);
+
+	const applyEngineState = (state: EngineState): void => {
+		updateEngineStatusBar(engineStatusBar, state);
+		void vscode.commands.executeCommand('setContext', 'nexora.engineState', state);
+		taskTree.message = treeMessageForState(state);
+	};
+	applyEngineState(getEngineState());
+	context.subscriptions.push(onDidChangeEngineState(applyEngineState));
 
 	const retainHidden = {
 		webviewOptions: { retainContextWhenHidden: true }
 	};
+	const gatedProviders: EngineGatedWebviewProvider[] = [];
 
 	const chatProvider = new ChatPanelProvider(context.extensionUri, context);
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider('nexora.chatPanel', chatProvider, retainHidden)
+		vscode.window.registerWebviewViewProvider(
+			'nexora.chatPanel',
+			gateWebview(chatProvider, context.subscriptions, gatedProviders),
+			retainHidden
+		)
 	);
 
 	// Week 11: Workflow / Output live in the bottom panel as horizontal tabs
 	const workflowProvider = new WorkflowPanelProvider(context.extensionUri);
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider('nexora.workflowViewer', workflowProvider, retainHidden)
+		vscode.window.registerWebviewViewProvider(
+			'nexora.workflowViewer',
+			gateWebview(workflowProvider, context.subscriptions, gatedProviders),
+			retainHidden
+		)
 	);
 
 	const outputProvider = new OutputPanelProvider(context.extensionUri);
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider('nexora.outputViewer', outputProvider, retainHidden)
+		vscode.window.registerWebviewViewProvider(
+			'nexora.outputViewer',
+			gateWebview(outputProvider, context.subscriptions, gatedProviders),
+			retainHidden
+		)
 	);
 
 	const settingsProvider = new SettingsPanelProvider(context.extensionUri, context);
-	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider(SettingsPanelProvider.viewType, settingsProvider, retainHidden)
-	);
-
-	const analyticsProvider = new AnalyticsPanelProvider(context.extensionUri);
-	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider(AnalyticsPanelProvider.viewType, analyticsProvider, retainHidden)
-	);
-
 	const templatesProvider = new TemplatesPanelProvider(context.extensionUri);
-	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider(TemplatesPanelProvider.viewType, templatesProvider, retainHidden)
-	);
-
 	const timelineProvider = new TimelinePanelProvider(context.extensionUri);
+	const platformProvider = new PlatformBrowserProvider(context.extensionUri);
+
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider(TimelinePanelProvider.viewType, timelineProvider, retainHidden)
+		vscode.window.registerWebviewViewProvider(
+			PlatformBrowserProvider.viewType,
+			gateWebview(platformProvider, context.subscriptions, gatedProviders),
+			retainHidden
+		),
+		vscode.window.registerWebviewViewProvider(
+			TemplatesPanelProvider.viewType,
+			gateWebview(templatesProvider, context.subscriptions, gatedProviders),
+			retainHidden
+		),
+		vscode.window.registerWebviewViewProvider(
+			TimelinePanelProvider.viewType,
+			gateWebview(timelineProvider, context.subscriptions, gatedProviders),
+			retainHidden
+		)
 	);
 
-	const platformProvider = new PlatformBrowserProvider();
-	context.subscriptions.push(
-		vscode.window.registerTreeDataProvider('nexora.platformBrowser', platformProvider)
-	);
+	const engine = await startNexoraEngine(context);
+	getBackendClient({
+		baseUrl: engine.baseUrl,
+		localToken: engine.localToken
+	});
+	for (const gated of gatedProviders) {
+		gated.notifyClientConfigured();
+	}
 
-	// Task Tree View (Week 6)
-	const taskTreeProvider = new TaskTreeProvider();
-	context.subscriptions.push(
-		vscode.window.registerTreeDataProvider('nexora.taskTree', taskTreeProvider)
-	);
+	const wsClient = getOrchestrationWebSocket('default', toWebSocketUrl(engine.baseUrl));
+
+	const connectRealtime = async (): Promise<void> => {
+		const connected = await wsClient.connect();
+		if (connected) {
+			console.log('[Nexora] WebSocket connected for real-time updates');
+		} else {
+			console.log('[Nexora] WebSocket connection failed - will retry on plan execution');
+		}
+	};
+	if (engine.ready || getEngineState() === 'ready') {
+		await connectRealtime();
+	} else {
+		const sub = onDidChangeEngineState((state) => {
+			if (state === 'ready') {
+				sub.dispose();
+				void connectRealtime();
+			}
+		});
+		context.subscriptions.push(sub);
+	}
 
 	// Week 11 + 12: Wire WebSocket updates to panels + notifications + context keys
 	wsClient.onMessage((message: WebSocketMessage) => {
@@ -160,11 +360,11 @@ export function activate(context: vscode.ExtensionContext) {
 			console.log(`[Nexora] Plan ${message.plan_id} completed with status: ${message.status}`);
 			void setOperationInProgress(false);
 			notifications.handleOrchestrationEvent(message);
-			void analyticsProvider.refresh();
+			void settingsProvider.refresh();
 		}
 
 		if (message.type === 'task_success') {
-			void analyticsProvider.refresh();
+			void settingsProvider.refresh();
 		}
 	});
 
@@ -174,10 +374,10 @@ export function activate(context: vscode.ExtensionContext) {
 			await setChatFocused(true);
 		}),
 		vscode.commands.registerCommand('nexora.openTaskPlan', () => {
-			vscode.commands.executeCommand('nexora.taskTree.focus');
+			void showOnlyNexoraPanelView('nexora.taskTree');
 		}),
-		vscode.commands.registerCommand('nexora.openPlatformBrowser', () => {
-			vscode.commands.executeCommand('nexora.platformBrowser.focus');
+		vscode.commands.registerCommand('nexora.openPlatformBrowser', async () => {
+			await platformProvider.open();
 		}),
 		vscode.commands.registerCommand('nexora.refreshPlatforms', async () => {
 			await platformProvider.refresh();
@@ -193,10 +393,13 @@ export function activate(context: vscode.ExtensionContext) {
 			const client = getBackendClient();
 			const isConnected = await client.checkHealth();
 			if (isConnected) {
-				void notifications.showSuccess('Backend is connected! API docs: http://localhost:8000/docs');
+				void notifications.showSuccess(`Nexora engine is connected. API docs: ${client.getBaseUrl()}/docs`);
 			} else {
-				void notifications.showError('Backend is offline. Start it with: uvicorn app.main:app --reload --port 8000');
+				void notifications.showError('Nexora engine is offline. Check the "Nexora Engine" output channel.');
 			}
+		}),
+		vscode.commands.registerCommand('nexora.showEngineOutput', () => {
+			showEngineOutput();
 		}),
 		vscode.commands.registerCommand('nexora.decomposeRequest', async () => {
 			const request = await vscode.window.showInputBox({
@@ -235,7 +438,6 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.updateTaskTreeFromPlan', (plan: any) => {
 			if (plan && plan.tasks && plan.tasks.length > 0) {
 				taskTreeProvider.setPlan(plan);
-				vscode.commands.executeCommand('nexora.taskTree.focus');
 			}
 		}),
 		vscode.commands.registerCommand('nexora.updateTaskStatus', (taskId: string, status: string) => {
@@ -245,19 +447,19 @@ export function activate(context: vscode.ExtensionContext) {
 			outputProvider.showTaskOutput(taskId);
 		}),
 		vscode.commands.registerCommand('nexora.openNexoraPanel', async () => {
-			await vscode.commands.executeCommand('nexora.workflowViewer.focus');
+			await showOnlyNexoraPanelView('nexora.workflowViewer');
 		}),
 		vscode.commands.registerCommand('nexora.openWorkflow', async () => {
-			await vscode.commands.executeCommand('nexora.workflowViewer.focus');
+			await showOnlyNexoraPanelView('nexora.workflowViewer');
 		}),
 		vscode.commands.registerCommand('nexora.openOutput', async () => {
-			await vscode.commands.executeCommand('nexora.outputViewer.focus');
+			await showOnlyNexoraPanelView('nexora.outputViewer');
 		}),
 		vscode.commands.registerCommand('nexora.updateWorkflowPlan', (plan: any) => {
 			if (plan && plan.tasks) {
 				workflowProvider.updatePlan(plan);
 				outputProvider.clearOutputs();
-				void vscode.commands.executeCommand('nexora.workflowViewer.focus');
+				void showOnlyNexoraPanelView('nexora.workflowViewer');
 			}
 		}),
 		vscode.commands.registerCommand('nexora.newSession', async () => {
@@ -275,8 +477,9 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 		}),
 		// Week 12: Settings + shortcuts
-		vscode.commands.registerCommand('nexora.openSettings', async () => {
-			await vscode.commands.executeCommand('nexora.settings.focus');
+		vscode.commands.registerCommand('nexora.openSettings', async (section?: unknown) => {
+			const sectionId = typeof section === 'string' ? section : undefined;
+			await settingsProvider.open(sectionId);
 			await settingsProvider.refresh();
 		}),
 		vscode.commands.registerCommand('nexora.refreshSettings', async () => {
@@ -284,22 +487,22 @@ export function activate(context: vscode.ExtensionContext) {
 			void notifications.showInfo('Settings status refreshed');
 		}),
 		vscode.commands.registerCommand('nexora.openAnalytics', async () => {
-			await vscode.commands.executeCommand('nexora.analytics.focus');
-			await analyticsProvider.refresh();
+			await settingsProvider.open('analytics');
+			await settingsProvider.refresh();
 		}),
 		vscode.commands.registerCommand('nexora.refreshAnalytics', async () => {
-			await analyticsProvider.refresh();
+			await settingsProvider.refresh();
 			void notifications.showInfo('Analytics refreshed');
 		}),
 		vscode.commands.registerCommand('nexora.openTemplates', async () => {
-			await vscode.commands.executeCommand('nexora.templates.focus');
+			await templatesProvider.open();
 			await templatesProvider.refresh();
 		}),
 		vscode.commands.registerCommand('nexora.refreshTemplates', async () => {
 			await templatesProvider.refresh();
 		}),
 		vscode.commands.registerCommand('nexora.openTimeline', async () => {
-			await vscode.commands.executeCommand('nexora.timeline.focus');
+			await timelineProvider.open();
 			await timelineProvider.refresh();
 		}),
 		vscode.commands.registerCommand('nexora.refreshTimeline', async () => {
@@ -329,6 +532,22 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	checkBackendOnStartup(notifications);
+
+	setTimeout(() => {
+		void vscode.commands.executeCommand('nexora.chatPanel.focus');
+		void (async () => {
+			for (const id of NEXORA_PANEL_VIEWS) {
+				if (id === 'nexora.workflowViewer') {
+					continue;
+				}
+				try {
+					await vscode.commands.executeCommand(`${id}.removeView`);
+				} catch {
+					// Panel not open, or this view was already hidden.
+				}
+			}
+		})();
+	}, 400);
 }
 
 async function checkBackendOnStartup(notifications: ReturnType<typeof getNotificationService>): Promise<void> {
@@ -338,11 +557,12 @@ async function checkBackendOnStartup(notifications: ReturnType<typeof getNotific
 	if (isConnected) {
 		void notifications.showInfo('Nexora: Backend connected');
 	} else {
-		void notifications.showWarning('Nexora: Backend offline. Run backend for full functionality.');
+		void notifications.showWarning('Nexora: Engine offline. Check the "Nexora Engine" output channel.');
 	}
 }
 
-export function deactivate() {
+export async function deactivate() {
 	console.log('Nexora Core extension deactivated');
 	disposeWebSocket();
+	await stopNexoraEngine();
 }

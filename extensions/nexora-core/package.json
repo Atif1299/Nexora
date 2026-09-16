@@ -19,8 +19,32 @@
     "viewsContainers": {
       "activitybar": [
         {
+          "id": "nexora-platforms",
+          "title": "Platforms",
+          "icon": "media/icon-platforms.svg"
+        },
+        {
+          "id": "nexora-templates",
+          "title": "Templates",
+          "icon": "media/icon-templates.svg"
+        },
+        {
+          "id": "nexora-timeline",
+          "title": "Timeline",
+          "icon": "media/icon-timeline.svg"
+        }
+      ],
+      "secondarySidebar": [
+        {
           "id": "nexora-sidebar",
           "title": "Nexora AI",
+          "icon": "media/nexora-icon.svg"
+        }
+      ],
+      "panel": [
+        {
+          "id": "nexora-panel",
+          "title": "Nexora",
           "icon": "media/nexora-icon.svg"
         }
       ]
@@ -34,7 +58,31 @@
           "visibility": "visible"
         }
       ],
-      "panel": [
+      "nexora-platforms": [
+        {
+          "type": "webview",
+          "id": "nexora.platformBrowser",
+          "name": "Platforms",
+          "visibility": "visible"
+        }
+      ],
+      "nexora-templates": [
+        {
+          "type": "webview",
+          "id": "nexora.templates",
+          "name": "Templates",
+          "visibility": "visible"
+        }
+      ],
+      "nexora-timeline": [
+        {
+          "type": "webview",
+          "id": "nexora.timeline",
+          "name": "Timeline",
+          "visibility": "visible"
+        }
+      ],
+      "nexora-panel": [
         {
           "type": "webview",
           "id": "nexora.workflowViewer",
@@ -44,53 +92,36 @@
         },
         {
           "type": "webview",
-          "id": "nexora.analytics",
-          "name": "Analytics",
-          "icon": "$(graph)",
-          "visibility": "visible"
-        },
-        {
-          "type": "webview",
           "id": "nexora.outputViewer",
           "name": "Task Output",
           "icon": "$(output)",
-          "visibility": "visible"
-        },
-        {
-          "type": "webview",
-          "id": "nexora.settings",
-          "name": "Settings",
-          "icon": "$(gear)",
-          "visibility": "visible"
-        },
-        {
-          "type": "webview",
-          "id": "nexora.templates",
-          "name": "Templates",
-          "icon": "$(notebook-template)",
-          "visibility": "visible"
-        },
-        {
-          "type": "webview",
-          "id": "nexora.timeline",
-          "name": "Timeline",
-          "icon": "$(history)",
-          "visibility": "visible"
+          "visibility": "hidden"
         },
         {
           "id": "nexora.taskTree",
           "name": "Task Plan",
           "icon": "$(list-tree)",
-          "visibility": "visible"
-        },
-        {
-          "id": "nexora.platformBrowser",
-          "name": "Platforms",
-          "icon": "$(plug)",
-          "visibility": "visible"
+          "visibility": "hidden"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "nexora.taskTree",
+        "contents": "Nexora engine is starting…",
+        "when": "nexora.engineState == starting"
+      },
+      {
+        "view": "nexora.taskTree",
+        "contents": "Nexora engine is restarting…",
+        "when": "nexora.engineState == restarting"
+      },
+      {
+        "view": "nexora.taskTree",
+        "contents": "Nexora engine failed to start.\n[Open Nexora Engine output](command:nexora.showEngineOutput)",
+        "when": "nexora.engineState == failed"
+      }
+    ],
     "commands": [
       {
         "command": "nexora.openChat",
@@ -104,8 +135,9 @@
       },
       {
         "command": "nexora.openPlatformBrowser",
-        "title": "Open Nexora Platform Browser",
-        "category": "Nexora"
+        "title": "Platforms",
+        "category": "Nexora",
+        "icon": "$(plug)"
       },
       {
         "command": "nexora.refreshPlatforms",
@@ -116,6 +148,11 @@
       {
         "command": "nexora.checkBackend",
         "title": "Check Backend Connection",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.showEngineOutput",
+        "title": "Show Engine Output",
         "category": "Nexora"
       },
       {
@@ -137,8 +174,9 @@
       },
       {
         "command": "nexora.openWorkflow",
-        "title": "Open Workflow Viewer",
-        "category": "Nexora"
+        "title": "Workflow",
+        "category": "Nexora",
+        "icon": "$(type-hierarchy)"
       },
       {
         "command": "nexora.openOutput",
@@ -162,8 +200,12 @@
       },
       {
         "command": "nexora.openSettings",
-        "title": "Open Settings",
-        "category": "Nexora"
+        "title": "Settings",
+        "category": "Nexora",
+        "icon": {
+          "light": "media/tab/light/settings.svg",
+          "dark": "media/tab/dark/settings.svg"
+        }
       },
       {
         "command": "nexora.showKeyboardShortcuts",
@@ -177,8 +219,9 @@
       },
       {
         "command": "nexora.openAnalytics",
-        "title": "Open Analytics",
-        "category": "Nexora"
+        "title": "Cost & Analytics",
+        "category": "Nexora",
+        "icon": "$(graph)"
       },
       {
         "command": "nexora.refreshAnalytics",
@@ -188,8 +231,9 @@
       },
       {
         "command": "nexora.openTemplates",
-        "title": "Open Templates",
-        "category": "Nexora"
+        "title": "Templates",
+        "category": "Nexora",
+        "icon": "$(notebook-template)"
       },
       {
         "command": "nexora.refreshTemplates",
@@ -199,8 +243,9 @@
       },
       {
         "command": "nexora.openTimeline",
-        "title": "Open Timeline",
-        "category": "Nexora"
+        "title": "Timeline",
+        "category": "Nexora",
+        "icon": "$(history)"
       },
       {
         "command": "nexora.refreshTimeline",
@@ -212,9 +257,9 @@
     "menus": {
       "view/title": [
         {
-          "command": "nexora.refreshPlatforms",
-          "when": "view == nexora.platformBrowser",
-          "group": "navigation"
+          "command": "nexora.openSettings",
+          "when": "view == nexora.chatPanel",
+          "group": "navigation@1"
         },
         {
           "command": "nexora.decomposeRequest",
@@ -227,13 +272,8 @@
           "group": "navigation"
         },
         {
-          "command": "nexora.refreshSettings",
-          "when": "view == nexora.settings",
-          "group": "navigation"
-        },
-        {
-          "command": "nexora.refreshAnalytics",
-          "when": "view == nexora.analytics",
+          "command": "nexora.refreshPlatforms",
+          "when": "view == nexora.platformBrowser",
           "group": "navigation"
         },
         {
@@ -285,7 +325,32 @@
         "key": "ctrl+shift+/",
         "mac": "cmd+shift+/"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Nexora",
+      "properties": {
+        "nexora.engine.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the Nexora local engine when the extension activates."
+        },
+        "nexora.engine.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to nexora-engine.exe or a Python interpreter. Empty prefers the bundled engine beside the app, then backend/.venv."
+        },
+        "nexora.engine.port": {
+          "type": "number",
+          "default": 8000,
+          "description": "Preferred loopback port for the Nexora engine. 0 picks a free port."
+        },
+        "nexora.backendUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Override the engine HTTP URL. Empty uses http://127.0.0.1:<engine port>."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
