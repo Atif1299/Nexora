@@ -4,184 +4,256 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
+import { getPlatformsWebviewHtml } from './webview/platforms';
 import { getBackendClient } from './services/backendClient';
+import { getEngineState, onDidChangeEngineState } from './services/engineProcess';
+import {
+	capabilityReason,
+	getCachedCapabilities,
+	onDidChangeCapabilities,
+	platformCapabilityStatus,
+	refreshCapabilities,
+	type CapabilitiesReport,
+	type CapabilityStatus
+} from './services/backend/capabilities';
 
 interface Platform {
-    id: string;
-    name: string;
-    category: string;
-    description?: string;
-    capabilities?: string[];
-    api_type?: string;
-    auth_type?: string;
-    has_active_connector?: boolean;
-    is_enabled?: boolean;
+	id: string;
+	name: string;
+	category: string;
+	description?: string;
+	capabilities?: string[];
+	api_type?: string;
+	auth_type?: string;
+	has_active_connector?: boolean;
+	is_enabled?: boolean;
+	capabilityStatus?: CapabilityStatus;
+	capabilityReason?: string;
 }
 
-class PlatformItem extends vscode.TreeItem {
-    constructor(public readonly platform: Platform) {
-        super(platform.name, vscode.TreeItemCollapsibleState.None);
-        this.description = platform.category;
-        this.tooltip = this._getTooltip();
-        this.iconPath = this._getIcon();
-        this.contextValue = platform.has_active_connector ? 'connected' : 'available';
-    }
-
-    private _getTooltip(): string {
-        const parts = [this.platform.name];
-        if (this.platform.description) {
-            parts.push(this.platform.description);
-        }
-        if (this.platform.capabilities && this.platform.capabilities.length > 0) {
-            parts.push(`Capabilities: ${this.platform.capabilities.join(', ')}`);
-        }
-        if (this.platform.api_type) {
-            parts.push(`API: ${this.platform.api_type}`);
-        }
-        return parts.join('\n');
-    }
-
-    private _getIcon(): vscode.ThemeIcon {
-        if (this.platform.has_active_connector) {
-            return new vscode.ThemeIcon('check', new vscode.ThemeColor('charts.green'));
-        }
-        if (!this.platform.is_enabled) {
-            return new vscode.ThemeIcon('circle-slash', new vscode.ThemeColor('charts.red'));
-        }
-        return new vscode.ThemeIcon('circle-outline');
-    }
+interface PlatformApiRow {
+	id?: string;
+	name?: string;
+	category?: string;
+	description?: string;
+	capabilities?: string[];
+	api_type?: string;
+	auth_type?: string;
+	has_active_connector?: boolean;
+	is_enabled?: boolean;
 }
 
-class CategoryItem extends vscode.TreeItem {
-    constructor(
-        public readonly category: string,
-        public readonly platforms: Platform[]
-    ) {
-        super(category, vscode.TreeItemCollapsibleState.Expanded);
-        this.description = `(${platforms.length})`;
-        this.iconPath = new vscode.ThemeIcon('folder');
-    }
+function isBlockedStatus(status: CapabilityStatus | undefined): boolean {
+	return status === 'not_configured' || status === 'unavailable' || status === 'failed';
 }
 
-class LoadingItem extends vscode.TreeItem {
-    constructor() {
-        super('Loading platforms...', vscode.TreeItemCollapsibleState.None);
-        this.iconPath = new vscode.ThemeIcon('sync~spin');
-    }
-}
+export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
+	public static readonly viewType = 'nexora.platformBrowser';
 
-class ErrorItem extends vscode.TreeItem {
-    constructor(message: string) {
-        super(message, vscode.TreeItemCollapsibleState.None);
-        this.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('charts.yellow'));
-        this.description = 'Click refresh to retry';
-    }
-}
+	private readonly _extensionUri: vscode.Uri;
+	private _view?: vscode.WebviewView;
+	private _attached = false;
+	private _disposables: vscode.Disposable[] = [];
+	private platforms: Platform[] = [];
+	private isLoading = false;
+	private error: string | null = null;
+	private backendConnected = false;
+	private embeddingInProgress = false;
 
-export class PlatformBrowserProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
-    private _onDidChangeTreeData = new vscode.EventEmitter<vscode.TreeItem | undefined>();
-    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+	constructor(extensionUri: vscode.Uri) {
+		this._extensionUri = extensionUri;
+		onDidChangeEngineState((state) => {
+			if (state === 'ready') {
+				void this.loadPlatforms();
+			}
+		});
+		onDidChangeCapabilities((report) => {
+			this._applyCapabilities(report);
+			this._pushState();
+			if (report?.vectors.embedding_in_progress === false && this.platforms.length === 0 && getEngineState() === 'ready') {
+				void this.loadPlatforms();
+			}
+		});
+		if (getEngineState() === 'ready') {
+			void this.loadPlatforms();
+		}
+	}
 
-    private platforms: Platform[] = [];
-    private isLoading = false;
-    private error: string | null = null;
-    private backendConnected = false;
+	public resolveWebviewView(
+		webviewView: vscode.WebviewView,
+		_context: vscode.WebviewViewResolveContext,
+		_token: vscode.CancellationToken
+	): void {
+		this._view = webviewView;
+		this._attach(webviewView);
+	}
 
-    constructor() {
-        this.loadPlatforms();
-    }
+	public async open(): Promise<void> {
+		await vscode.commands.executeCommand(`${PlatformBrowserProvider.viewType}.focus`);
+		if (this._attached) {
+			this._pushState();
+		}
+	}
 
-    async loadPlatforms(): Promise<void> {
-        this.isLoading = true;
-        this.error = null;
-        this._onDidChangeTreeData.fire(undefined);
+	async loadPlatforms(): Promise<void> {
+		if (getEngineState() !== 'ready') {
+			return;
+		}
 
-        try {
-            const client = getBackendClient();
+		this.isLoading = true;
+		this.error = null;
+		this._pushState();
 
-            const isHealthy = await client.checkHealth();
-            this.backendConnected = isHealthy;
+		try {
+			const client = getBackendClient();
 
-            const platformsData = await client.getPlatforms();
-            this.platforms = platformsData.map((p: any) => ({
-                id: p.id,
-                name: p.name,
-                category: p.category,
-                description: p.description,
-                capabilities: p.capabilities,
-                api_type: p.api_type,
-                auth_type: p.auth_type,
-                has_active_connector: p.has_active_connector,
-                is_enabled: p.is_enabled !== false
-            }));
+			const isHealthy = await client.checkHealth();
+			this.backendConnected = isHealthy;
 
-            if (!this.backendConnected && this.platforms.length > 0) {
-                this.error = 'Using cached data (backend offline)';
-            }
-        } catch (e) {
-            this.error = 'Failed to load platforms';
-            this.platforms = [];
-        } finally {
-            this.isLoading = false;
-            this._onDidChangeTreeData.fire(undefined);
-        }
-    }
+			const report = getCachedCapabilities() || await refreshCapabilities();
+			this.embeddingInProgress = !!report?.vectors.embedding_in_progress;
 
-    refresh(): void {
-        this.loadPlatforms();
-    }
+			const platformsData = await client.getPlatforms() as PlatformApiRow[];
+			this.platforms = platformsData.map((p) => this._mapPlatform(p, report));
 
-    getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
-        return element;
-    }
+			if (!this.backendConnected && this.platforms.length > 0) {
+				this.error = 'Using cached data (backend offline)';
+			}
+		} catch {
+			this.error = 'Failed to load platforms';
+			this.platforms = [];
+		} finally {
+			this.isLoading = false;
+			this._pushState();
+		}
+	}
 
-    getChildren(element?: vscode.TreeItem): vscode.TreeItem[] {
-        if (this.isLoading) {
-            return [new LoadingItem()];
-        }
+	public async refresh(): Promise<void> {
+		void refreshCapabilities();
+		await this.loadPlatforms();
+	}
 
-        if (this.error && this.platforms.length === 0) {
-            return [new ErrorItem(this.error)];
-        }
+	isBackendConnected(): boolean {
+		return this.backendConnected;
+	}
 
-        if (!element) {
-            const items: vscode.TreeItem[] = [];
+	getPlatformCount(): number {
+		return this.platforms.length;
+	}
 
-            if (this.error) {
-                items.push(new ErrorItem(this.error));
-            }
+	private _attach(view: vscode.WebviewView): void {
+		if (this._attached && this._view === view) {
+			this._pushState();
+			return;
+		}
+		this._disposeBindings();
+		this._attached = true;
+		this._view = view;
+		view.webview.options = {
+			enableScripts: true,
+			localResourceRoots: [this._extensionUri]
+		};
+		view.webview.html = getPlatformsWebviewHtml(view.webview, this._extensionUri);
 
-            const grouped = this._groupByCategory();
-            const categoryItems = Object.entries(grouped)
-                .sort(([a], [b]) => a.localeCompare(b))
-                .map(([cat, platforms]) => new CategoryItem(cat, platforms));
+		this._disposables = [
+			view.webview.onDidReceiveMessage(async (msg: { type?: string }) => {
+				if (msg?.type === 'refresh') {
+					await this.refresh();
+					return;
+				}
+				if (msg?.type === 'ready') {
+					if (this.platforms.length === 0 && getEngineState() === 'ready') {
+						await this.loadPlatforms();
+					} else {
+						this._pushState();
+					}
+				}
+			}),
+			view.onDidChangeVisibility(() => {
+				if (view.visible && this._attached) {
+					this._pushState();
+				}
+			}),
+			view.onDidDispose(() => {
+				this._disposeBindings();
+				this._view = undefined;
+				this._attached = false;
+			})
+		];
+	}
 
-            return [...items, ...categoryItems];
-        }
+	private _disposeBindings(): void {
+		for (const disposable of this._disposables) {
+			disposable.dispose();
+		}
+		this._disposables = [];
+	}
 
-        if (element instanceof CategoryItem) {
-            return element.platforms.map(p => new PlatformItem(p));
-        }
+	private _pushState(): void {
+		if (!this._view || !this._attached) {
+			return;
+		}
+		this._view.webview.postMessage({
+			type: 'updateData',
+			data: {
+				isLoading: this.isLoading,
+				error: this.error,
+				embeddingInProgress: this.embeddingInProgress,
+				backendConnected: this.backendConnected,
+				categories: this._categoriesPayload()
+			}
+		});
+	}
 
-        return [];
-    }
+	private _mapPlatform(p: PlatformApiRow, report: CapabilitiesReport | undefined): Platform {
+		const id = String(p.id || '');
+		const status = platformCapabilityStatus(id, report);
+		const blocked = isBlockedStatus(status);
+		return {
+			id,
+			name: p.name || id,
+			category: p.category || 'Other',
+			description: p.description,
+			capabilities: p.capabilities,
+			api_type: p.api_type,
+			auth_type: p.auth_type,
+			has_active_connector: blocked ? false : p.has_active_connector,
+			is_enabled: blocked ? false : p.is_enabled !== false,
+			capabilityStatus: status,
+			capabilityReason: status ? capabilityReason(status) : undefined
+		};
+	}
 
-    private _groupByCategory(): Record<string, Platform[]> {
-        return this.platforms.reduce((acc, p) => {
-            const cat = p.category || 'Other';
-            if (!acc[cat]) {
-                acc[cat] = [];
-            }
-            acc[cat].push(p);
-            return acc;
-        }, {} as Record<string, Platform[]>);
-    }
+	private _applyCapabilities(report: CapabilitiesReport | undefined): void {
+		this.embeddingInProgress = !!report?.vectors.embedding_in_progress;
+		this.platforms = this.platforms.map(p => {
+			const status = platformCapabilityStatus(p.id, report);
+			const blocked = isBlockedStatus(status);
+			return {
+				...p,
+				capabilityStatus: status,
+				capabilityReason: status ? capabilityReason(status) : undefined,
+				has_active_connector: blocked ? false : p.has_active_connector,
+				is_enabled: blocked ? false : p.is_enabled !== false
+			};
+		});
+	}
 
-    isBackendConnected(): boolean {
-        return this.backendConnected;
-    }
+	private _groupByCategory(): Record<string, Platform[]> {
+		const acc: Record<string, Platform[]> = {};
+		for (const p of this.platforms) {
+			const cat = p.category || 'Other';
+			if (!acc[cat]) {
+				acc[cat] = [];
+			}
+			acc[cat].push(p);
+		}
+		return acc;
+	}
 
-    getPlatformCount(): number {
-        return this.platforms.length;
-    }
+	private _categoriesPayload(): { category: string; platforms: Platform[] }[] {
+		return Object.entries(this._groupByCategory())
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([category, platforms]) => ({ category, platforms }));
+	}
 }

@@ -1,0 +1,232 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+:root
+{
+	--nx-bg: var(--vscode-editor-background);
+	--nx-fg: var(--vscode-editor-foreground);
+	--nx-muted: var(--vscode-descriptionForeground);
+	--nx-border: var(--vscode-panel-border);
+	--nx-surface: var(--vscode-input-background);
+	--nx-btn-bg: var(--vscode-button-background);
+	--nx-btn-fg: var(--vscode-button-foreground);
+	--nx-btn-hover: var(--vscode-button-hoverBackground);
+	--nx-btn2-bg: var(--vscode-button-secondaryBackground);
+	--nx-btn2-fg: var(--vscode-button-secondaryForeground);
+	--nx-ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
+	--nx-err: var(--vscode-charts-red);
+	--nx-disabled: var(--vscode-disabledForeground);
+}
+
+*
+{
+	box-sizing: border-box;
+	scrollbar-width: none;
+}
+
+*::-webkit-scrollbar
+{
+	width: 0;
+	height: 0;
+	display: none;
+}
+
+body
+{
+	margin: 0;
+	padding: 0;
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
+	color: var(--nx-fg);
+	background: var(--nx-bg);
+}
+
+#platforms-root
+{
+	padding: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	max-width: none;
+}
+
+h1
+{
+	margin: 0;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.nx-section-head
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.nx-hint
+{
+	margin: 0;
+	font-size: 12px;
+	color: var(--nx-muted);
+	line-height: 1.4;
+}
+
+.nx-btn
+{
+	border: none;
+	border-radius: 4px;
+	padding: 4px 10px;
+	cursor: pointer;
+	font-size: 12px;
+}
+
+.nx-btn-secondary
+{
+	background: var(--nx-btn2-bg);
+	color: var(--nx-btn2-fg);
+}
+
+.nx-btn-secondary:hover
+{
+	background: var(--nx-btn-hover);
+	color: var(--nx-btn-fg);
+}
+
+.nx-banner
+{
+	margin: 0;
+	padding: 8px 10px;
+	border-radius: 4px;
+	font-size: 12px;
+	background: var(--vscode-inputValidation-warningBackground, rgba(255, 190, 80, 0.15));
+	border: 1px solid var(--vscode-inputValidation-warningBorder, rgba(255, 190, 80, 0.5));
+	color: var(--vscode-foreground);
+}
+
+.nx-banner-info
+{
+	background: var(--vscode-textBlockQuote-background, rgba(80, 160, 255, 0.12));
+	border-color: var(--vscode-focusBorder, rgba(80, 160, 255, 0.4));
+}
+
+.nx-groups
+{
+	display: flex;
+	flex-direction: column;
+	gap: 18px;
+}
+
+.nx-group h2
+{
+	margin: 0 0 8px 0;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.nx-count
+{
+	font-weight: 400;
+	color: var(--nx-muted);
+}
+
+.nx-list
+{
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.nx-platform
+{
+	display: grid;
+	grid-template-columns: 12px minmax(0, 1fr) auto;
+	gap: 10px;
+	align-items: start;
+	border: 1px solid var(--nx-border);
+	border-radius: 6px;
+	background: var(--nx-surface);
+	padding: 10px 12px;
+}
+
+.nx-platform.is-blocked
+{
+	opacity: 0.55;
+}
+
+.nx-dot
+{
+	width: 10px;
+	height: 10px;
+	margin-top: 4px;
+	border-radius: 50%;
+	border: 1px solid var(--nx-muted);
+	background: transparent;
+}
+
+.nx-platform.is-connected .nx-dot
+{
+	background: var(--nx-ok);
+	border-color: var(--nx-ok);
+}
+
+.nx-platform.is-failed .nx-dot
+{
+	background: var(--nx-err);
+	border-color: var(--nx-err);
+}
+
+.nx-platform.is-blocked:not(.is-failed) .nx-dot
+{
+	background: var(--nx-disabled);
+	border-color: var(--nx-disabled);
+}
+
+.nx-name
+{
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.nx-meta
+{
+	margin-top: 2px;
+	font-size: 11px;
+	color: var(--nx-muted);
+	line-height: 1.4;
+}
+
+.nx-status
+{
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--nx-muted);
+	border: 1px solid var(--nx-border);
+	border-radius: 4px;
+	padding: 1px 6px;
+	white-space: nowrap;
+}
+
+.nx-empty
+{
+	font-size: 12px;
+	color: var(--nx-muted);
+	padding: 8px 0;
+}
+
+.sr-only
+{
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
