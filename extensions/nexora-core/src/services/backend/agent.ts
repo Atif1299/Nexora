@@ -45,7 +45,8 @@ export function createAgentApi(transport: Transport) {
 			workspaceId: string,
 			workspacePath?: string,
 			model?: string,
-			mode: AgentMode = 'ask'
+			mode: AgentMode = 'ask',
+			sessionId?: string
 		): Promise<AgentTurnResponse> => {
 			return await transport.post('/api/agent/turn', {
 				messages,
@@ -53,7 +54,8 @@ export function createAgentApi(transport: Transport) {
 				workspace_path: workspacePath,
 				model,
 				mode,
-				max_tokens: 2048
+				max_tokens: 2048,
+				session_id: sessionId
 			});
 		},
 

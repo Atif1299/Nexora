@@ -48,6 +48,14 @@ export class OrchestrationWebSocket {
 		this.baseUrl = baseUrl;
 	}
 
+	getUserId(): string {
+		return this.userId;
+	}
+
+	getBaseUrl(): string {
+		return this.baseUrl;
+	}
+
 	connect(): Promise<boolean> {
 		this.intentionalDisconnect = false;
 		if (this.reconnectTimer) {
@@ -233,10 +241,27 @@ export class OrchestrationWebSocket {
 // Singleton instance
 let wsInstance: OrchestrationWebSocket | null = null;
 
-export function getOrchestrationWebSocket(userId: string = 'default'): OrchestrationWebSocket {
-	if (!wsInstance || wsInstance['userId'] !== userId) {
-		wsInstance = new OrchestrationWebSocket(userId);
+export function getOrchestrationWebSocket(userId: string = 'default', baseUrl?: string): OrchestrationWebSocket {
+	let resolved = baseUrl;
+	if (!resolved) {
+		try {
+			const http = getBackendClient().getBaseUrl();
+			resolved = http.startsWith('https://')
+				? 'wss://' + http.slice('https://'.length)
+				: http.startsWith('http://')
+					? 'ws://' + http.slice('http://'.length)
+					: http;
+		} catch {
+			resolved = 'ws://127.0.0.1:8000';
+		}
 	}
+	if (wsInstance && wsInstance.getUserId() === userId && wsInstance.getBaseUrl() === resolved) {
+		return wsInstance;
+	}
+	if (wsInstance) {
+		wsInstance.disconnect();
+	}
+	wsInstance = new OrchestrationWebSocket(userId, resolved ?? 'ws://127.0.0.1:8000');
 	return wsInstance;
 }
 

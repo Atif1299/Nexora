@@ -6,6 +6,7 @@
 export interface BackendConfig {
 	baseUrl: string;
 	timeout: number;
+	localToken?: string;
 }
 
 import { createTransport, type HeaderProvider } from './backend/transport';
@@ -18,12 +19,12 @@ import { createOrchestrateApi } from './backend/orchestrate';
 import { createHistoryApi, type HistoryItem, type RollbackableItem, type RollbackInfo, type RollbackResponse, type HistoryStats } from './backend/history';
 import { createAnalyticsApi, type AnalyticsDashboardData, type CostSummary, type MemoryInsights } from './backend/analytics';
 import { createAgentApi, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './backend/agent';
-import { createSessionsApi, type ChatSession, type ChatMessage, type SessionSummary, type SessionListResponse } from './backend/sessions';
 import { createStatusApi, type ConnectionsResponse, type TestResult, type ProviderStatus } from './backend/status';
+import { createCapabilitiesApi, type CapabilitiesReport } from './backend/capabilities';
 
 export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
-export type { ChatSession, ChatMessage, SessionSummary, SessionListResponse };
 export type { ConnectionsResponse, TestResult, ProviderStatus };
+export type { CapabilitiesReport };
 export type { SaasConnector };
 export type { MemorySuggestion, SuggestionsResponse, TimelineEntry, TimelineResponse, TimelineDiff };
 export type { WorkflowTemplate, TemplateListResponse, SuggestFromPlanResponse, SaveFromPlanRequest, ImportPreview };
@@ -54,14 +55,15 @@ export class BackendClient {
 		this.config = {
 			// Use 127.0.0.1 so health checks succeed on Windows when localhost resolves to IPv6 first
 			baseUrl: config?.baseUrl || 'http://127.0.0.1:8000',
-			timeout: config?.timeout || 30000
+			timeout: config?.timeout || 30000,
+			localToken: config?.localToken
 		};
 
-		this.transport = createTransport(
-			this.config,
-			(endpoint) => this._getMockResponse(endpoint),
-			resolveApiKeyHeaders
-		);
+		this.transport = createTransport(this.config, resolveApiKeyHeaders);
+	}
+
+	getBaseUrl(): string {
+		return this.config.baseUrl;
 	}
 
 	async checkHealth(): Promise<boolean> {
@@ -74,11 +76,11 @@ export class BackendClient {
 	}
 
 	async getPlatforms(): Promise<any[]> {
-		return createPlatformsApi(this.transport, () => this._getMockPlatforms()).getPlatforms();
+		return createPlatformsApi(this.transport).getPlatforms();
 	}
 
 	async searchPlatforms(query: string): Promise<any[]> {
-		return createPlatformsApi(this.transport, () => this._getMockPlatforms()).searchPlatforms(query);
+		return createPlatformsApi(this.transport).searchPlatforms(query);
 	}
 
 	/**
@@ -90,7 +92,7 @@ export class BackendClient {
 	 * @returns Array of matching platforms with relevance scores
 	 */
 	async semanticSearchPlatforms(query: string, limit: number = 5): Promise<any[]> {
-		return createPlatformsApi(this.transport, () => this._getMockPlatforms()).semanticSearchPlatforms(query, limit);
+		return createPlatformsApi(this.transport).semanticSearchPlatforms(query, limit);
 	}
 
 	/**
@@ -189,9 +191,29 @@ export class BackendClient {
 		workspaceId: string,
 		workspacePath?: string,
 		model?: string,
-		mode: AgentMode = 'ask'
+		mode: AgentMode = 'ask',
+		sessionId?: string
 	): Promise<AgentTurnResponse> {
-		return createAgentApi(this.transport).agentTurn(messages, workspaceId, workspacePath, model, mode);
+		return createAgentApi(this.transport).agentTurn(messages, workspaceId, workspacePath, model, mode, sessionId);
+	}
+
+	/**
+	 * Append one chat/agent turn to the backend jsonl transcript (Layer A).
+	 */
+	async appendTranscript(
+		workspaceId: string,
+		sessionId: string,
+		role: string,
+		content: string,
+		mode: string
+	): Promise<void> {
+		await this.transport.post('/api/transcript/append', {
+			workspace_id: workspaceId,
+			session_id: sessionId,
+			role,
+			content,
+			mode
+		});
 	}
 
 	/**
@@ -240,12 +262,8 @@ export class BackendClient {
 	 * @returns List of available connector type names (openai, anthropic, rest, mcp)
 	 */
 	async getConnectorTypes(): Promise<string[]> {
-		try {
-			const response = await this.transport.get('/api/connectors/types');
-			return response?.types || [];
-		} catch {
-			return ['openai', 'anthropic', 'rest', 'mcp'];
-		}
+		const response = await this.transport.get('/api/connectors/types');
+		return response?.types || [];
 	}
 
 	/**
@@ -287,12 +305,8 @@ export class BackendClient {
 	 * @returns Usage metrics per connector and total aggregated usage
 	 */
 	async getConnectorUsage(): Promise<any> {
-		try {
-			const response = await this.transport.get('/api/connectors/usage');
-			return response || { connectors: {}, total: { input_tokens: 0, output_tokens: 0, api_calls: 0, estimated_cost: 0 } };
-		} catch {
-			return { connectors: {}, total: { input_tokens: 0, output_tokens: 0, api_calls: 0, estimated_cost: 0 } };
-		}
+		const response = await this.transport.get('/api/connectors/usage');
+		return response || { connectors: {}, total: { input_tokens: 0, output_tokens: 0, api_calls: 0, estimated_cost: 0 } };
 	}
 
 	/**
@@ -303,11 +317,7 @@ export class BackendClient {
 	 * @returns Health status
 	 */
 	async checkConnectorHealth(connectorType: string, config: Record<string, any> = {}): Promise<any> {
-		try {
-			return await this.transport.post(`/api/connectors/health/${connectorType}`, { config });
-		} catch {
-			return { healthy: false, status: 'FAILED_TO_CONNECT' };
-		}
+		return this.transport.post(`/api/connectors/health/${connectorType}`, { config });
 	}
 
 	/**
@@ -316,12 +326,8 @@ export class BackendClient {
 	 * @returns List of active connector instances
 	 */
 	async getActiveConnectors(): Promise<any[]> {
-		try {
-			const response = await this.transport.get('/api/connectors/active');
-			return response?.connectors || [];
-		} catch {
-			return [];
-		}
+		const response = await this.transport.get('/api/connectors/active');
+		return response?.connectors || [];
 	}
 
 	/**
@@ -387,6 +393,14 @@ export class BackendClient {
 		userId: string = 'default'
 	): Promise<{ status: string }> {
 		return createAuthApi(this.transport).disconnectSaasConnector(provider, userId);
+	}
+
+	/**
+	 * Honest engine capability report (ready / not_configured / unavailable / failed).
+	 * Never returns secret values.
+	 */
+	async getCapabilities(): Promise<CapabilitiesReport> {
+		return createCapabilitiesApi(this.transport).getCapabilities();
 	}
 
 	/**
@@ -691,97 +705,13 @@ export class BackendClient {
 		return createHistoryApi(this.transport).getStats(userId);
 	}
 
-	// ============================================================================
-	// Sessions API (FYP Integration)
-	// ============================================================================
-
-	/**
-	 * Create a new chat session.
-	 */
-	async createSession(name: string = 'New Chat', userId: string = 'default'): Promise<ChatSession> {
-		return createSessionsApi(this.transport).createSession(name, userId);
-	}
-
-	/**
-	 * List all sessions for a user.
-	 */
-	async listSessions(userId: string = 'default', limit: number = 50, offset: number = 0): Promise<SessionListResponse> {
-		return createSessionsApi(this.transport).listSessions(userId, limit, offset);
-	}
-
-	/**
-	 * Load a session with all messages.
-	 */
-	async loadSession(sessionId: string, userId: string = 'default'): Promise<ChatSession> {
-		return createSessionsApi(this.transport).loadSession(sessionId, userId);
-	}
-
-	/**
-	 * Save/update a session.
-	 */
-	async saveSession(session: {
-		id: string;
-		name: string;
-		messages: ChatMessage[];
-		workspace_id?: string;
-		workspace_path?: string;
-	}, userId: string = 'default'): Promise<ChatSession> {
-		return createSessionsApi(this.transport).saveSession(session, userId);
-	}
-
-	/**
-	 * Add a message to a session.
-	 */
-	async addSessionMessage(
-		sessionId: string,
-		message: { role: string; content: string; mode?: string },
-		userId: string = 'default'
-	): Promise<ChatSession> {
-		return createSessionsApi(this.transport).addMessage(sessionId, message, userId);
-	}
-
-	/**
-	 * Delete a session.
-	 */
-	async deleteSession(sessionId: string, userId: string = 'default'): Promise<{ status: string; session_id: string }> {
-		return createSessionsApi(this.transport).deleteSession(sessionId, userId);
-	}
-
-	/**
-	 * Search across sessions.
-	 */
-	async searchSessions(query: string, userId: string = 'default', limit: number = 10): Promise<SessionListResponse> {
-		return createSessionsApi(this.transport).searchSessions(query, userId, limit);
-	}
-
-	private _getMockResponse(endpoint: string): any {
-		if (endpoint === '/api/health') {
-			return { status: 'mock', message: 'Backend not connected' };
-		}
-		if (endpoint === '/api/platforms') {
-			return { platforms: this._getMockPlatforms() };
-		}
-		return {};
-	}
-
-	private _getMockPlatforms(): any[] {
-		return [
-			{ id: 'openai', name: 'OpenAI GPT-4', category: 'LLM', status: 'available' },
-			{ id: 'claude', name: 'Anthropic Claude', category: 'LLM', status: 'available' },
-			{ id: 'v0-dev', name: 'v0.dev', category: 'UI Generation', status: 'available' },
-			{ id: 'github', name: 'GitHub', category: 'Version Control', status: 'connected' },
-			{ id: 'vercel', name: 'Vercel', category: 'Deployment', status: 'available' },
-			{ id: 'elevenlabs', name: 'ElevenLabs', category: 'Voice/Audio', status: 'available' },
-			{ id: 'tavily', name: 'Tavily', category: 'Research', status: 'available' }
-		];
-	}
 }
 
 let instance: BackendClient | null = null;
 
-export function getBackendClient(): BackendClient {
-	if (!instance) {
-		instance = new BackendClient();
+export function getBackendClient(config?: Partial<BackendConfig>): BackendClient {
+	if (!instance || config) {
+		instance = new BackendClient(config);
 	}
 	return instance;
 }

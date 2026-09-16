@@ -44,11 +44,6 @@ export function createAuthApi(transport: Transport) {
 		getAuthStatus: async (userId: string = 'default'): Promise<AuthStatus> => {
 			try {
 				const response = await transport.get(`/api/auth/status?user_id=${userId}`);
-				// transport.get returns a mock ({} for this route) when the request
-				// fails, so a missing github_connected means the backend never
-				// answered - not that every provider is disconnected. Without this
-				// check every badge silently reads "disconnected" while the backend
-				// is simply down.
 				if (!response || typeof response.github_connected !== 'boolean') {
 					return { ...DISCONNECTED_STATUS, backend_offline: true };
 				}
