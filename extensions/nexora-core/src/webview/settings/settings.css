@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root {
+:root
+{
 	--nx-bg: var(--vscode-editor-background);
 	--nx-fg: var(--vscode-editor-foreground);
 	--nx-muted: var(--vscode-descriptionForeground);
@@ -18,28 +19,140 @@
 	--nx-ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
 	--nx-err: var(--vscode-testing-iconFailed, var(--vscode-errorForeground));
 	--nx-warn: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+	--nx-bar: var(--vscode-charts-blue, var(--vscode-button-background));
 }
 
-* { box-sizing: border-box; }
+*
+{
+	box-sizing: border-box;
+	scrollbar-width: none;
+}
 
-body {
+*::-webkit-scrollbar
+{
+	width: 0;
+	height: 0;
+	display: none;
+}
+
+html,
+body
+{
+	height: 100%;
+}
+
+body
+{
 	margin: 0;
 	padding: 0;
+	overflow: hidden;
 	font-family: var(--vscode-font-family);
 	font-size: var(--vscode-font-size);
 	color: var(--nx-fg);
 	background: var(--nx-bg);
 }
 
-#settings-root {
-	padding: 12px;
+#settings-root
+{
 	display: flex;
-	flex-direction: column;
-	gap: 16px;
+	flex-direction: row;
+	align-items: stretch;
+	height: 100%;
+	min-height: 100vh;
+	padding: 0;
+	gap: 0;
 }
 
-.nx-banner {
-	padding: 10px 12px;
+.nx-settings-nav
+{
+	width: 220px;
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 24px 12px;
+	border-right: 1px solid var(--nx-border);
+	background: var(--vscode-sideBar-background, var(--nx-bg));
+	overflow-y: auto;
+}
+
+.nx-settings-nav-title
+{
+	padding: 0 12px 14px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--nx-muted);
+}
+
+.nx-nav-item
+{
+	display: block;
+	width: 100%;
+	text-align: left;
+	border: none;
+	border-radius: 6px;
+	padding: 8px 12px;
+	background: transparent;
+	color: var(--nx-fg);
+	font-family: inherit;
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.nx-nav-item:hover
+{
+	background: var(--vscode-list-hoverBackground);
+}
+
+.nx-nav-item:focus-visible
+{
+	outline: 2px solid var(--nx-focus);
+	outline-offset: 2px;
+}
+
+.nx-nav-item.selected,
+.nx-nav-item[aria-current="page"]
+{
+	background: var(--vscode-list-activeSelectionBackground, var(--vscode-list-hoverBackground));
+	color: var(--vscode-list-activeSelectionForeground, var(--nx-fg));
+	font-weight: 600;
+}
+
+.nx-settings-detail
+{
+	flex: 1;
+	min-width: 0;
+	overflow: auto;
+	padding: 28px 36px 48px;
+}
+
+.nx-section
+{
+	display: none;
+	max-width: 760px;
+}
+
+.nx-section.active
+{
+	display: block;
+}
+
+.nx-section-analytics
+{
+	max-width: 960px;
+}
+
+.nx-section[hidden]
+{
+	display: none !important;
+}
+
+.nx-banner
+{
+	padding: 12px 14px;
+	margin: 0 0 14px 0;
 	border: 1px solid var(--nx-border);
 	border-radius: 6px;
 	background: var(--nx-surface);
@@ -48,18 +161,28 @@ body {
 	line-height: 1.4;
 }
 
-.nx-banner code {
+.nx-banner code
+{
 	font-family: var(--vscode-editor-font-family);
 	font-size: 11px;
 }
 
-.nx-section h2 {
-	margin: 0 0 8px 0;
-	font-size: 13px;
+.nx-banner-warn
+{
+	background: var(--vscode-inputValidation-warningBackground, rgba(255, 190, 80, 0.15));
+	border-color: var(--vscode-inputValidation-warningBorder, rgba(255, 190, 80, 0.5));
+	color: var(--vscode-foreground);
+}
+
+.nx-section h2
+{
+	margin: 0 0 12px 0;
+	font-size: 18px;
 	font-weight: 600;
 }
 
-.nx-section-head {
+.nx-section-head
+{
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -67,29 +190,36 @@ body {
 	margin-bottom: 8px;
 }
 
-.nx-section-head h2 { margin: 0; }
+.nx-section-head h2
+{
+	margin: 0;
+}
 
-.nx-hint {
+.nx-hint
+{
 	margin: 0 0 10px 0;
 	font-size: 11px;
 	color: var(--nx-muted);
 	line-height: 1.4;
 }
 
-.nx-stack {
+.nx-stack
+{
 	display: flex;
 	flex-direction: column;
 	gap: 10px;
 }
 
-.nx-card {
+.nx-card
+{
 	border: 1px solid var(--nx-border);
 	border-radius: 6px;
 	background: var(--nx-surface);
 	padding: 10px 12px;
 }
 
-.nx-row {
+.nx-row
+{
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -97,21 +227,27 @@ body {
 	margin-bottom: 8px;
 }
 
-.nx-row:last-child { margin-bottom: 0; }
+.nx-row:last-child
+{
+	margin-bottom: 0;
+}
 
-.nx-label {
+.nx-label
+{
 	font-size: 12px;
 	font-weight: 600;
 }
 
-.nx-status {
+.nx-status
+{
 	font-size: 11px;
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
 }
 
-.nx-dot {
+.nx-dot
+{
 	width: 8px;
 	height: 8px;
 	border-radius: 50%;
@@ -119,11 +255,34 @@ body {
 	flex-shrink: 0;
 }
 
-.nx-dot.connected { background: var(--nx-ok); }
-.nx-dot.not_configured { background: var(--nx-muted); }
-.nx-dot.error { background: var(--nx-err); }
+.nx-dot.ready
+{
+	background: var(--nx-ok);
+}
 
-.nx-input {
+.nx-dot.not_configured
+{
+	background: var(--nx-muted);
+}
+
+.nx-dot.unavailable
+{
+	background: var(--nx-muted);
+	opacity: 0.55;
+}
+
+.nx-dot.failed
+{
+	background: var(--nx-err);
+}
+
+.nx-dot.error
+{
+	background: var(--nx-err);
+}
+
+.nx-input
+{
 	width: 100%;
 	padding: 6px 8px;
 	border: 1px solid var(--vscode-input-border, var(--nx-border));
@@ -135,19 +294,22 @@ body {
 	outline: none;
 }
 
-.nx-input:focus {
+.nx-input:focus
+{
 	border-color: var(--nx-focus);
 	box-shadow: 0 0 0 1px var(--nx-focus);
 }
 
-.nx-actions {
+.nx-actions
+{
 	display: flex;
 	flex-wrap: wrap;
 	gap: 6px;
 	margin-top: 8px;
 }
 
-.nx-btn {
+.nx-btn
+{
 	border: none;
 	border-radius: 4px;
 	padding: 6px 10px;
@@ -157,29 +319,37 @@ body {
 	color: var(--nx-btn-fg);
 }
 
-.nx-btn:hover { background: var(--nx-btn-hover); }
+.nx-btn:hover
+{
+	background: var(--nx-btn-hover);
+}
 
-.nx-btn:focus-visible {
+.nx-btn:focus-visible
+{
 	outline: 2px solid var(--nx-focus);
 	outline-offset: 2px;
 }
 
-.nx-btn:disabled {
+.nx-btn:disabled
+{
 	opacity: 0.55;
 	cursor: not-allowed;
 }
 
-.nx-btn-secondary {
+.nx-btn-secondary
+{
 	background: var(--nx-btn2-bg);
 	color: var(--nx-btn2-fg);
 }
 
-.nx-btn-danger {
+.nx-btn-danger
+{
 	background: var(--vscode-inputValidation-errorBackground, var(--nx-err));
 	color: var(--vscode-inputValidation-errorForeground, var(--nx-fg));
 }
 
-.nx-select {
+.nx-select
+{
 	width: 100%;
 	padding: 6px 8px;
 	border: 1px solid var(--vscode-input-border, var(--nx-border));
@@ -189,33 +359,197 @@ body {
 	font-size: 12px;
 }
 
-.nx-select:focus {
+.nx-select:focus
+{
 	border-color: var(--nx-focus);
 	outline: none;
 }
 
-.nx-check {
+.nx-check
+{
 	display: flex;
 	align-items: center;
 	gap: 8px;
 	font-size: 12px;
 }
 
-.nx-check input:focus-visible {
+.nx-check input:focus-visible
+{
 	outline: 2px solid var(--nx-focus);
 	outline-offset: 2px;
 }
 
-.nx-msg {
+.nx-msg
+{
 	margin-top: 6px;
 	font-size: 11px;
 	color: var(--nx-muted);
 }
 
-.nx-msg.ok { color: var(--nx-ok); }
-.nx-msg.err { color: var(--nx-err); }
+.nx-msg.ok
+{
+	color: var(--nx-ok);
+}
 
-.sr-only {
+.nx-msg.err
+{
+	color: var(--nx-err);
+}
+
+.nx-analytics
+{
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	margin-top: 12px;
+}
+
+.nx-analytics-block h3
+{
+	margin: 0 0 8px 0;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.nx-analytics-cards
+{
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+}
+
+.nx-analytics-card
+{
+	border: 1px solid var(--nx-border);
+	border-radius: 6px;
+	background: var(--nx-surface);
+	padding: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.nx-analytics-cardLabel
+{
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-analytics-cardValue
+{
+	font-size: 16px;
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+
+.nx-analytics-cardTrend
+{
+	font-size: 11px;
+	color: var(--nx-ok);
+}
+
+.nx-analytics-chart,
+.nx-analytics-bars,
+.nx-analytics-stats,
+.nx-analytics-memory,
+.nx-analytics-recent
+{
+	border: 1px solid var(--nx-border);
+	border-radius: 6px;
+	background: var(--nx-surface);
+	padding: 10px;
+}
+
+.nx-analytics-dayRow,
+.nx-analytics-barRow,
+.nx-analytics-fileRow
+{
+	display: grid;
+	grid-template-columns: 72px 1fr 56px;
+	gap: 8px;
+	align-items: center;
+	margin-bottom: 6px;
+	font-size: 11px;
+}
+
+.nx-analytics-barRow
+{
+	grid-template-columns: 88px 1fr 64px;
+}
+
+.nx-analytics-fileRow
+{
+	grid-template-columns: 1fr auto;
+}
+
+.nx-analytics-barTrack
+{
+	height: 8px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--nx-border) 70%, transparent);
+	overflow: hidden;
+}
+
+.nx-analytics-barFill
+{
+	height: 100%;
+	background: var(--nx-bar);
+	border-radius: 4px;
+}
+
+.nx-analytics-statGrid
+{
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 8px;
+	font-size: 12px;
+}
+
+.nx-analytics-recentRow
+{
+	display: grid;
+	grid-template-columns: 1fr 1.2fr auto auto auto auto;
+	gap: 8px;
+	align-items: center;
+	font-size: 12px;
+	padding: 4px 0;
+	border-bottom: 1px solid var(--nx-border, rgba(128, 128, 128, 0.2));
+}
+
+.nx-analytics-recentRow:last-child
+{
+	border-bottom: none;
+}
+
+.nx-analytics-recentPlatform
+{
+	font-weight: 600;
+}
+
+.nx-analytics-recentStatus
+{
+	text-transform: capitalize;
+}
+
+.nx-analytics-recentRow-failed .nx-analytics-recentStatus
+{
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.nx-muted
+{
+	color: var(--nx-muted);
+}
+
+.nx-empty
+{
+	font-size: 12px;
+	color: var(--nx-muted);
+	padding: 8px 0;
+}
+
+.sr-only
+{
 	position: absolute;
 	width: 1px;
 	height: 1px;

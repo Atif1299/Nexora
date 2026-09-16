@@ -5,10 +5,16 @@
 
 import * as vscode from 'vscode';
 import { getSettingsWebviewHtml } from './webview/settings';
+import { acquireEditorPanel, gateEditorPanel } from './services/editorPage';
 import { getSettingsService, type ApiKeyProvider, type NexoraPreferences } from './services/settingsService';
 import { getBackendClient } from './services/backendClient';
 import { getNotificationService } from './services/notificationService';
 import type { SaasConnector } from './services/backend/auth';
+import {
+	onDidChangeCapabilities,
+	refreshCapabilities,
+	type CapabilitiesReport
+} from './services/backend/capabilities';
 
 const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'openrouter'];
 const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0', 'elevenlabs', 'tavily'] as const;
@@ -22,87 +28,149 @@ function isSaasProvider(value: string): value is SaasProvider {
 	return (SAAS_PROVIDERS as readonly string[]).includes(value);
 }
 
-export class SettingsPanelProvider implements vscode.WebviewViewProvider {
+export class SettingsPanelProvider {
 	public static readonly viewType = 'nexora.settings';
 
-	private _view?: vscode.WebviewView;
+	private _panel?: vscode.WebviewPanel;
+	private _view?: vscode.Webview;
+	private _attached = false;
+	private _pendingSection?: string;
+	private _disposables: vscode.Disposable[] = [];
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
 		private readonly _context: vscode.ExtensionContext
 	) { }
 
-	public resolveWebviewView(
-		webviewView: vscode.WebviewView,
-		_context: vscode.WebviewViewResolveContext,
-		_token: vscode.CancellationToken
-	): void {
-		this._view = webviewView;
+	public async open(section?: string): Promise<void> {
+		if (section) {
+			this._pendingSection = section;
+		}
 
-		const webviewOpts: vscode.WebviewOptions & { retainContextWhenHidden?: boolean } = {
-			enableScripts: true,
-			localResourceRoots: [this._extensionUri],
-			retainContextWhenHidden: true
-		};
-		webviewView.webview.options = webviewOpts;
-		webviewView.webview.html = getSettingsWebviewHtml(webviewView.webview, this._extensionUri);
-
-		webviewView.webview.onDidReceiveMessage(async (msg) => {
-			switch (msg.type) {
-				case 'ready':
-				case 'refreshStatus':
-					await this._pushState();
-					break;
-				case 'validateApiKey':
-					await this._validateApiKey(msg.provider, msg.key);
-					break;
-				case 'saveApiKey':
-					await this._saveApiKey(msg.provider, msg.key);
-					break;
-				case 'clearApiKey':
-					await this._clearApiKey(msg.provider);
-					break;
-				case 'savePreferences':
-					await this._savePreferences(msg.preferences || {});
-					break;
-				case 'connectOAuth':
-					await this._connectOAuth(msg.provider);
-					break;
-				case 'disconnectOAuth':
-					await this._disconnectOAuth(msg.provider);
-					break;
-				case 'testEnvConnection':
-					await this._testEnvConnection(msg.provider);
-					break;
-				case 'showShortcuts':
-					await vscode.commands.executeCommand('nexora.showKeyboardShortcuts');
-					break;
-				// Week 13: SaaS connector key handlers
-				case 'testSaasKey':
-					await this._testSaasKey(msg.provider, msg.value);
-					break;
-				case 'saveSaasKey':
-					await this._saveSaasKey(msg.provider, msg.value);
-					break;
-				case 'clearSaasKey':
-					await this._clearSaasKey(msg.provider);
-					break;
-			}
+		const panel = acquireEditorPanel({
+			viewType: SettingsPanelProvider.viewType,
+			title: 'Nexora Settings',
+			extensionUri: this._extensionUri,
+			icon: 'settings.svg'
 		});
+		const isNew = this._panel !== panel;
+		this._panel = panel;
+		this._view = panel.webview;
 
-		webviewView.onDidChangeVisibility(() => {
-			if (webviewView.visible) {
-				void this._pushState();
+		if (!isNew) {
+			if (this._attached) {
+				this._revealSection(section);
 			}
+			return;
+		}
+
+		this._attached = false;
+		panel.onDidDispose(() => {
+			if (this._panel !== panel) {
+				return;
+			}
+			this._disposeBindings();
+			this._panel = undefined;
+			this._view = undefined;
+			this._attached = false;
+			this._pendingSection = undefined;
 		});
+		gateEditorPanel(panel, (readyPanel) => this._attach(readyPanel));
 	}
 
 	public async refresh(): Promise<void> {
 		await this._pushState();
 	}
 
+	private _attach(panel: vscode.WebviewPanel): void {
+		if (this._attached && this._panel === panel) {
+			this._revealSection(this._pendingSection);
+			return;
+		}
+		this._disposeBindings();
+		this._attached = true;
+		this._panel = panel;
+		this._view = panel.webview;
+		panel.webview.html = getSettingsWebviewHtml(
+			panel.webview,
+			this._extensionUri,
+			this._pendingSection
+		);
+
+		this._disposables = [
+			panel.webview.onDidReceiveMessage(async (msg) => {
+				switch (msg.type) {
+					case 'ready':
+					case 'refreshStatus':
+					case 'refreshAnalytics':
+						await this._pushState();
+						this._revealSection(this._pendingSection);
+						break;
+					case 'validateApiKey':
+						await this._validateApiKey(msg.provider, msg.key);
+						break;
+					case 'saveApiKey':
+						await this._saveApiKey(msg.provider, msg.key);
+						break;
+					case 'clearApiKey':
+						await this._clearApiKey(msg.provider);
+						break;
+					case 'savePreferences':
+						await this._savePreferences(msg.preferences || {});
+						break;
+					case 'connectOAuth':
+						await this._connectOAuth(msg.provider);
+						break;
+					case 'disconnectOAuth':
+						await this._disconnectOAuth(msg.provider);
+						break;
+					case 'testEnvConnection':
+						await this._testEnvConnection(msg.provider);
+						break;
+					case 'showShortcuts':
+						await vscode.commands.executeCommand('nexora.showKeyboardShortcuts');
+						break;
+					// Week 13: SaaS connector key handlers
+					case 'testSaasKey':
+						await this._testSaasKey(msg.provider, msg.value);
+						break;
+					case 'saveSaasKey':
+						await this._saveSaasKey(msg.provider, msg.value);
+						break;
+					case 'clearSaasKey':
+						await this._clearSaasKey(msg.provider);
+						break;
+				}
+			}),
+			panel.onDidChangeViewState(() => {
+				if (panel.visible && this._attached) {
+					void this._pushState();
+				}
+			}),
+			onDidChangeCapabilities(() => {
+				if (this._panel?.visible) {
+					void this._pushState();
+				}
+			})
+		];
+	}
+
+	private _revealSection(section?: string): void {
+		if (!this._view || !section) {
+			return;
+		}
+		void this._view.postMessage({ type: 'showSection', section });
+	}
+
+	private _disposeBindings(): void {
+		for (const disposable of this._disposables) {
+			disposable.dispose();
+		}
+		this._disposables = [];
+	}
+
 	private async _pushState(): Promise<void> {
-		if (!this._view) {
+		if (!this._view || !this._attached) {
 			return;
 		}
 
@@ -117,6 +185,8 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 		}
 
 		const connections = await client.getConnectionStatus('default');
+		const capabilities: CapabilitiesReport | undefined = await refreshCapabilities();
+		const analytics = await client.getAnalyticsDashboard('default');
 
 		// Week 13: Check SaaS connector status from auth status endpoint
 		const authStatus = await client.getAuthStatus('default');
@@ -127,12 +197,14 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 		configured['elevenlabs'] = !!authStatus.elevenlabs_configured;
 		configured['tavily'] = !!authStatus.tavily_configured;
 
-		this._view.webview.postMessage({
+		this._view.postMessage({
 			type: 'updateState',
 			keyMasks,
 			configured,
 			preferences: settings.getPreferences(),
-			connections
+			connections,
+			capabilities: capabilities || null,
+			analytics
 		});
 	}
 
@@ -142,7 +214,7 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 		}
 		const client = getBackendClient();
 		const result = await client.validateApiKey(provider, key);
-		this._view.webview.postMessage({
+		this._view.postMessage({
 			type: 'validateResult',
 			provider,
 			success: !!result?.success,
@@ -163,7 +235,7 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 		try {
 			const result = await client.validateApiKey(provider, key);
 			if (!result?.success) {
-				this._view.webview.postMessage({
+				this._view.postMessage({
 					type: 'saveResult',
 					provider,
 					success: false,
@@ -173,7 +245,7 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 			}
 
 			await settings.setApiKey(provider, key);
-			this._view.webview.postMessage({
+			this._view.postMessage({
 				type: 'saveResult',
 				provider,
 				success: true
@@ -181,9 +253,10 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 			void notifications.showSuccess(
 				`${provider} key saved - used for Chat, Plan, and Agent`
 			);
+			await refreshCapabilities();
 			await this._pushState();
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._view.postMessage({
 				type: 'saveResult',
 				provider,
 				success: false,
@@ -198,10 +271,11 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 		}
 		try {
 			await getSettingsService(this._context).deleteApiKey(provider);
-			this._view.webview.postMessage({ type: 'clearResult', provider, success: true });
+			this._view.postMessage({ type: 'clearResult', provider, success: true });
+			await refreshCapabilities();
 			await this._pushState();
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._view.postMessage({
 				type: 'clearResult',
 				provider,
 				success: false,
@@ -248,7 +322,7 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 
 			await vscode.env.openExternal(vscode.Uri.parse(result.authorization_url));
 			void notifications.showInfo(`Complete ${provider} login in the browser, then Refresh status`);
-			this._view?.webview.postMessage({
+			this._view?.postMessage({
 				type: 'oauthResult',
 				message: `${provider} OAuth opened in browser`
 			});
@@ -307,7 +381,7 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 			const envKey = this._getEnvKeyName(provider);
 			const saved = await client.setSaasCredential(envKey, typed);
 			if (!saved?.success) {
-				this._view.webview.postMessage({
+				this._view.postMessage({
 					type: 'saasTestResult',
 					provider,
 					success: false,
@@ -321,7 +395,7 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 		const testProvider = provider === 'supabase_url' || provider === 'supabase_key' ? 'supabase' : provider;
 		const result = await client.testProviderConnection(testProvider, 'default');
 
-		this._view.webview.postMessage({
+		this._view.postMessage({
 			type: 'saasTestResult',
 			provider,
 			success: !!result?.success,
@@ -344,7 +418,7 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 			const result = await client.setSaasCredential(envKey, value);
 
 			if (result?.success) {
-				this._view.webview.postMessage({
+				this._view.postMessage({
 					type: 'saasSaveResult',
 					provider,
 					success: true
@@ -352,7 +426,7 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 				void notifications.showSuccess(`${provider} saved to backend`);
 				await this._pushState();
 			} else {
-				this._view.webview.postMessage({
+				this._view.postMessage({
 					type: 'saasSaveResult',
 					provider,
 					success: false,
@@ -360,7 +434,7 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 				});
 			}
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._view.postMessage({
 				type: 'saasSaveResult',
 				provider,
 				success: false,
@@ -386,10 +460,10 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 				: provider;
 			await client.disconnectSaasConnector(connector as SaasConnector, 'default');
 
-			this._view.webview.postMessage({ type: 'saasClearResult', provider, success: true });
+			this._view.postMessage({ type: 'saasClearResult', provider, success: true });
 			await this._pushState();
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._view.postMessage({
 				type: 'saasClearResult',
 				provider,
 				success: false,
