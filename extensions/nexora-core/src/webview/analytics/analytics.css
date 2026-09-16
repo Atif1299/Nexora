@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root {
+:root
+{
 	--nx-bg: var(--vscode-editor-background);
 	--nx-fg: var(--vscode-editor-foreground);
 	--nx-muted: var(--vscode-descriptionForeground);
@@ -18,9 +19,21 @@
 	--nx-bar: var(--vscode-charts-blue, var(--vscode-button-background));
 }
 
-* { box-sizing: border-box; }
+*
+{
+	box-sizing: border-box;
+	scrollbar-width: none;
+}
 
-body {
+*::-webkit-scrollbar
+{
+	width: 0;
+	height: 0;
+	display: none;
+}
+
+body
+{
 	margin: 0;
 	padding: 0;
 	font-family: var(--vscode-font-family);
@@ -29,40 +42,47 @@ body {
 	background: var(--nx-bg);
 }
 
-#analytics-root {
-	padding: 12px;
+#analytics-root
+{
+	padding: 24px 32px;
 	display: flex;
 	flex-direction: column;
 	gap: 16px;
+	max-width: 1100px;
 }
 
-h1 {
+h1
+{
 	margin: 0;
-	font-size: 14px;
+	font-size: 18px;
 	font-weight: 600;
 }
 
-.nx-section h2 {
+.nx-section h2
+{
 	margin: 0 0 8px 0;
 	font-size: 13px;
 	font-weight: 600;
 }
 
-.nx-section-head {
+.nx-section-head
+{
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
 }
 
-.nx-hint {
+.nx-hint
+{
 	margin: 0;
 	font-size: 11px;
 	color: var(--nx-muted);
 	line-height: 1.4;
 }
 
-.nx-btn {
+.nx-btn
+{
 	border: none;
 	border-radius: 4px;
 	padding: 4px 10px;
@@ -70,18 +90,21 @@ h1 {
 	font-size: 12px;
 }
 
-.nx-btn-secondary {
+.nx-btn-secondary
+{
 	background: var(--nx-btn2-bg);
 	color: var(--nx-btn2-fg);
 }
 
-.nx-cards {
+.nx-cards
+{
 	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));
 	gap: 8px;
 }
 
-.nx-card {
+.nx-card
+{
 	border: 1px solid var(--nx-border);
 	border-radius: 6px;
 	background: var(--nx-surface);
@@ -91,18 +114,21 @@ h1 {
 	gap: 4px;
 }
 
-.nx-cardLabel {
+.nx-cardLabel
+{
 	font-size: 11px;
 	color: var(--nx-muted);
 }
 
-.nx-cardValue {
+.nx-cardValue
+{
 	font-size: 16px;
 	font-weight: 600;
 	font-variant-numeric: tabular-nums;
 }
 
-.nx-cardTrend {
+.nx-cardTrend
+{
 	font-size: 11px;
 	color: var(--nx-ok);
 }
@@ -110,7 +136,8 @@ h1 {
 .nx-chart,
 .nx-bars,
 .nx-stats,
-.nx-memory {
+.nx-memory
+{
 	border: 1px solid var(--nx-border);
 	border-radius: 6px;
 	background: var(--nx-surface);
@@ -119,7 +146,8 @@ h1 {
 
 .nx-dayRow,
 .nx-barRow,
-.nx-fileRow {
+.nx-fileRow
+{
 	display: grid;
 	grid-template-columns: 72px 1fr 56px;
 	gap: 8px;
@@ -128,45 +156,53 @@ h1 {
 	font-size: 11px;
 }
 
-.nx-barRow {
+.nx-barRow
+{
 	grid-template-columns: 88px 1fr 64px;
 }
 
-.nx-fileRow {
+.nx-fileRow
+{
 	grid-template-columns: 1fr auto;
 }
 
-.nx-barTrack {
+.nx-barTrack
+{
 	height: 8px;
 	border-radius: 4px;
 	background: color-mix(in srgb, var(--nx-border) 70%, transparent);
 	overflow: hidden;
 }
 
-.nx-barFill {
+.nx-barFill
+{
 	height: 100%;
 	background: var(--nx-bar);
 	border-radius: 4px;
 }
 
-.nx-muted {
+.nx-muted
+{
 	color: var(--nx-muted);
 }
 
-.nx-statGrid {
+.nx-statGrid
+{
 	display: grid;
 	grid-template-columns: 1fr 1fr;
 	gap: 8px;
 	font-size: 12px;
 }
 
-.nx-empty {
+.nx-empty
+{
 	font-size: 12px;
 	color: var(--nx-muted);
 	padding: 8px 0;
 }
 
-.nx-banner {
+.nx-banner
+{
 	margin: 8px 0 12px;
 	padding: 8px 10px;
 	border-radius: 4px;
@@ -176,7 +212,8 @@ h1 {
 	color: var(--vscode-foreground);
 }
 
-.nx-recentRow {
+.nx-recentRow
+{
 	display: grid;
 	grid-template-columns: 1fr 1.2fr auto auto auto auto;
 	gap: 8px;
@@ -186,23 +223,28 @@ h1 {
 	border-bottom: 1px solid var(--nx-border, rgba(128, 128, 128, 0.2));
 }
 
-.nx-recentRow:last-child {
+.nx-recentRow:last-child
+{
 	border-bottom: none;
 }
 
-.nx-recentPlatform {
+.nx-recentPlatform
+{
 	font-weight: 600;
 }
 
-.nx-recentStatus {
+.nx-recentStatus
+{
 	text-transform: capitalize;
 }
 
-.nx-recentRow-failed .nx-recentStatus {
+.nx-recentRow-failed .nx-recentStatus
+{
 	color: var(--vscode-errorForeground, #f14c4c);
 }
 
-.sr-only {
+.sr-only
+{
 	position: absolute;
 	width: 1px;
 	height: 1px;

@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root {
+:root
+{
 	--nx-bg: var(--vscode-editor-background);
 	--nx-fg: var(--vscode-editor-foreground);
 	--nx-muted: var(--vscode-descriptionForeground);
@@ -20,9 +21,21 @@
 	--nx-input-border: var(--vscode-input-border);
 }
 
-* { box-sizing: border-box; }
+*
+{
+	box-sizing: border-box;
+	scrollbar-width: none;
+}
 
-body {
+*::-webkit-scrollbar
+{
+	width: 0;
+	height: 0;
+	display: none;
+}
+
+body
+{
 	margin: 0;
 	padding: 0;
 	font-family: var(--vscode-font-family);
@@ -31,45 +44,52 @@ body {
 	background: var(--nx-bg);
 }
 
-#templates-root {
+#templates-root
+{
 	padding: 12px;
 	display: flex;
 	flex-direction: column;
-	gap: 16px;
+	gap: 12px;
 }
 
-h1 {
+h1
+{
 	margin: 0;
 	font-size: 14px;
 	font-weight: 600;
 }
 
-.nx-section h2 {
+.nx-section h2
+{
 	margin: 0 0 8px 0;
 	font-size: 13px;
 	font-weight: 600;
 }
 
-.nx-section-head {
+.nx-section-head
+{
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
 }
 
-.nx-head-actions {
+.nx-head-actions
+{
 	display: flex;
 	gap: 6px;
 }
 
-.nx-hint {
+.nx-hint
+{
 	margin: 0;
 	font-size: 11px;
 	color: var(--nx-muted);
 	line-height: 1.4;
 }
 
-.nx-btn {
+.nx-btn
+{
 	border: none;
 	border-radius: 4px;
 	padding: 4px 10px;
@@ -77,27 +97,32 @@ h1 {
 	font-size: 12px;
 }
 
-.nx-btn-primary {
+.nx-btn-primary
+{
 	background: var(--nx-btn-bg);
 	color: var(--nx-btn-fg);
 }
 
-.nx-btn-primary:hover {
+.nx-btn-primary:hover
+{
 	background: var(--nx-btn-hover);
 }
 
-.nx-btn-secondary {
+.nx-btn-secondary
+{
 	background: var(--nx-btn2-bg);
 	color: var(--nx-btn2-fg);
 }
 
-.nx-list {
+.nx-list
+{
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
 }
 
-.nx-card {
+.nx-card
+{
 	border: 1px solid var(--nx-border);
 	border-radius: 6px;
 	background: var(--nx-surface);
@@ -107,19 +132,22 @@ h1 {
 	gap: 8px;
 }
 
-.nx-cardHead {
+.nx-cardHead
+{
 	display: flex;
 	align-items: baseline;
 	justify-content: space-between;
 	gap: 8px;
 }
 
-.nx-cardTitle {
+.nx-cardTitle
+{
 	font-size: 13px;
 	font-weight: 600;
 }
 
-.nx-badge {
+.nx-badge
+{
 	font-size: 10px;
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
@@ -129,18 +157,21 @@ h1 {
 	padding: 1px 6px;
 }
 
-.nx-cardMeta {
+.nx-cardMeta
+{
 	font-size: 11px;
 	color: var(--nx-muted);
 }
 
-.nx-cardActions {
+.nx-cardActions
+{
 	display: flex;
 	flex-wrap: wrap;
 	gap: 6px;
 }
 
-.nx-form {
+.nx-form
+{
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
@@ -148,19 +179,22 @@ h1 {
 	border-top: 1px solid var(--nx-border);
 }
 
-.nx-field {
+.nx-field
+{
 	display: flex;
 	flex-direction: column;
 	gap: 3px;
 }
 
-.nx-field label {
+.nx-field label
+{
 	font-size: 11px;
 	color: var(--nx-muted);
 }
 
 .nx-field input,
-.nx-field select {
+.nx-field select
+{
 	background: var(--nx-input-bg);
 	color: var(--nx-input-fg);
 	border: 1px solid var(--nx-input-border, var(--nx-border));
@@ -171,17 +205,20 @@ h1 {
 }
 
 .nx-field input:focus,
-.nx-field select:focus {
+.nx-field select:focus
+{
 	outline: 1px solid var(--nx-focus);
 	outline-offset: 1px;
 }
 
-.nx-formActions {
+.nx-formActions
+{
 	display: flex;
 	gap: 6px;
 }
 
-.nx-preview {
+.nx-preview
+{
 	border: 1px solid var(--nx-border);
 	border-radius: 6px;
 	background: var(--nx-surface);
@@ -192,12 +229,14 @@ h1 {
 	font-size: 12px;
 }
 
-.nx-previewTitle {
+.nx-previewTitle
+{
 	font-weight: 600;
 	font-size: 13px;
 }
 
-.nx-banner {
+.nx-banner
+{
 	margin: 0;
 	padding: 8px 10px;
 	border-radius: 4px;
@@ -207,17 +246,20 @@ h1 {
 	color: var(--vscode-foreground);
 }
 
-.nx-empty {
+.nx-empty
+{
 	font-size: 12px;
 	color: var(--nx-muted);
 	padding: 8px 0;
 }
 
-.nx-muted {
+.nx-muted
+{
 	color: var(--nx-muted);
 }
 
-.sr-only {
+.sr-only
+{
 	position: absolute;
 	width: 1px;
 	height: 1px;

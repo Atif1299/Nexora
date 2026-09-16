@@ -13,7 +13,9 @@ export class TemplatesPanelProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nexora.templates';
 
 	private _view?: vscode.WebviewView;
+	private _attached = false;
 	private _pendingImport?: Record<string, unknown>;
+	private _disposables: vscode.Disposable[] = [];
 
 	constructor(private readonly _extensionUri: vscode.Uri) { }
 
@@ -23,17 +25,36 @@ export class TemplatesPanelProvider implements vscode.WebviewViewProvider {
 		_token: vscode.CancellationToken
 	): void {
 		this._view = webviewView;
+		this._attach(webviewView);
+	}
 
-		const webviewOpts: vscode.WebviewOptions & { retainContextWhenHidden?: boolean } = {
+	public async open(): Promise<void> {
+		await vscode.commands.executeCommand(`${TemplatesPanelProvider.viewType}.focus`);
+		if (this._attached) {
+			void this._pushState();
+		}
+	}
+
+	public async refresh(): Promise<void> {
+		await this._pushState();
+	}
+
+	private _attach(view: vscode.WebviewView): void {
+		if (this._attached && this._view === view) {
+			void this._pushState();
+			return;
+		}
+		this._disposeBindings();
+		this._attached = true;
+		this._view = view;
+		view.webview.options = {
 			enableScripts: true,
-			localResourceRoots: [this._extensionUri],
-			retainContextWhenHidden: true
+			localResourceRoots: [this._extensionUri]
 		};
-		webviewView.webview.options = webviewOpts;
-		webviewView.webview.html = getTemplatesWebviewHtml(webviewView.webview, this._extensionUri);
+		view.webview.html = getTemplatesWebviewHtml(view.webview, this._extensionUri);
 
-		const disposables: vscode.Disposable[] = [
-			webviewView.webview.onDidReceiveMessage(async (msg) => {
+		this._disposables = [
+			view.webview.onDidReceiveMessage(async (msg) => {
 				switch (msg.type) {
 					case 'ready':
 					case 'refresh':
@@ -56,27 +77,29 @@ export class TemplatesPanelProvider implements vscode.WebviewViewProvider {
 						break;
 				}
 			}),
-			webviewView.onDidChangeVisibility(() => {
-				if (webviewView.visible) {
+			view.onDidChangeVisibility(() => {
+				if (view.visible && this._attached) {
 					void this._pushState();
 				}
+			}),
+			view.onDidDispose(() => {
+				this._disposeBindings();
+				this._view = undefined;
+				this._attached = false;
+				this._pendingImport = undefined;
 			})
 		];
-
-		webviewView.onDidDispose(() => {
-			for (const disposable of disposables) {
-				disposable.dispose();
-			}
-			this._view = undefined;
-		});
 	}
 
-	public async refresh(): Promise<void> {
-		await this._pushState();
+	private _disposeBindings(): void {
+		for (const disposable of this._disposables) {
+			disposable.dispose();
+		}
+		this._disposables = [];
 	}
 
 	private async _pushState(): Promise<void> {
-		if (!this._view) {
+		if (!this._view || !this._attached) {
 			return;
 		}
 		try {

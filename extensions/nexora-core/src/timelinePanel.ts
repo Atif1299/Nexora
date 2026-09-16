@@ -12,8 +12,10 @@ export class TimelinePanelProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nexora.timeline';
 
 	private _view?: vscode.WebviewView;
+	private _attached = false;
 	private _workspaceId?: string;
 	private _snapshots: TimelineEntry[] = [];
+	private _disposables: vscode.Disposable[] = [];
 
 	constructor(private readonly _extensionUri: vscode.Uri) { }
 
@@ -23,40 +25,60 @@ export class TimelinePanelProvider implements vscode.WebviewViewProvider {
 		_token: vscode.CancellationToken
 	): void {
 		this._view = webviewView;
+		this._attach(webviewView);
+	}
 
-		const webviewOpts: vscode.WebviewOptions & { retainContextWhenHidden?: boolean } = {
+	public async open(): Promise<void> {
+		await vscode.commands.executeCommand(`${TimelinePanelProvider.viewType}.focus`);
+		if (this._attached) {
+			void this._pushState();
+		}
+	}
+
+	public async refresh(): Promise<void> {
+		await this._pushState();
+	}
+
+	private _attach(view: vscode.WebviewView): void {
+		if (this._attached && this._view === view) {
+			void this._pushState();
+			return;
+		}
+		this._disposeBindings();
+		this._attached = true;
+		this._view = view;
+		view.webview.options = {
 			enableScripts: true,
-			localResourceRoots: [this._extensionUri],
-			retainContextWhenHidden: true
+			localResourceRoots: [this._extensionUri]
 		};
-		webviewView.webview.options = webviewOpts;
-		webviewView.webview.html = getTimelineWebviewHtml(webviewView.webview, this._extensionUri);
+		view.webview.html = getTimelineWebviewHtml(view.webview, this._extensionUri);
 
-		const disposables: vscode.Disposable[] = [
-			webviewView.webview.onDidReceiveMessage(async (msg) => {
+		this._disposables = [
+			view.webview.onDidReceiveMessage(async (msg) => {
 				if (msg.type === 'ready' || msg.type === 'refresh') {
 					await this._pushState();
 				} else if (msg.type === 'selectSnapshot') {
 					await this._pushDetail(String(msg.id || ''));
 				}
 			}),
-			webviewView.onDidChangeVisibility(() => {
-				if (webviewView.visible) {
+			view.onDidChangeVisibility(() => {
+				if (view.visible) {
 					void this._pushState();
 				}
+			}),
+			view.onDidDispose(() => {
+				this._disposeBindings();
+				this._view = undefined;
+				this._attached = false;
 			})
 		];
-
-		webviewView.onDidDispose(() => {
-			for (const disposable of disposables) {
-				disposable.dispose();
-			}
-			this._view = undefined;
-		});
 	}
 
-	public async refresh(): Promise<void> {
-		await this._pushState();
+	private _disposeBindings(): void {
+		for (const disposable of this._disposables) {
+			disposable.dispose();
+		}
+		this._disposables = [];
 	}
 
 	private async _resolveWorkspaceId(): Promise<string | undefined> {
@@ -73,7 +95,7 @@ export class TimelinePanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _pushState(): Promise<void> {
-		if (!this._view) {
+		if (!this._view || !this._attached) {
 			return;
 		}
 		try {
@@ -111,7 +133,7 @@ export class TimelinePanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _pushDetail(snapshotId: string): Promise<void> {
-		if (!this._view || !snapshotId) {
+		if (!this._view || !this._attached || !snapshotId) {
 			return;
 		}
 		try {
