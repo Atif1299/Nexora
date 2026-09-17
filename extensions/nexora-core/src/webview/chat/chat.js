@@ -26,9 +26,8 @@
 	const suggestRun = document.getElementById('suggestRun');
 	const suggestLater = document.getElementById('suggestLater');
 	const suggestNever = document.getElementById('suggestNever');
-	const sessionSelect = document.getElementById('sessionSelect');
+	const sessionList = document.getElementById('sessionList');
 	const newSessionBtn = document.getElementById('newSessionBtn');
-	const deleteSessionBtn = document.getElementById('deleteSessionBtn');
 	const firstRunCard = document.getElementById('firstRunCard');
 	const firstRunProvider = document.getElementById('firstRunProvider');
 	const firstRunKey = document.getElementById('firstRunKey');
@@ -49,6 +48,13 @@
 	let ddKbIndex = 0;
 	let ddGlobalsBound = false;
 	let messagesScrollBarTimer = null;
+	let replyInFlight = false;
+	let atCompleteTimer = null;
+	let atCompleteItems = [];
+	let atCompleteIndex = 0;
+	let atCompleteOpen = false;
+	let atCompletePrefixStart = -1;
+	let atCompleteSuppressEnter = false;
 
 	const modeHints = {
 		'chat': 'Chat mode: Have a conversation, ask questions, get explanations',
@@ -341,7 +347,7 @@
 		banner.id = 'offline-banner';
 		banner.setAttribute('role', 'alert');
 		banner.hidden = true;
-		banner.style.cssText = 'grid-column:1/-1;margin:0;padding:8px 10px;border-radius:4px;font-size:12px;align-items:center;gap:8px;flex-wrap:wrap;background:var(--vscode-inputValidation-warningBackground, rgba(255,190,80,0.15));border:1px solid var(--vscode-inputValidation-warningBorder, rgba(255,190,80,0.5));color:var(--vscode-foreground);';
+		banner.style.cssText = 'flex:1 1 100%;width:100%;margin:0;padding:8px 10px;border-radius:4px;font-size:12px;align-items:center;gap:8px;flex-wrap:wrap;background:var(--vscode-inputValidation-warningBackground, rgba(255,190,80,0.15));border:1px solid var(--vscode-inputValidation-warningBorder, rgba(255,190,80,0.5));color:var(--vscode-foreground);';
 
 		const text = document.createElement('span');
 		text.id = 'offline-banner-text';
@@ -414,29 +420,437 @@
 			syncOneDd(modelDdRoot);
 		}
 		currentMode = modeSelect.value;
-		const label = buttonLabels[currentMode] || 'Send';
-		if (sendBtnText) {
-			sendBtnText.textContent = label;
-		}
-		if (sendBtn) {
-			sendBtn.title = `${label} (Enter)`;
-			sendBtn.setAttribute('aria-label', `${label}, press Enter`);
-		}
+		applySendButtonChrome();
 		
 		if (modeHint) {
 			modeHint.setAttribute('data-mode', currentMode);
 		}
 		
-		const hintEl = modeHint.querySelector('.nx-hintText');
+		const hintEl = modeHint ? modeHint.querySelector('.nx-hintText') : null;
 		if (hintEl) {
 			hintEl.textContent = modeHints[currentMode] || '';
 		}
+	}
+
+	function applySendButtonChrome() {
+		if (!sendBtn) {
+			return;
+		}
+		sendBtn.classList.toggle('nx-isStop', replyInFlight);
+		if (replyInFlight) {
+			if (sendBtnText) {
+				sendBtnText.textContent = 'Stop';
+			}
+			sendBtn.title = 'Stop';
+			sendBtn.setAttribute('aria-label', 'Stop generating');
+			return;
+		}
+		const label = buttonLabels[currentMode] || 'Send';
+		if (sendBtnText) {
+			sendBtnText.textContent = label;
+		}
+		sendBtn.title = `${label} (Enter)`;
+		sendBtn.setAttribute('aria-label', `${label}, press Enter`);
+	}
+
+	function setReplyInFlight(running) {
+		replyInFlight = !!running;
+		applySendButtonChrome();
 	}
 
 	function escapeHtml(text) {
 		const div = document.createElement('div');
 		div.textContent = String(text);
 		return div.innerHTML;
+	}
+
+	function parseAtMentionTokens(text) {
+		const tokens = [];
+		const src = String(text || '');
+		const re = /(^|[\s])@(?:"([^"]+)"|'([^']+)'|([^\s@]+))/g;
+		let m = re.exec(src);
+		while (m) {
+			const path = (m[2] || m[3] || m[4] || '').replace(/[.,;:!?)]+$/, '');
+			if (path) {
+				const atIndex = m.index + m[1].length;
+				tokens.push({
+					path: path,
+					start: atIndex,
+					end: atIndex + m[0].length - m[1].length
+				});
+			}
+			m = re.exec(src);
+		}
+		return tokens;
+	}
+
+	function formatAtMentionHighlight(text) {
+		const src = String(text || '');
+		const tokens = parseAtMentionTokens(src);
+		if (!tokens.length) {
+			return escapeHtml(src);
+		}
+		let html = '';
+		let cursor = 0;
+		tokens.forEach(function (tok) {
+			html += escapeHtml(src.slice(cursor, tok.start));
+			html += '<span class="nx-atMentionToken">' + escapeHtml(src.slice(tok.start, tok.end)) + '</span>';
+			cursor = tok.end;
+		});
+		html += escapeHtml(src.slice(cursor));
+		return html;
+	}
+
+	function getAtCompletePrefix(value, caret) {
+		const before = String(value || '').slice(0, caret);
+		const match = before.match(/(^|[\s])@([^\s@]*)$/);
+		if (!match) {
+			return null;
+		}
+		return {
+			start: before.length - match[2].length - 1,
+			prefix: match[2]
+		};
+	}
+
+	function ensureAtCompleteMenu() {
+		let menu = document.getElementById('nxAtComplete');
+		if (menu) {
+			return menu;
+		}
+		menu = document.createElement('div');
+		menu.id = 'nxAtComplete';
+		menu.className = 'nx-atComplete';
+		menu.setAttribute('role', 'listbox');
+		menu.hidden = true;
+		document.body.appendChild(menu);
+		menu.addEventListener('mousedown', function (e) {
+			e.preventDefault();
+			const item = e.target && e.target.closest ? e.target.closest('[data-at-index]') : null;
+			if (!item) {
+				return;
+			}
+			const idx = Number(item.getAttribute('data-at-index'));
+			if (!isFinite(idx)) {
+				return;
+			}
+			applyAtCompleteSelection(idx);
+		});
+		return menu;
+	}
+
+	function ensureAtChipRow() {
+		let chips = document.getElementById('nxAtChips');
+		if (chips) {
+			return chips;
+		}
+		chips = document.createElement('div');
+		chips.id = 'nxAtChips';
+		chips.className = 'nx-atChips';
+		chips.hidden = true;
+		const wrap = document.getElementById('nxAtInputWrap');
+		if (wrap && wrap.parentNode) {
+			wrap.parentNode.insertBefore(chips, wrap);
+		} else if (input && input.parentNode) {
+			input.parentNode.insertBefore(chips, input);
+		}
+		return chips;
+	}
+
+	function wireAtContextComposer() {
+		if (!input || input.dataset.nxAtWired) {
+			return;
+		}
+		input.dataset.nxAtWired = '1';
+		const wrap = document.createElement('div');
+		wrap.className = 'nx-atInputWrap';
+		wrap.id = 'nxAtInputWrap';
+		const highlight = document.createElement('div');
+		highlight.className = 'nx-atHighlight';
+		highlight.id = 'nxAtHighlight';
+		highlight.setAttribute('aria-hidden', 'true');
+		if (input.parentNode) {
+			input.parentNode.insertBefore(wrap, input);
+			wrap.appendChild(highlight);
+			wrap.appendChild(input);
+		}
+		ensureAtChipRow();
+		ensureAtCompleteMenu();
+		input.addEventListener('input', onAtComposerInput);
+		input.addEventListener('click', onAtComposerInput);
+		input.addEventListener('keyup', function (e) {
+			if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
+				onAtComposerInput();
+			}
+		});
+		input.addEventListener('keydown', onAtComposerKeydown);
+		input.addEventListener('scroll', syncAtMentionHighlight);
+		input.addEventListener('blur', function () {
+			window.setTimeout(function () {
+				hideAtCompleteMenu();
+			}, 120);
+		});
+		window.addEventListener('resize', function () {
+			if (atCompleteOpen) {
+				positionAtCompleteMenu();
+			}
+		});
+		syncAtMentionChips();
+		syncAtMentionHighlight();
+	}
+
+	function quoteAtMentionPath(relPath) {
+		const p = String(relPath || '');
+		if (/[\s"']/.test(p)) {
+			return '@"' + p.replace(/"/g, '') + '"';
+		}
+		return '@' + p;
+	}
+
+	function syncAtMentionHighlight() {
+		const hl = document.getElementById('nxAtHighlight');
+		const wrap = document.getElementById('nxAtInputWrap');
+		if (!hl || !input) {
+			return;
+		}
+		const hasMentions = parseAtMentionTokens(input.value).length > 0;
+		if (wrap) {
+			wrap.classList.toggle('nx-hasAtMentions', hasMentions);
+		}
+		hl.innerHTML = hasMentions ? formatAtMentionHighlight(input.value) : '';
+		hl.scrollLeft = input.scrollLeft;
+	}
+
+	function syncAtMentionChips() {
+		const chips = ensureAtChipRow();
+		if (!chips || !input) {
+			return;
+		}
+		const tokens = parseAtMentionTokens(input.value);
+		const seen = {};
+		const unique = [];
+		tokens.forEach(function (tok) {
+			if (seen[tok.path]) {
+				return;
+			}
+			seen[tok.path] = true;
+			unique.push(tok);
+		});
+		chips.innerHTML = '';
+		if (!unique.length) {
+			chips.hidden = true;
+			return;
+		}
+		chips.hidden = false;
+		unique.forEach(function (tok) {
+			const chip = document.createElement('span');
+			chip.className = 'nx-atChip';
+			const label = document.createElement('span');
+			label.className = 'nx-atChipLabel';
+			label.textContent = tok.path;
+			label.title = tok.path;
+			const remove = document.createElement('button');
+			remove.type = 'button';
+			remove.className = 'nx-atChipRemove';
+			remove.setAttribute('aria-label', 'Remove ' + tok.path);
+			remove.textContent = 'x';
+			remove.addEventListener('click', function (ev) {
+				ev.preventDefault();
+				removeAtMentionPath(tok.path);
+			});
+			chip.appendChild(label);
+			chip.appendChild(remove);
+			chips.appendChild(chip);
+		});
+	}
+
+	function removeAtMentionPath(relPath) {
+		if (!input) {
+			return;
+		}
+		const token = quoteAtMentionPath(relPath);
+		const re = new RegExp('(^|\\s)' + token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=\\s|$)');
+		input.value = input.value.replace(re, function (_m, lead) {
+			return lead;
+		}).replace(/\s{2,}/g, ' ').trimStart();
+		syncAtMentionChips();
+		syncAtMentionHighlight();
+		onAtComposerInput();
+		input.focus();
+	}
+
+	function hideAtCompleteMenu() {
+		const menu = document.getElementById('nxAtComplete');
+		if (menu) {
+			menu.hidden = true;
+			menu.innerHTML = '';
+		}
+		atCompleteOpen = false;
+		atCompleteItems = [];
+		atCompleteIndex = 0;
+		atCompletePrefixStart = -1;
+	}
+
+	function positionAtCompleteMenu() {
+		const menu = document.getElementById('nxAtComplete');
+		if (!menu || !input) {
+			return;
+		}
+		const wrap = document.getElementById('nxAtInputWrap') || input;
+		const rect = wrap.getBoundingClientRect();
+		const width = Math.max(rect.width, 200);
+		const maxH = Math.min(240, Math.max(72, rect.top - 8));
+		menu.style.width = width + 'px';
+		menu.style.left = Math.max(4, rect.left) + 'px';
+		menu.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+		menu.style.top = 'auto';
+		menu.style.maxHeight = maxH + 'px';
+	}
+
+	function scheduleAtCompleteRequest(prefix, start) {
+		atCompletePrefixStart = start;
+		window.clearTimeout(atCompleteTimer);
+		atCompleteTimer = window.setTimeout(function () {
+			vscode.postMessage({ type: 'requestAtComplete', prefix: prefix });
+		}, 80);
+	}
+
+	function onAtComposerInput() {
+		syncAtMentionChips();
+		syncAtMentionHighlight();
+		if (!input) {
+			return;
+		}
+		const caret = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+		const query = getAtCompletePrefix(input.value, caret);
+		if (!query) {
+			hideAtCompleteMenu();
+			return;
+		}
+		scheduleAtCompleteRequest(query.prefix, query.start);
+	}
+
+	function onAtComposerKeydown(e) {
+		if (!atCompleteOpen) {
+			return;
+		}
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			atCompleteIndex = Math.min(atCompleteItems.length - 1, atCompleteIndex + 1);
+			paintAtCompleteActive();
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			atCompleteIndex = Math.max(0, atCompleteIndex - 1);
+			paintAtCompleteActive();
+		} else if (e.key === 'Enter' || e.key === 'Tab') {
+			if (atCompleteItems.length) {
+				e.preventDefault();
+				if (e.key === 'Enter') {
+					atCompleteSuppressEnter = true;
+				}
+				applyAtCompleteSelection(atCompleteIndex);
+			}
+		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			hideAtCompleteMenu();
+		}
+	}
+
+	function paintAtCompleteActive() {
+		const menu = document.getElementById('nxAtComplete');
+		if (!menu) {
+			return;
+		}
+		const nodes = menu.querySelectorAll('[data-at-index]');
+		nodes.forEach(function (el) {
+			const on = Number(el.getAttribute('data-at-index')) === atCompleteIndex;
+			el.classList.toggle('nx-atCompleteActive', on);
+			if (on) {
+				el.scrollIntoView({ block: 'nearest' });
+			}
+		});
+	}
+
+	function renderAtCompleteResults(items) {
+		if (!input) {
+			return;
+		}
+		const caret = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+		if (!getAtCompletePrefix(input.value, caret)) {
+			hideAtCompleteMenu();
+			return;
+		}
+		const menu = ensureAtCompleteMenu();
+		atCompleteItems = Array.isArray(items) ? items : [];
+		atCompleteIndex = 0;
+		menu.innerHTML = '';
+		if (!atCompleteItems.length) {
+			const empty = document.createElement('div');
+			empty.className = 'nx-atCompleteEmpty';
+			empty.textContent = 'No matching files';
+			menu.appendChild(empty);
+			menu.hidden = false;
+			atCompleteOpen = true;
+			positionAtCompleteMenu();
+			return;
+		}
+		atCompleteItems.forEach(function (item, idx) {
+			const btn = document.createElement('button');
+			btn.type = 'button';
+			btn.className = 'nx-atCompleteItem' + (idx === 0 ? ' nx-atCompleteActive' : '');
+			btn.setAttribute('role', 'option');
+			btn.setAttribute('data-at-index', String(idx));
+			const icon = document.createElement('span');
+			icon.className = 'nx-atCompleteIcon';
+			icon.textContent = item.kind === 'folder' ? 'dir' : (item.icon || 'file');
+			const body = document.createElement('span');
+			body.className = 'nx-atCompleteBody';
+			const label = document.createElement('span');
+			label.className = 'nx-atCompleteLabel';
+			label.textContent = item.label || item.path || '';
+			const pathEl = document.createElement('span');
+			pathEl.className = 'nx-atCompletePath';
+			pathEl.textContent = item.path || '';
+			body.appendChild(label);
+			if (item.path && item.path !== item.label) {
+				body.appendChild(pathEl);
+			}
+			btn.appendChild(icon);
+			btn.appendChild(body);
+			menu.appendChild(btn);
+		});
+		menu.hidden = false;
+		atCompleteOpen = true;
+		positionAtCompleteMenu();
+	}
+
+	function applyAtCompleteSelection(index) {
+		if (!input) {
+			return;
+		}
+		const item = atCompleteItems[index];
+		if (!item) {
+			hideAtCompleteMenu();
+			return;
+		}
+		const caret = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+		const query = getAtCompletePrefix(input.value, caret);
+		const start = query ? query.start : atCompletePrefixStart;
+		if (start < 0) {
+			hideAtCompleteMenu();
+			return;
+		}
+		const token = quoteAtMentionPath(item.path || item.label || '');
+		const before = input.value.slice(0, start);
+		const after = input.value.slice(caret);
+		const spacer = after.charAt(0) === ' ' ? '' : ' ';
+		input.value = before + token + spacer + after;
+		const nextCaret = (before + token + spacer).length;
+		input.setSelectionRange(nextCaret, nextCaret);
+		hideAtCompleteMenu();
+		syncAtMentionChips();
+		syncAtMentionHighlight();
+		input.focus();
 	}
 
 	function formatContent(content) {
@@ -532,7 +946,7 @@
 		messages.scrollTop = messages.scrollHeight;
 	}
 
-	function addMessage(role, content, isLoading) {
+	function addMessage(role, content, isLoading, stopped) {
 		if (welcome) {
 			welcome.style.display = 'none';
 		}
@@ -542,22 +956,19 @@
 		}
 
 		const div = document.createElement('div');
-		div.className = 'nx-msg ' + (role === 'user' ? 'nx-user' : 'nx-assistant') + (isLoading ? ' nx-msgLoading' : '');
-
-		const header = document.createElement('div');
-		header.className = 'nx-msgHeader';
-		header.textContent = role === 'user' ? 'You' : 'Nexora';
+		div.className = 'nx-msg ' + (role === 'user' ? 'nx-user' : 'nx-assistant') + (isLoading ? ' nx-msgLoading' : '') + (stopped || (!isLoading && content === 'Stopped.') ? ' nx-msgStopped' : '');
 
 		const body = document.createElement('div');
 		body.className = 'nx-msgBody';
 
 		if (isLoading) {
 			body.textContent = content;
+		} else if (role === 'user') {
+			body.innerHTML = formatAtMentionHighlight(content);
 		} else {
 			body.innerHTML = formatContent(content);
 		}
 
-		div.appendChild(header);
 		div.appendChild(body);
 
 		messages.appendChild(div);
@@ -568,7 +979,49 @@
 		} else if (lastLoadingMessage) {
 			lastLoadingMessage.remove();
 			lastLoadingMessage = null;
+			setReplyInFlight(false);
+		} else if (stopped) {
+			setReplyInFlight(false);
 		}
+	}
+
+	function appendToken(content) {
+		const chunk = String(content || '');
+		if (!chunk) {
+			return;
+		}
+		if (!lastLoadingMessage) {
+			addMessage('assistant', chunk, true);
+			return;
+		}
+		const body = lastLoadingMessage.querySelector('.nx-msgBody');
+		if (!body) {
+			return;
+		}
+		if (body.getAttribute('data-nx-streaming') !== '1') {
+			body.textContent = chunk;
+			body.setAttribute('data-nx-streaming', '1');
+		} else {
+			body.textContent = (body.textContent || '') + chunk;
+		}
+		messages.scrollTop = messages.scrollHeight;
+	}
+
+	function finishMessage() {
+		if (!lastLoadingMessage) {
+			setReplyInFlight(false);
+			return;
+		}
+		const body = lastLoadingMessage.querySelector('.nx-msgBody');
+		const text = body ? (body.textContent || '') : '';
+		lastLoadingMessage.classList.remove('nx-msgLoading');
+		if (body) {
+			body.removeAttribute('data-nx-streaming');
+			body.innerHTML = formatContent(text);
+		}
+		lastLoadingMessage = null;
+		setReplyInFlight(false);
+		messages.scrollTop = messages.scrollHeight;
 	}
 
 	function clearMessagesUi() {
@@ -586,23 +1039,61 @@
 		clearChatActivityCard();
 		currentPlan = null;
 		planCardElement = null;
+		setReplyInFlight(false);
 	}
 
 	function renderSessions(sessions, activeId) {
-		if (!sessionSelect) {
+		if (!sessionList) {
 			return;
 		}
-		sessionSelect.innerHTML = '';
-		(sessions || []).forEach(s => {
-			const opt = document.createElement('option');
-			opt.value = s.id;
-			opt.textContent = s.name || 'Chat';
-			sessionSelect.appendChild(opt);
-		});
 		if (activeId) {
-			sessionSelect.value = activeId;
 			activeSessionId = activeId;
 		}
+		sessionList.innerHTML = '';
+		(sessions || []).forEach(function (s) {
+			const id = s && s.id ? String(s.id) : '';
+			if (!id) {
+				return;
+			}
+			const name = (s && s.name) ? String(s.name) : 'New chat';
+			const row = document.createElement('div');
+			row.className = 'nx-railItem' + (id === activeSessionId ? ' is-active' : '');
+			row.setAttribute('role', 'listitem');
+			row.setAttribute('data-session-id', id);
+			if (id === activeSessionId) {
+				row.setAttribute('aria-current', 'true');
+			}
+
+			const openBtn = document.createElement('button');
+			openBtn.type = 'button';
+			openBtn.className = 'nx-railOpen';
+			openBtn.title = name;
+			const openLabel = document.createElement('span');
+			openLabel.className = 'nx-railOpenText';
+			openLabel.textContent = name;
+			openBtn.appendChild(openLabel);
+			openBtn.addEventListener('click', function () {
+				if (id === activeSessionId) {
+					return;
+				}
+				vscode.postMessage({ type: 'switchSession', sessionId: id });
+			});
+
+			const delBtn = document.createElement('button');
+			delBtn.type = 'button';
+			delBtn.className = 'nx-railDelete';
+			delBtn.title = 'Delete chat session';
+			delBtn.setAttribute('aria-label', 'Delete ' + name);
+			delBtn.textContent = '-';
+			delBtn.addEventListener('click', function (ev) {
+				ev.stopPropagation();
+				vscode.postMessage({ type: 'deleteSession', sessionId: id });
+			});
+
+			row.appendChild(openBtn);
+			row.appendChild(delBtn);
+			sessionList.appendChild(row);
+		});
 	}
 
 	function loadSessionMessages(sessionId, msgs) {
@@ -940,16 +1431,33 @@
 		saveTemplateCard = card;
 	}
 
+	function handleStop() {
+		if (!replyInFlight) {
+			return;
+		}
+		vscode.postMessage({ type: 'stopGeneration' });
+	}
+
 	function handleSend() {
+		if (replyInFlight) {
+			return;
+		}
+
 		const text = input.value.trim();
 		if (!text) {
 			return;
 		}
 
+		hideAtCompleteMenu();
+
 		const model = modelSelect.value;
 		const mode = modeSelect.value;
 
 		addMessage('user', text, false);
+
+		if (mode === 'chat' || mode === 'ask' || mode === 'agent') {
+			setReplyInFlight(true);
+		}
 
 		switch (mode) {
 			case 'chat':
@@ -972,40 +1480,136 @@
 		}
 
 		input.value = '';
+		syncAtMentionChips();
+		syncAtMentionHighlight();
 	}
 
 	// Event listeners
-	sendBtn.onclick = handleSend;
+	sendBtn.onclick = function () {
+		if (replyInFlight) {
+			handleStop();
+			return;
+		}
+		handleSend();
+	};
 
 	input.onkeypress = (e) => {
 		if (e.key === 'Enter' && !e.shiftKey) {
+			if (atCompleteSuppressEnter || atCompleteOpen) {
+				atCompleteSuppressEnter = false;
+				e.preventDefault();
+				return;
+			}
 			e.preventDefault();
+			if (replyInFlight) {
+				return;
+			}
 			handleSend();
 		}
 	};
 
 	wireComposerDropdowns();
 	wireMessagesScrollbarFlash();
-	if (sessionSelect) {
-		sessionSelect.onchange = () => {
-			const id = sessionSelect.value;
-			if (id) {
-				vscode.postMessage({ type: 'switchSession', sessionId: id });
-			}
-		};
-	}
+	wireAtContextComposer();
 	if (newSessionBtn) {
 		newSessionBtn.onclick = () => vscode.postMessage({ type: 'newSession' });
 	}
-	if (deleteSessionBtn) {
-		deleteSessionBtn.onclick = () => {
-			const id = (sessionSelect && sessionSelect.value) ? sessionSelect.value : activeSessionId;
-			if (!id) {
+
+	(function setupSessionRailResize() {
+		const rail = document.getElementById('sessionRail');
+		const handle = document.getElementById('railResize');
+		const root = document.querySelector('.nx-root');
+		if (!rail || !handle || !root) {
+			return;
+		}
+
+		const RAIL_MIN = 140;
+		const RAIL_MAX = 360;
+		const RAIL_DEFAULT = 196;
+
+		function railMaxWidth() {
+			const half = Math.floor(root.getBoundingClientRect().width * 0.5);
+			return Math.max(RAIL_MIN, Math.min(RAIL_MAX, half));
+		}
+
+		function clampRailWidth(value) {
+			const n = Math.round(Number(value));
+			if (!isFinite(n)) {
+				return RAIL_DEFAULT;
+			}
+			const max = railMaxWidth();
+			if (n < RAIL_MIN) {
+				return RAIL_MIN;
+			}
+			if (n > max) {
+				return max;
+			}
+			return n;
+		}
+
+		function persistWebviewRailWidth(width) {
+			const prev = vscode.getState();
+			const next = prev && typeof prev === 'object' ? Object.assign({}, prev) : {};
+			next.sessionRailWidth = width;
+			vscode.setState(next);
+		}
+
+		function applyRailWidth(value, persistHost) {
+			const width = clampRailWidth(value);
+			rail.style.setProperty('--nx-rail-width', width + 'px');
+			persistWebviewRailWidth(width);
+			if (persistHost) {
+				vscode.postMessage({ type: 'persistSessionRailWidth', width: width });
+			}
+			return width;
+		}
+
+		let dragging = false;
+		let dragPointerId = 0;
+		let startX = 0;
+		let startWidth = 0;
+
+		handle.addEventListener('pointerdown', function (ev) {
+			if (ev.button !== 0) {
 				return;
 			}
-			vscode.postMessage({ type: 'deleteSession', sessionId: id });
-		};
-	}
+			dragging = true;
+			dragPointerId = ev.pointerId;
+			startX = ev.clientX;
+			startWidth = rail.getBoundingClientRect().width;
+			handle.setPointerCapture(ev.pointerId);
+			root.classList.add('is-railResizing');
+			ev.preventDefault();
+		});
+
+		handle.addEventListener('pointermove', function (ev) {
+			if (!dragging || ev.pointerId !== dragPointerId) {
+				return;
+			}
+			applyRailWidth(startWidth + (startX - ev.clientX), false);
+		});
+
+		function endRailDrag(ev) {
+			if (!dragging) {
+				return;
+			}
+			if (ev && ev.pointerId !== dragPointerId) {
+				return;
+			}
+			dragging = false;
+			root.classList.remove('is-railResizing');
+			applyRailWidth(rail.getBoundingClientRect().width, true);
+		}
+
+		handle.addEventListener('pointerup', endRailDrag);
+		handle.addEventListener('pointercancel', endRailDrag);
+
+		const vsState = vscode.getState();
+		const fromHost = initial.sessionRailWidth;
+		const fromWeb = vsState && typeof vsState.sessionRailWidth === 'number' ? vsState.sessionRailWidth : undefined;
+		const start = typeof fromHost === 'number' ? fromHost : (typeof fromWeb === 'number' ? fromWeb : RAIL_DEFAULT);
+		applyRailWidth(start, false);
+	})();
 
 	// Quick action buttons
 	document.querySelectorAll('.nx-quickBtn').forEach(btn => {
@@ -1190,7 +1794,19 @@
 
 		switch (data.type) {
 			case 'addMessage':
-				addMessage(data.role, data.content, data.isLoading);
+				addMessage(data.role, data.content, data.isLoading, data.stopped);
+				break;
+
+			case 'appendToken':
+				appendToken(data.content);
+				break;
+
+			case 'finishMessage':
+				finishMessage();
+				break;
+
+			case 'generationRunning':
+				setReplyInFlight(!!data.running);
 				break;
 
 			case 'chatActivity':
@@ -1269,6 +1885,10 @@
 				if (data.success && firstRunKey) {
 					firstRunKey.value = '';
 				}
+				break;
+
+			case 'atCompleteResults':
+				renderAtCompleteResults(data.items);
 				break;
 		}
 	});
