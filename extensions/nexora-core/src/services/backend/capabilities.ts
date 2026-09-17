@@ -216,27 +216,39 @@ async function fetchOnce(): Promise<CapabilitiesReport> {
 	return getBackendClient().getCapabilities();
 }
 
+async function isTokenizedClientReady(): Promise<boolean> {
+	const { isBackendClientConfigured } = await import('../backendClient');
+	return isBackendClientConfigured();
+}
+
 /**
  * Fetch /api/capabilities, cache it, and notify listeners.
- * Retries briefly so a ready-event cannot race the engine URL/token wiring.
+ * Waits for engine ready AND the tokenized BackendClient so first paint
+ * cannot 401. Retries cover transient network errors only.
  */
 export async function refreshCapabilities(): Promise<CapabilitiesReport | undefined> {
+	if (getEngineState() !== 'ready') {
+		cached = undefined;
+		changeEmitter.fire(undefined);
+		clearEmbeddingPoll();
+		return undefined;
+	}
+	if (!(await isTokenizedClientReady())) {
+		return undefined;
+	}
 	if (refreshInFlight) {
 		return refreshInFlight;
 	}
 	refreshInFlight = (async () => {
-		if (getEngineState() !== 'ready') {
-			cached = undefined;
-			changeEmitter.fire(undefined);
-			clearEmbeddingPoll();
-			return undefined;
-		}
 		let lastError: unknown;
 		for (let attempt = 0; attempt < FETCH_RETRY_MAX; attempt++) {
 			if (getEngineState() !== 'ready') {
 				cached = undefined;
 				changeEmitter.fire(undefined);
 				clearEmbeddingPoll();
+				return undefined;
+			}
+			if (!(await isTokenizedClientReady())) {
 				return undefined;
 			}
 			try {
@@ -274,9 +286,16 @@ function startCapabilitiesWatcher(): void {
 		cached = undefined;
 		changeEmitter.fire(undefined);
 	});
-	if (getEngineState() === 'ready') {
-		void refreshCapabilities();
-	}
+	void import('../backendClient').then((backend) => {
+		backend.onDidConfigureBackendClient(() => {
+			if (getEngineState() === 'ready') {
+				void refreshCapabilities();
+			}
+		});
+		if (getEngineState() === 'ready' && backend.isBackendClientConfigured()) {
+			void refreshCapabilities();
+		}
+	});
 }
 
 startCapabilitiesWatcher();

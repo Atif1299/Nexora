@@ -5,7 +5,7 @@
 
 import * as vscode from 'vscode';
 import { getPlatformsWebviewHtml } from './webview/platforms';
-import { getBackendClient } from './services/backendClient';
+import { getBackendClient, isBackendClientConfigured, onDidConfigureBackendClient } from './services/backendClient';
 import { getEngineState, onDidChangeEngineState } from './services/engineProcess';
 import {
 	capabilityReason,
@@ -67,6 +67,11 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 				void this.loadPlatforms();
 			}
 		});
+		onDidConfigureBackendClient(() => {
+			if (getEngineState() === 'ready') {
+				void this.loadPlatforms();
+			}
+		});
 		onDidChangeCapabilities((report) => {
 			this._applyCapabilities(report);
 			this._pushState();
@@ -74,7 +79,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 				void this.loadPlatforms();
 			}
 		});
-		if (getEngineState() === 'ready') {
+		if (getEngineState() === 'ready' && isBackendClientConfigured()) {
 			void this.loadPlatforms();
 		}
 	}
@@ -96,7 +101,10 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	}
 
 	async loadPlatforms(): Promise<void> {
-		if (getEngineState() !== 'ready') {
+		if (getEngineState() !== 'ready' || !isBackendClientConfigured()) {
+			return;
+		}
+		if (this.isLoading) {
 			return;
 		}
 
