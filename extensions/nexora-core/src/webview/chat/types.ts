@@ -21,6 +21,7 @@ export type WebviewInboundMessage =
 	| { type: 'newSession' }
 	| { type: 'switchSession'; sessionId: string }
 	| { type: 'deleteSession'; sessionId: string }
+	| { type: 'persistSessionRailWidth'; width: number }
 	| { type: 'approvePlan'; planId: string }
 	| { type: 'cancelPlan'; planId: string }
 	| { type: 'modifyPlan'; planId: string; modification: any }
@@ -31,16 +32,21 @@ export type WebviewInboundMessage =
 	| { type: 'indexWorkspace' }
 	| { type: 'executeRequest'; request: string; model?: string }
 	| { type: 'runAgent'; request: string; model?: string }
+	| { type: 'stopGeneration' }
 	| { type: 'confirmSaveTemplate'; planId: string; name: string; description: string; category: string; parameters: Array<{ name: string; source_value: string; type?: string; required?: boolean; description?: string }> }
 	| { type: 'cancelSaveTemplate' }
 	| { type: 'acceptSuggestion'; id: string }
 	| { type: 'dismissSuggestion'; id: string; permanent: boolean }
-	| { type: 'requestSuggestions' };
+	| { type: 'requestSuggestions' }
+	| { type: 'requestAtComplete'; prefix: string };
 
 export type ChatActivityItem = { id: string; label: string; done?: boolean };
 
 export type WebviewOutboundMessage =
-	| { type: 'addMessage'; role: 'user' | 'assistant'; content: string; isLoading: boolean }
+	| { type: 'addMessage'; role: 'user' | 'assistant'; content: string; isLoading: boolean; stopped?: boolean }
+	| { type: 'appendToken'; content: string }
+	| { type: 'finishMessage' }
+	| { type: 'generationRunning'; running: boolean }
 	| { type: 'chatActivity'; items: ChatActivityItem[] }
 	| { type: 'chatActivityClear' }
 	| { type: 'backendStatus'; connected: boolean }
@@ -56,7 +62,11 @@ export type WebviewOutboundMessage =
 	| { type: 'showSaveTemplate'; planId: string; parameters: any[] }
 	| { type: 'showSuggestion'; suggestion: any | null }
 	| { type: 'firstRunKeyCard'; show: boolean }
-	| { type: 'firstRunKeyResult'; success: boolean; error?: string };
+	| { type: 'firstRunKeyResult'; success: boolean; error?: string }
+	| {
+		type: 'atCompleteResults';
+		items: Array<{ icon: string; label: string; path: string; kind: 'file' | 'folder' }>;
+	};
 
 export type ChatInitialState = {
 	connected: boolean;
@@ -72,5 +82,6 @@ export type ChatInitialState = {
 	messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 	sessions?: Array<{ id: string; name: string }>;
 	activeSessionId?: string;
+	sessionRailWidth?: number;
 };
 
