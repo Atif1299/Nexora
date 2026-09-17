@@ -55,7 +55,7 @@
 			<button type="button" class="nx-node" data-id="${escapeHtml(entry.id)}" data-selected="${entry.id === selectedId ? 'true' : 'false'}">
 				<div class="nx-nodeTitle">
 					${escapeHtml(entry.summary || entry.id)}
-					${entry.is_newest ? '<span class="nx-newest">now</span>' : ''}
+					${entry.is_newest ? '<span class="nx-newest" title="Latest snapshot for this workspace">current</span>' : ''}
 				</div>
 				<div class="nx-nodeMeta">${escapeHtml(formatWhen(entry.created_at))} · ${escapeHtml(String(entry.file_count || 0))} files</div>
 			</button>
@@ -88,7 +88,7 @@
 				</div>
 			`;
 		} else if (detail.is_newest) {
-			diffHtml = '<div class="nx-diffBlock nx-muted">This is the current snapshot.</div>';
+			diffHtml = '<div class="nx-diffBlock nx-muted">This is the current snapshot. Title status is the run that produced it, not this capture.</div>';
 		}
 		root.innerHTML = `
 			<h3>${escapeHtml(detail.summary || detail.id)}</h3>
