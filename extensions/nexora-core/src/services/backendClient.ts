@@ -9,7 +9,7 @@ export interface BackendConfig {
 	localToken?: string;
 }
 
-import { createTransport, type HeaderProvider } from './backend/transport';
+import { createTransport, type HeaderProvider, type SSEEvent } from './backend/transport';
 import { createPlatformsApi } from './backend/platforms';
 import { createMemoryApi, type MemorySuggestion, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
 import { createWorkflowsApi, type WorkflowTemplate, type TemplateListResponse, type SuggestFromPlanResponse, type SaveFromPlanRequest, type ImportPreview } from './backend/workflows';
@@ -23,6 +23,7 @@ import { createStatusApi, type ConnectionsResponse, type TestResult, type Provid
 import { createCapabilitiesApi, type CapabilitiesReport } from './backend/capabilities';
 
 export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
+export type { SSEEvent };
 export type { ConnectionsResponse, TestResult, ProviderStatus };
 export type { CapabilitiesReport };
 export type { SaasConnector };
@@ -160,7 +161,7 @@ export class BackendClient {
 		message: string,
 		workspacePath?: string,
 		model?: string,
-		options?: { session_id?: string; workspace_id?: string }
+		options?: { session_id?: string; workspace_id?: string; signal?: AbortSignal }
 	): Promise<{ response: string; model_used: string }> {
 		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string } = {
 			message,
@@ -173,7 +174,30 @@ export class BackendClient {
 		if (options?.workspace_id) {
 			body.workspace_id = options.workspace_id;
 		}
-		return this.transport.post('/api/cognitive/chat', body);
+		return this.transport.post('/api/cognitive/chat', body, undefined, options?.signal);
+	}
+
+	/**
+	 * Stream a chat reply as SSE events (token, done, error).
+	 */
+	chatStream(
+		message: string,
+		workspacePath?: string,
+		model?: string,
+		options?: { session_id?: string; workspace_id?: string; signal?: AbortSignal }
+	): AsyncIterable<SSEEvent> {
+		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string } = {
+			message,
+			workspace_path: workspacePath,
+			model
+		};
+		if (options?.session_id) {
+			body.session_id = options.session_id;
+		}
+		if (options?.workspace_id) {
+			body.workspace_id = options.workspace_id;
+		}
+		return this.transport.postStream('/api/cognitive/chat/stream', body, options?.signal);
 	}
 
 	/**
@@ -192,9 +216,41 @@ export class BackendClient {
 		workspacePath?: string,
 		model?: string,
 		mode: AgentMode = 'ask',
-		sessionId?: string
+		sessionId?: string,
+		signal?: AbortSignal
 	): Promise<AgentTurnResponse> {
-		return createAgentApi(this.transport).agentTurn(messages, workspaceId, workspacePath, model, mode, sessionId);
+		return createAgentApi(this.transport).agentTurn(
+			messages,
+			workspaceId,
+			workspacePath,
+			model,
+			mode,
+			sessionId,
+			signal
+		);
+	}
+
+	/**
+	 * Stream one agent turn as SSE events (token, tool_calls, done, error).
+	 */
+	agentTurnStream(
+		messages: AgentMessage[],
+		workspaceId: string,
+		workspacePath?: string,
+		model?: string,
+		mode: AgentMode = 'ask',
+		sessionId?: string,
+		signal?: AbortSignal
+	): AsyncIterable<SSEEvent> {
+		return createAgentApi(this.transport).agentTurnStream(
+			messages,
+			workspaceId,
+			workspacePath,
+			model,
+			mode,
+			sessionId,
+			signal
+		);
 	}
 
 	/**
@@ -708,10 +764,46 @@ export class BackendClient {
 }
 
 let instance: BackendClient | null = null;
+let backendClientConfigured = false;
+const configuredListeners: Array<() => void> = [];
+
+export function isBackendClientConfigured(): boolean {
+	return backendClientConfigured;
+}
+
+export function onDidConfigureBackendClient(listener: () => void): { dispose(): void } {
+	configuredListeners.push(listener);
+	return {
+		dispose(): void {
+			const index = configuredListeners.indexOf(listener);
+			if (index >= 0) {
+				configuredListeners.splice(index, 1);
+			}
+		}
+	};
+}
+
+/**
+ * Mark the HTTP client as wired (base URL + local token). First-paint
+ * fetches must wait for this so /api/capabilities and /api/platforms
+ * never go out without X-Nexora-Local-Token.
+ */
+export function notifyBackendClientConfigured(): void {
+	if (backendClientConfigured) {
+		return;
+	}
+	backendClientConfigured = true;
+	for (const listener of configuredListeners.slice()) {
+		listener();
+	}
+}
 
 export function getBackendClient(config?: Partial<BackendConfig>): BackendClient {
 	if (!instance || config) {
 		instance = new BackendClient(config);
+	}
+	if (config && typeof config.localToken === 'string' && config.localToken.length > 0) {
+		notifyBackendClientConfigured();
 	}
 	return instance;
 }
