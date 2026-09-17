@@ -3,7 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { Transport } from './transport';
+import type { SSEEvent, Transport } from './transport';
+
+/** Agent turns call LiteLLM with tools; 30s aborts a healthy first completion. */
+const AGENT_TURN_TIMEOUT_MS = 120000;
 
 export interface AgentMessage {
 	role: 'system' | 'user' | 'assistant' | 'tool';
@@ -46,7 +49,8 @@ export function createAgentApi(transport: Transport) {
 			workspacePath?: string,
 			model?: string,
 			mode: AgentMode = 'ask',
-			sessionId?: string
+			sessionId?: string,
+			signal?: AbortSignal
 		): Promise<AgentTurnResponse> => {
 			return await transport.post('/api/agent/turn', {
 				messages,
@@ -56,7 +60,30 @@ export function createAgentApi(transport: Transport) {
 				mode,
 				max_tokens: 2048,
 				session_id: sessionId
-			});
+			}, AGENT_TURN_TIMEOUT_MS, signal);
+		},
+
+		/**
+		 * Stream one agent turn as SSE events (token, tool_calls, done, error).
+		 */
+		agentTurnStream: (
+			messages: AgentMessage[],
+			workspaceId: string,
+			workspacePath?: string,
+			model?: string,
+			mode: AgentMode = 'ask',
+			sessionId?: string,
+			signal?: AbortSignal
+		): AsyncIterable<SSEEvent> => {
+			return transport.postStream('/api/agent/turn/stream', {
+				messages,
+				workspace_id: workspaceId,
+				workspace_path: workspacePath,
+				model,
+				mode,
+				max_tokens: 2048,
+				session_id: sessionId
+			}, signal, AGENT_TURN_TIMEOUT_MS);
 		},
 
 		/**
