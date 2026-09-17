@@ -12,7 +12,7 @@ import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { SettingsPanelProvider } from './settingsPanel';
 import { TemplatesPanelProvider } from './templatesPanel';
 import { TimelinePanelProvider } from './timelinePanel';
-import { getBackendClient, setApiKeyHeaderProvider } from './services/backendClient';
+import { getBackendClient, notifyBackendClientConfigured, setApiKeyHeaderProvider } from './services/backendClient';
 import { getSettingsService } from './services/settingsService';
 import { getNotificationService } from './services/notificationService';
 import { getOrchestrationWebSocket, disposeWebSocket, type WebSocketMessage } from './services/websocketClient';
@@ -26,6 +26,7 @@ import {
 	type EngineState
 } from './services/engineProcess';
 import { enginePlaceholderHtml, engineStateLabel } from './services/editorPage';
+import { nexoraDiffProvider, NEXORA_DIFF_SCHEME } from './services/tools/diffProvider';
 
 async function setOperationInProgress(value: boolean): Promise<void> {
 	await vscode.commands.executeCommand('setContext', 'nexora.operationInProgress', value);
@@ -207,6 +208,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	void setOperationInProgress(false);
 	void setChatFocused(false);
 
+	context.subscriptions.push(
+		vscode.workspace.registerTextDocumentContentProvider(NEXORA_DIFF_SCHEME, nexoraDiffProvider),
+		nexoraDiffProvider
+	);
+
 	const engineStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
 	engineStatusBar.name = 'Nexora Engine';
 	updateEngineStatusBar(engineStatusBar, getEngineState());
@@ -288,6 +294,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		baseUrl: engine.baseUrl,
 		localToken: engine.localToken
 	});
+	notifyBackendClientConfigured();
 	for (const gated of gatedProviders) {
 		gated.notifyClientConfigured();
 	}

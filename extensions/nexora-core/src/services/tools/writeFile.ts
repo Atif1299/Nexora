@@ -3,10 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as vscode from 'vscode';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import type { ToolResult } from './executor';
+import { previewDiffAndConfirm } from './diffProvider';
 
 const SKIP_PATTERNS = ['.env', '.pem', 'credentials', 'secret', '.key', 'node_modules', '.git'];
 
@@ -28,7 +28,7 @@ function isSensitivePath(filePath: string): boolean {
 
 /**
  * Write or create a file in the workspace.
- * Shows confirmation dialog before writing.
+ * Shows a vscode.diff preview with Accept / Reject before writing.
  */
 export async function writeFileTool(
 	workspaceRoot: string,
@@ -55,20 +55,17 @@ export async function writeFileTool(
 	const fullPath = path.resolve(workspaceRoot, filePath);
 	const isNewFile = !await fs.access(fullPath).then(() => true).catch(() => false);
 
-	// Show confirmation dialog
 	if (requireConfirmation) {
-		const action = isNewFile ? 'Create' : 'Overwrite';
-		const result = await vscode.window.showWarningMessage(
-			`${action} file: ${filePath}?`,
-			{ modal: true, detail: `Content: ${content.slice(0, 200)}${content.length > 200 ? '...' : ''}` },
-			'Yes',
-			'No'
-		);
-
-		if (result !== 'Yes') {
+		const accepted = await previewDiffAndConfirm({
+			filePath,
+			fullPath,
+			proposedContent: content,
+			existsOnDisk: !isNewFile
+		});
+		if (!accepted) {
 			return {
 				success: false,
-				error: 'User cancelled file write'
+				error: 'User rejected'
 			};
 		}
 	}

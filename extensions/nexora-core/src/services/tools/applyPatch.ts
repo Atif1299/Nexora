@@ -3,10 +3,10 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as vscode from 'vscode';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import type { ToolResult } from './executor';
+import { previewDiffAndConfirm } from './diffProvider';
 
 const SKIP_PATTERNS = ['.env', '.pem', 'credentials', 'secret', '.key', 'node_modules', '.git'];
 
@@ -78,24 +78,17 @@ export async function applyPatchTool(
 		// Build new content
 		const newContent = content.replace(oldText, newText);
 
-		// Show confirmation with diff preview
 		if (requireConfirmation) {
-			const preview =
-				`File: ${filePath}\n\n` +
-				`--- OLD ---\n${oldText.slice(0, 300)}${oldText.length > 300 ? '...' : ''}\n\n` +
-				`+++ NEW +++\n${newText.slice(0, 300)}${newText.length > 300 ? '...' : ''}`;
-
-			const result = await vscode.window.showWarningMessage(
-				`Apply patch to ${filePath}?`,
-				{ modal: true, detail: preview },
-				'Apply',
-				'Cancel'
-			);
-
-			if (result !== 'Apply') {
+			const accepted = await previewDiffAndConfirm({
+				filePath,
+				fullPath,
+				proposedContent: newContent,
+				existsOnDisk: true
+			});
+			if (!accepted) {
 				return {
 					success: false,
-					error: 'User cancelled patch'
+					error: 'User rejected'
 				};
 			}
 		}
@@ -158,28 +151,24 @@ export async function insertLinesTool(
 		// Validate line number
 		const insertAt = Math.max(0, Math.min(lineNumber - 1, contentLines.length));
 
-		// Show confirmation
-		if (requireConfirmation) {
-			const preview = `Insert at line ${lineNumber}:\n${lines.slice(0, 200)}${lines.length > 200 ? '...' : ''}`;
-			const result = await vscode.window.showWarningMessage(
-				`Insert lines into ${filePath}?`,
-				{ modal: true, detail: preview },
-				'Insert',
-				'Cancel'
-			);
-
-			if (result !== 'Insert') {
-				return {
-					success: false,
-					error: 'User cancelled insertion'
-				};
-			}
-		}
-
-		// Insert lines
 		const newLines = lines.split('\n');
 		contentLines.splice(insertAt, 0, ...newLines);
 		const newContent = contentLines.join('\n');
+
+		if (requireConfirmation) {
+			const accepted = await previewDiffAndConfirm({
+				filePath,
+				fullPath,
+				proposedContent: newContent,
+				existsOnDisk: true
+			});
+			if (!accepted) {
+				return {
+					success: false,
+					error: 'User rejected'
+				};
+			}
+		}
 
 		await fs.writeFile(fullPath, newContent, 'utf8');
 
