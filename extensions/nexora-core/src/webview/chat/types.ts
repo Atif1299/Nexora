@@ -30,6 +30,7 @@ export type WebviewInboundMessage =
 	| { type: 'rollback'; historyId: number }
 	| { type: 'browsePlatforms' }
 	| { type: 'indexWorkspace' }
+	| { type: 'showEngineOutput' }
 	| { type: 'executeRequest'; request: string; model?: string }
 	| { type: 'runAgent'; request: string; model?: string }
 	| { type: 'stopGeneration' }
@@ -40,7 +41,7 @@ export type WebviewInboundMessage =
 	| { type: 'requestSuggestions' }
 	| { type: 'requestAtComplete'; prefix: string };
 
-export type ChatActivityItem = { id: string; label: string; done?: boolean };
+export type ChatActivityItem = { id: string; label: string; done?: boolean; turn?: number; totalTurns?: number };
 
 export type WebviewOutboundMessage =
 	| { type: 'addMessage'; role: 'user' | 'assistant'; content: string; isLoading: boolean; stopped?: boolean }
@@ -66,7 +67,8 @@ export type WebviewOutboundMessage =
 	| {
 		type: 'atCompleteResults';
 		items: Array<{ icon: string; label: string; path: string; kind: 'file' | 'folder' }>;
-	};
+	}
+	| { type: 'costUpdate'; cost_usd: number; tokens_in: number; tokens_out: number };
 
 export type ChatInitialState = {
 	connected: boolean;

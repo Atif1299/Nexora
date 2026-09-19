@@ -38,8 +38,13 @@
 
 	let lastLoadingMessage = null;
 	let chatActivityCard = null;
+	let costTickerEl = null;
+	let totalCostUsd = 0;
+	let totalTokensIn = 0;
+	let totalTokensOut = 0;
 	let currentPlan = null;
 	let planCardElement = null;
+	const shownEscalationKeys = {};
 	let currentSuggestionId = null;
 	let saveTemplateCard = null;
 	let currentMode = 'chat';
@@ -882,6 +887,13 @@
 			chatActivityCard.remove();
 		}
 		chatActivityCard = null;
+		if (costTickerEl && costTickerEl.parentNode) {
+			costTickerEl.remove();
+		}
+		costTickerEl = null;
+		totalCostUsd = 0;
+		totalTokensIn = 0;
+		totalTokensOut = 0;
 	}
 
 	function renderChatActivity(items) {
@@ -903,8 +915,11 @@
 			const title = document.createElement('span');
 			title.className = 'nx-activityCardTitle';
 			title.textContent = 'Activity';
+			const turnCounter = document.createElement('span');
+			turnCounter.className = 'nx-activityTurnCounter';
 			headerBtn.appendChild(chev);
 			headerBtn.appendChild(title);
+			headerBtn.appendChild(turnCounter);
 			const body = document.createElement('div');
 			body.className = 'nx-activityCardBody';
 			card.appendChild(headerBtn);
@@ -919,6 +934,16 @@
 			});
 			chatActivityCard = card;
 		}
+		// Update turn counter in header from agent item
+		const turnCounterEl = chatActivityCard.querySelector('.nx-activityTurnCounter');
+		if (turnCounterEl) {
+			const agentIt = list.find(function (it) { return it.id === 'agent' && it.turn !== null && it.turn !== undefined; });
+			if (agentIt && agentIt.totalTurns) {
+				turnCounterEl.textContent = 'Turn ' + agentIt.turn + '/' + agentIt.totalTurns;
+			} else {
+				turnCounterEl.textContent = '';
+			}
+		}
 		const bodyEl = chatActivityCard.querySelector('.nx-activityCardBody');
 		if (!bodyEl) {
 			return;
@@ -930,11 +955,24 @@
 			row.setAttribute('data-activity-id', it.id);
 			const mark = document.createElement('span');
 			mark.className = 'nx-activityMark';
-			mark.textContent = it.done ? '+' : '.';
+			if (it.done) {
+				mark.textContent = '+';
+			} else {
+				// Spinner for in-progress items
+				const spinner = document.createElement('span');
+				spinner.className = 'nx-activitySpinner';
+				spinner.setAttribute('aria-hidden', 'true');
+				mark.appendChild(spinner);
+			}
+			// File icon for file tools
+			const fileIcon = _makeActivityFileIcon(it.label || '');
 			const lab = document.createElement('span');
 			lab.className = 'nx-activityLabel';
 			lab.textContent = it.label || '';
 			row.appendChild(mark);
+			if (fileIcon) {
+				row.appendChild(fileIcon);
+			}
 			row.appendChild(lab);
 			bodyEl.appendChild(row);
 		});
@@ -944,6 +982,55 @@
 			messages.appendChild(chatActivityCard);
 		}
 		messages.scrollTop = messages.scrollHeight;
+	}
+
+	function _makeActivityFileIcon(label) {
+		const lower = label.toLowerCase();
+		let iconClass = '';
+		let iconText = '';
+		if (lower.startsWith('write_file:') || lower.startsWith('apply_patch:') || lower.startsWith('insert_lines:')) {
+			iconClass = 'nx-activityFileIcon nx-activityFileIconWrite';
+			iconText = 'W';
+		} else if (lower.startsWith('read_file:')) {
+			iconClass = 'nx-activityFileIcon nx-activityFileIconRead';
+			iconText = 'R';
+		} else if (lower.startsWith('search_codebase:') || lower.startsWith('grep:') || lower.startsWith('search_chat_history:')) {
+			iconClass = 'nx-activityFileIcon nx-activityFileIconSearch';
+			iconText = 'S';
+		}
+		if (!iconText) {
+			return null;
+		}
+		const span = document.createElement('span');
+		span.className = iconClass;
+		span.textContent = iconText;
+		return span;
+	}
+
+	function updateCostTicker(costUsd, tokensIn, tokensOut) {
+		if (!messages) {
+			return;
+		}
+		totalCostUsd += costUsd;
+		totalTokensIn += tokensIn;
+		totalTokensOut += tokensOut;
+		if (!costTickerEl) {
+			costTickerEl = document.createElement('div');
+			costTickerEl.className = 'nx-costTicker';
+		}
+		const totalTokens = totalTokensIn + totalTokensOut;
+		const kTokens = totalTokens >= 1000
+			? (totalTokens / 1000).toFixed(1) + 'K'
+			: String(totalTokens);
+		costTickerEl.textContent = '$' + totalCostUsd.toFixed(4) + ' -- ' + kTokens + ' tokens';
+		if (chatActivityCard && chatActivityCard.parentNode) {
+			const next = chatActivityCard.nextSibling;
+			if (next !== costTickerEl) {
+				chatActivityCard.parentNode.insertBefore(costTickerEl, next);
+			}
+		} else if (!costTickerEl.parentNode) {
+			messages.appendChild(costTickerEl);
+		}
 	}
 
 	function addMessage(role, content, isLoading, stopped) {
@@ -1241,7 +1328,12 @@
 	}
 
 	function showUserEscalation(data) {
-		// Show escalation card as structured HTML (do not route through isLoading text path)
+		const taskKey = (data.planId || '') + ':' + (data.taskId || data.taskName || 'task');
+		if (shownEscalationKeys[taskKey]) {
+			return;
+		}
+		shownEscalationKeys[taskKey] = true;
+
 		const platformsTried = data.platformsTried || [data.platform];
 		const platformList = (platformsTried || []).join(', ');
 
@@ -1251,6 +1343,7 @@
 
 		const div = document.createElement('div');
 		div.className = 'nx-msg nx-assistant';
+		div.setAttribute('data-escalation-key', taskKey);
 
 		const header = document.createElement('div');
 		header.className = 'nx-msgHeader';
@@ -1262,7 +1355,7 @@
 			<div class="nx-escalation">
 				<div class="nx-escalationHeader">
 					<span class="nx-escalationIcon">!</span>
-					<strong>Task Failed - User Attention Required</strong>
+					<strong>Task failed</strong>
 				</div>
 				<div class="nx-escalationBody">
 					<div class="nx-escalationTask">
@@ -1270,12 +1363,14 @@
 						<span class="nx-escalationOp">${escapeHtml(data.operation || 'unknown')}</span>
 					</div>
 					<div class="nx-escalationDetails">
-						<div><span class="nx-escalationLabel">Platforms tried:</span> ${escapeHtml(platformList)}</div>
-						<div><span class="nx-escalationLabel">Total attempts:</span> ${data.totalAttempts || 'multiple'}</div>
+						<div><span class="nx-escalationLabel">Platform:</span> ${escapeHtml(platformList)}</div>
 						<div class="nx-escalationError"><span class="nx-escalationLabel">Error:</span> ${escapeHtml(data.error || 'Unknown error')}</div>
 					</div>
 					<div class="nx-escalationMessage">
-						${escapeHtml(data.message || 'All retry and fallback attempts have been exhausted.')}
+						${escapeHtml(data.message || 'This step failed. Engine logs are in the Nexora Engine output channel.')}
+					</div>
+					<div class="nx-escalationActions">
+						<button type="button" class="nx-openEngineOutput">Open Nexora Output</button>
 					</div>
 				</div>
 			</div>
@@ -1315,6 +1410,11 @@
 	}
 
 	function showPlanExecuting(planId) {
+		Object.keys(shownEscalationKeys).forEach(function (key) {
+			if (key.indexOf(planId + ':') === 0) {
+				delete shownEscalationKeys[key];
+			}
+		});
 		const actionsEl = document.getElementById('plan-actions-' + planId);
 		if (actionsEl) {
 			actionsEl.innerHTML = `
@@ -1647,6 +1747,10 @@
 			setTimeout(() => (target.textContent = old), 800);
 		}
 
+		if (target.closest && target.closest('.nx-openEngineOutput')) {
+			vscode.postMessage({ type: 'showEngineOutput' });
+		}
+
 		if (target.classList.contains('nx-approveBtn')) {
 			const planId = target.getAttribute('data-plan-id');
 			if (planId) {
@@ -1889,6 +1993,10 @@
 
 			case 'atCompleteResults':
 				renderAtCompleteResults(data.items);
+				break;
+
+			case 'costUpdate':
+				updateCostTicker(data.cost_usd, data.tokens_in, data.tokens_out);
 				break;
 		}
 	});

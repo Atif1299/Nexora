@@ -17,6 +17,7 @@ export type SSEEvent = {
 	tool_calls?: Array<{ id: string; name: string; arguments: Record<string, any> }>;
 	model_used?: string;
 	message?: string;
+	usage?: { prompt_tokens: number; completion_tokens: number };
 };
 
 export type Transport = {

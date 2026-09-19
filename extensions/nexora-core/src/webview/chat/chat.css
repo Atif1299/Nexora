@@ -1320,25 +1320,26 @@ body
 {
 	max-width: 760px;
 	margin: 0 auto var(--nx-space-3) auto;
-	border: 1px solid var(--nx-border);
-	border-radius: var(--nx-radius-2);
-	background: var(--nx-surface);
+	border: 1px solid color-mix(in srgb, var(--nx-border) 80%, transparent);
+	border-radius: var(--nx-radius-1);
+	background: color-mix(in srgb, var(--nx-surface) 70%, transparent);
 	overflow: hidden;
 }
 
 .nx-planHeader
 {
-	padding: var(--nx-space-4);
-	background: color-mix(in srgb, var(--nx-primary) 8%, var(--nx-surface));
-	border-bottom: 1px solid var(--nx-border);
+	padding: 10px 14px 8px;
+	background: transparent;
+	border-bottom: 1px solid color-mix(in srgb, var(--nx-border) 70%, transparent);
 }
 
 .nx-planTitle
 {
-	font-size: 14px;
+	font-size: 12px;
 	font-weight: 600;
-	letter-spacing: -0.01em;
-	margin-bottom: var(--nx-space-2);
+	letter-spacing: 0.01em;
+	margin-bottom: 4px;
+	color: var(--nx-fg);
 }
 
 .nx-planMeta
@@ -1555,9 +1556,9 @@ body
 
 .nx-planActions
 {
-	padding: var(--nx-space-4);
-	background: var(--nx-surface-2);
-	border-top: 1px solid var(--nx-border);
+	padding: 8px 14px;
+	background: transparent;
+	border-top: 1px solid color-mix(in srgb, var(--nx-border) 70%, transparent);
 	display: flex;
 	gap: var(--nx-space-2);
 	justify-content: flex-end;
@@ -1595,8 +1596,8 @@ body
 {
 	display: flex;
 	align-items: center;
-	gap: var(--nx-space-3);
-	padding: 12px 16px;
+	gap: var(--nx-space-2);
+	padding: 8px 4px;
 	border-radius: var(--nx-radius-1);
 	font-size: 12px;
 	font-weight: 500;
@@ -1605,13 +1606,13 @@ body
 
 .nx-planSuccess
 {
-	background: color-mix(in srgb, var(--vscode-charts-green) 12%, transparent);
+	background: transparent;
 	color: var(--vscode-charts-green);
 }
 
 .nx-planFailed
 {
-	background: color-mix(in srgb, var(--vscode-charts-red) 12%, transparent);
+	background: transparent;
 	color: var(--vscode-charts-red);
 }
 
@@ -1655,13 +1656,14 @@ body
 .nx-approveBtn,
 .nx-cancelBtn,
 .nx-saveConfirm,
-.nx-saveCancel
+.nx-saveCancel,
+.nx-openEngineOutput
 {
-	padding: 8px 16px;
+	padding: 5px 11px;
 	border: none;
 	border-radius: var(--nx-radius-1);
 	cursor: pointer;
-	font-size: 12px;
+	font-size: 11px;
 	font-weight: 500;
 }
 
@@ -1786,11 +1788,79 @@ body
 	word-break: break-word;
 }
 
-/* User escalation notification (Week 10/11) */
+/* Spinner for in-progress activity rows */
+.nx-activitySpinner
+{
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	border: 1.5px solid color-mix(in srgb, var(--nx-muted) 35%, transparent);
+	border-top-color: var(--nx-primary);
+	border-radius: 50%;
+	animation: spin 0.8s linear infinite;
+	vertical-align: middle;
+}
+
+/* Turn counter in activity card header */
+.nx-activityTurnCounter
+{
+	font-size: 9px;
+	color: var(--nx-muted);
+	margin-left: auto;
+	font-variant-numeric: tabular-nums;
+	opacity: 0.75;
+}
+
+/* File icon badge in activity rows */
+.nx-activityFileIcon
+{
+	flex-shrink: 0;
+	font-size: 9px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	padding: 0 3px;
+	border-radius: 3px;
+	line-height: 1.5;
+	color: var(--nx-muted);
+	background: color-mix(in srgb, var(--nx-muted) 12%, transparent);
+}
+
+.nx-activityFileIconWrite
+{
+	color: var(--vscode-charts-orange, #d29922);
+	background: color-mix(in srgb, var(--vscode-charts-orange, #d29922) 14%, transparent);
+}
+
+.nx-activityFileIconRead
+{
+	color: var(--vscode-charts-blue, #58a6ff);
+	background: color-mix(in srgb, var(--vscode-charts-blue, #58a6ff) 14%, transparent);
+}
+
+.nx-activityFileIconSearch
+{
+	color: var(--vscode-charts-purple, #a371f7);
+	background: color-mix(in srgb, var(--vscode-charts-purple, #a371f7) 14%, transparent);
+}
+
+/* Running cost ticker under activity card */
+.nx-costTicker
+{
+	font-family: var(--nx-font-mono);
+	font-size: 10px;
+	color: var(--nx-muted);
+	padding: 2px var(--nx-space-3);
+	margin-top: -4px;
+	margin-bottom: var(--nx-space-2);
+	opacity: 0.8;
+}
+
+/* Failure card (one per task; quiet, still clearly failed) */
 .nx-escalation
 {
-	background: color-mix(in srgb, var(--vscode-inputValidation-warningBackground, #5c4813) 30%, var(--nx-surface));
-	border: 1px solid var(--vscode-inputValidation-warningBorder, #856d00);
+	background: var(--nx-surface);
+	border: 1px solid color-mix(in srgb, var(--nx-border) 80%, transparent);
+	border-left: 2px solid var(--vscode-charts-red, #f85149);
 	border-radius: var(--nx-radius-1);
 	overflow: hidden;
 }
@@ -1800,9 +1870,9 @@ body
 	display: flex;
 	align-items: center;
 	gap: var(--nx-space-2);
-	padding: var(--nx-space-2) var(--nx-space-3);
-	background: color-mix(in srgb, var(--vscode-inputValidation-warningBackground, #5c4813) 50%, transparent);
-	border-bottom: 1px solid var(--vscode-inputValidation-warningBorder, #856d00);
+	padding: 8px 12px 4px;
+	background: transparent;
+	border-bottom: none;
 }
 
 .nx-escalationIcon
@@ -1810,24 +1880,27 @@ body
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 20px;
-	height: 20px;
-	background: var(--vscode-inputValidation-warningBorder, #856d00);
-	color: var(--nx-bg);
-	border-radius: 50%;
+	width: 14px;
+	height: 14px;
+	background: transparent;
+	color: var(--vscode-charts-red, #f85149);
+	border-radius: 0;
 	font-size: 12px;
 	font-weight: 700;
 }
 
 .nx-escalationHeader strong
 {
-	color: var(--vscode-inputValidation-warningForeground, #cca700);
-	font-size: 12px;
+	color: var(--nx-muted);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+	text-transform: uppercase;
 }
 
 .nx-escalationBody
 {
-	padding: var(--nx-space-3);
+	padding: 4px 12px 10px;
 }
 
 .nx-escalationTask
@@ -1835,12 +1908,12 @@ body
 	display: flex;
 	align-items: center;
 	gap: var(--nx-space-2);
-	margin-bottom: var(--nx-space-2);
+	margin-bottom: 6px;
 }
 
 .nx-escalationTask strong
 {
-	font-size: 13px;
+	font-size: 12px;
 }
 
 .nx-escalationOp
@@ -1849,7 +1922,7 @@ body
 	font-size: 10px;
 	color: var(--nx-muted);
 	background: var(--nx-surface-2);
-	padding: 2px 6px;
+	padding: 1px 6px;
 	border-radius: var(--nx-radius-1);
 }
 
@@ -1857,17 +1930,17 @@ body
 {
 	font-size: 11px;
 	color: var(--nx-muted);
-	margin-bottom: var(--nx-space-2);
+	margin-bottom: 6px;
 }
 
 .nx-escalationDetails>div
 {
-	padding: 2px 0;
+	padding: 1px 0;
 }
 
 .nx-escalationLabel
 {
-	color: var(--nx-fg);
+	color: var(--nx-muted);
 	font-weight: 500;
 }
 
@@ -1880,8 +1953,27 @@ body
 {
 	font-size: 12px;
 	color: var(--nx-fg);
-	padding-top: var(--nx-space-2);
-	border-top: 1px solid var(--nx-border);
+	padding-top: 6px;
+	border-top: 1px solid color-mix(in srgb, var(--nx-border) 60%, transparent);
+}
+
+.nx-escalationActions
+{
+	display: flex;
+	gap: 6px;
+	margin-top: 8px;
+}
+
+.nx-openEngineOutput
+{
+	background: transparent;
+	border: 1px solid var(--nx-border);
+	color: var(--nx-fg);
+}
+
+.nx-openEngineOutput:hover
+{
+	background: color-mix(in srgb, var(--nx-fg) 8%, transparent);
 }
 
 /* @ mention autocomplete dropdown */
