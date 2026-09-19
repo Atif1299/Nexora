@@ -253,8 +253,11 @@ export async function refreshCapabilities(): Promise<CapabilitiesReport | undefi
 			}
 			try {
 				const report = await fetchOnce();
+				const changed = JSON.stringify(cached) !== JSON.stringify(report);
 				cached = report;
-				changeEmitter.fire(report);
+				if (changed) {
+					changeEmitter.fire(report);
+				}
 				scheduleEmbeddingPoll(report);
 				return report;
 			} catch (error) {

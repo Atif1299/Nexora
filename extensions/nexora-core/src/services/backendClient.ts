@@ -51,6 +51,8 @@ async function resolveApiKeyHeaders(): Promise<Record<string, string>> {
 export class BackendClient {
 	private config: BackendConfig;
 	private transport: ReturnType<typeof createTransport>;
+	private _healthyUntil = 0;
+	private _healthInflight?: Promise<boolean>;
 
 	constructor(config?: Partial<BackendConfig>) {
 		this.config = {
@@ -67,11 +69,33 @@ export class BackendClient {
 		return this.config.baseUrl;
 	}
 
+	markUnhealthy(): void {
+		this._healthyUntil = 0;
+	}
+
 	async checkHealth(): Promise<boolean> {
+		if (Date.now() < this._healthyUntil) {
+			return true;
+		}
+		if (this._healthInflight) {
+			return this._healthInflight;
+		}
+		this._healthInflight = this._checkHealthOnce();
+		try {
+			return await this._healthInflight;
+		} finally {
+			this._healthInflight = undefined;
+		}
+	}
+
+	private async _checkHealthOnce(): Promise<boolean> {
 		try {
 			const response = await this.transport.get('/api/health');
-			return response?.status === 'ok';
+			const ok = response?.status === 'ok';
+			this._healthyUntil = ok ? Date.now() + 20_000 : 0;
+			return ok;
 		} catch {
+			this._healthyUntil = 0;
 			return false;
 		}
 	}
@@ -597,8 +621,8 @@ export class BackendClient {
 		return createOrchestrateApi(this.transport).estimatePlan(request, userId, workspacePath, model);
 	}
 
-	async getAnalyticsDashboard(userId: string = 'default'): Promise<AnalyticsDashboardData> {
-		return createAnalyticsApi(this.transport).getDashboard(userId);
+	async getAnalyticsDashboard(userId: string = 'default', force = false): Promise<AnalyticsDashboardData> {
+		return createAnalyticsApi(this.transport).getDashboard(userId, force);
 	}
 
 	async getCostSummary(userId: string = 'default'): Promise<CostSummary> {
