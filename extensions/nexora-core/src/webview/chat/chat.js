@@ -38,6 +38,9 @@
 
 	let lastLoadingMessage = null;
 	let chatActivityCard = null;
+	let lastActivityItems = [];
+	let lastActivityCaption = '';
+	let activityLogExpanded = {};
 	let costTickerEl = null;
 	let totalCostUsd = 0;
 	let totalTokensIn = 0;
@@ -60,6 +63,7 @@
 	let atCompleteOpen = false;
 	let atCompletePrefixStart = -1;
 	let atCompleteSuppressEnter = false;
+	let submitWithCtrlEnter = !!initial.submitWithCtrlEnter;
 
 	const modeHints = {
 		'chat': 'Chat mode: Have a conversation, ask questions, get explanations',
@@ -454,8 +458,9 @@
 		if (sendBtnText) {
 			sendBtnText.textContent = label;
 		}
-		sendBtn.title = `${label} (Enter)`;
-		sendBtn.setAttribute('aria-label', `${label}, press Enter`);
+		const chord = submitWithCtrlEnter ? 'Ctrl+Enter' : 'Enter';
+		sendBtn.title = `${label} (${chord})`;
+		sendBtn.setAttribute('aria-label', `${label}, press ${chord}`);
 	}
 
 	function setReplyInFlight(running) {
@@ -887,6 +892,9 @@
 			chatActivityCard.remove();
 		}
 		chatActivityCard = null;
+		lastActivityItems = [];
+		lastActivityCaption = '';
+		activityLogExpanded = {};
 		if (costTickerEl && costTickerEl.parentNode) {
 			costTickerEl.remove();
 		}
@@ -896,11 +904,150 @@
 		totalTokensOut = 0;
 	}
 
-	function renderChatActivity(items) {
+	function formatElapsedMs(ms) {
+		const totalSec = Math.max(0, Math.floor((ms || 0) / 1000));
+		const m = Math.floor(totalSec / 60);
+		const s = totalSec % 60;
+		return m + ':' + String(s).padStart(2, '0');
+	}
+
+	function updateLoadingCaption(caption) {
+		if (!caption || !lastLoadingMessage) {
+			return;
+		}
+		const body = lastLoadingMessage.querySelector('.nx-msgBody');
+		if (!body || body.getAttribute('data-nx-streaming') === '1') {
+			return;
+		}
+		body.textContent = caption;
+	}
+
+	function terminalStatusLabel(it) {
+		const status = it.status || (it.done ? 'succeeded' : 'running');
+		if (status === 'confirming') {
+			return 'Allow';
+		}
+		if (status === 'running') {
+			return formatElapsedMs(it.elapsedMs);
+		}
+		if (status === 'succeeded') {
+			return formatElapsedMs(it.elapsedMs) + ' · exit 0';
+		}
+		if (status === 'failed') {
+			const code = it.exitCode === undefined || it.exitCode === null ? '?' : String(it.exitCode);
+			return formatElapsedMs(it.elapsedMs) + ' · exit ' + code;
+		}
+		if (status === 'timeout') {
+			return formatElapsedMs(it.elapsedMs) + ' · timed out';
+		}
+		if (status === 'cancelled') {
+			return 'cancelled';
+		}
+		return formatElapsedMs(it.elapsedMs);
+	}
+
+	function renderTerminalActivityRow(it) {
+		const status = it.status || (it.done ? 'succeeded' : 'running');
+		const row = document.createElement('div');
+		row.className = 'nx-activityRow nx-activityTermRow';
+		row.setAttribute('data-activity-id', it.id);
+		if (status === 'succeeded' || (it.done && status !== 'failed' && status !== 'timeout' && status !== 'cancelled')) {
+			row.classList.add('nx-activityRowDone');
+		}
+		if (status === 'failed' || status === 'timeout') {
+			row.classList.add('nx-activityRowFailed');
+		}
+		if (status === 'cancelled') {
+			row.classList.add('nx-activityRowCancelled');
+		}
+		if (status === 'running' || status === 'confirming') {
+			row.classList.add('nx-activityRowLive');
+		}
+
+		const mark = document.createElement('span');
+		mark.className = 'nx-activityMark';
+		if (status === 'running' || status === 'confirming') {
+			const spinner = document.createElement('span');
+			spinner.className = 'nx-activitySpinner';
+			spinner.setAttribute('aria-hidden', 'true');
+			mark.appendChild(spinner);
+		} else if (status === 'failed' || status === 'timeout') {
+			mark.textContent = 'x';
+		} else if (status === 'cancelled') {
+			mark.textContent = '-';
+		} else {
+			mark.textContent = '+';
+		}
+
+		const glyph = document.createElement('span');
+		glyph.className = 'nx-activityTermGlyph';
+		glyph.textContent = '$';
+
+		const body = document.createElement('div');
+		body.className = 'nx-activityTermBody';
+
+		const head = document.createElement('div');
+		head.className = 'nx-activityTermHead';
+		const cmd = document.createElement('span');
+		cmd.className = 'nx-activityTermCmd';
+		cmd.textContent = it.label || ('$ ' + (it.command || ''));
+		const meta = document.createElement('span');
+		meta.className = 'nx-activityTermMeta';
+		meta.textContent = terminalStatusLabel(it);
+		head.appendChild(cmd);
+		head.appendChild(meta);
+		body.appendChild(head);
+
+		const lines = String(it.preview || '').split('\n').filter(function (line, idx, arr) {
+			return line.length > 0 || idx < arr.length - 1;
+		});
+		const expanded = !!activityLogExpanded[it.id];
+		const visible = expanded ? lines.slice(-12) : lines.slice(-6);
+		const log = document.createElement('pre');
+		log.className = 'nx-activityTermLog' + (expanded ? ' nx-activityTermLogExpanded' : '');
+		if (visible.length) {
+			log.textContent = visible.join('\n');
+		} else if (status === 'confirming') {
+			log.textContent = 'Waiting for Allow...';
+		} else if (status === 'running') {
+			log.textContent = 'waiting for output...';
+		} else {
+			log.textContent = '';
+		}
+		if (log.textContent) {
+			body.appendChild(log);
+		}
+
+		if (lines.length > 6) {
+			const toggle = document.createElement('button');
+			toggle.type = 'button';
+			toggle.className = 'nx-activityTermToggle';
+			toggle.textContent = expanded ? 'Show less' : 'Show more';
+			toggle.addEventListener('click', function (ev) {
+				ev.preventDefault();
+				ev.stopPropagation();
+				activityLogExpanded[it.id] = !expanded;
+				renderChatActivity(lastActivityItems, lastActivityCaption);
+			});
+			body.appendChild(toggle);
+		}
+
+		row.appendChild(mark);
+		row.appendChild(glyph);
+		row.appendChild(body);
+		return row;
+	}
+
+	function renderChatActivity(items, caption) {
 		if (!messages) {
 			return;
 		}
 		const list = Array.isArray(items) ? items : [];
+		lastActivityItems = list;
+		if (caption) {
+			lastActivityCaption = caption;
+			updateLoadingCaption(caption);
+		}
 		if (!chatActivityCard) {
 			const card = document.createElement('div');
 			card.className = 'nx-activityCard';
@@ -934,7 +1081,6 @@
 			});
 			chatActivityCard = card;
 		}
-		// Update turn counter in header from agent item
 		const turnCounterEl = chatActivityCard.querySelector('.nx-activityTurnCounter');
 		if (turnCounterEl) {
 			const agentIt = list.find(function (it) { return it.id === 'agent' && it.turn !== null && it.turn !== undefined; });
@@ -950,6 +1096,10 @@
 		}
 		bodyEl.innerHTML = '';
 		list.forEach(function (it) {
+			if (it.kind === 'terminal') {
+				bodyEl.appendChild(renderTerminalActivityRow(it));
+				return;
+			}
 			const row = document.createElement('div');
 			row.className = 'nx-activityRow' + (it.done ? ' nx-activityRowDone' : '');
 			row.setAttribute('data-activity-id', it.id);
@@ -958,13 +1108,11 @@
 			if (it.done) {
 				mark.textContent = '+';
 			} else {
-				// Spinner for in-progress items
 				const spinner = document.createElement('span');
 				spinner.className = 'nx-activitySpinner';
 				spinner.setAttribute('aria-hidden', 'true');
 				mark.appendChild(spinner);
 			}
-			// File icon for file tools
 			const fileIcon = _makeActivityFileIcon(it.label || '');
 			const lab = document.createElement('span');
 			lab.className = 'nx-activityLabel';
@@ -1557,6 +1705,8 @@
 
 		if (mode === 'chat' || mode === 'ask' || mode === 'agent') {
 			setReplyInFlight(true);
+			addMessage('assistant', '', true);
+			renderChatActivity([{ id: 'agent', label: 'Working...', done: false }], 'Working...');
 		}
 
 		switch (mode) {
@@ -1593,24 +1743,29 @@
 		handleSend();
 	};
 
-	input.onkeypress = (e) => {
-		if (e.key === 'Enter' && !e.shiftKey) {
-			if (atCompleteSuppressEnter || atCompleteOpen) {
-				atCompleteSuppressEnter = false;
-				e.preventDefault();
-				return;
-			}
-			e.preventDefault();
-			if (replyInFlight) {
-				return;
-			}
-			handleSend();
-		}
-	};
-
 	wireComposerDropdowns();
 	wireMessagesScrollbarFlash();
 	wireAtContextComposer();
+	input.addEventListener('keydown', function (e) {
+		if (e.key !== 'Enter') {
+			return;
+		}
+		if (atCompleteSuppressEnter || atCompleteOpen) {
+			atCompleteSuppressEnter = false;
+			return;
+		}
+		const send = submitWithCtrlEnter
+			? (e.ctrlKey || e.metaKey)
+			: (!e.shiftKey && !e.ctrlKey && !e.metaKey);
+		if (!send) {
+			return;
+		}
+		e.preventDefault();
+		if (replyInFlight) {
+			return;
+		}
+		handleSend();
+	});
 	if (newSessionBtn) {
 		newSessionBtn.onclick = () => vscode.postMessage({ type: 'newSession' });
 	}
@@ -1873,7 +2028,7 @@
 				setFirstRunMsg('Paste a key to save', 'err');
 				return;
 			}
-			setFirstRunMsg('Saving…', '');
+			setFirstRunMsg('Saving...', '');
 			vscode.postMessage({ type: 'saveFirstRunKey', provider: provider, key: key });
 		});
 	}
@@ -1914,7 +2069,7 @@
 				break;
 
 			case 'chatActivity':
-				renderChatActivity(data.items);
+				renderChatActivity(data.items, data.caption);
 				break;
 
 			case 'chatActivityClear':
@@ -1997,6 +2152,11 @@
 
 			case 'costUpdate':
 				updateCostTicker(data.cost_usd, data.tokens_in, data.tokens_out);
+				break;
+
+			case 'composerSettings':
+				submitWithCtrlEnter = !!data.submitWithCtrlEnter;
+				applySendButtonChrome();
 				break;
 		}
 	});

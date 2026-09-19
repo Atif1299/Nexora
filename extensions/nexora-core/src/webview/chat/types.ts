@@ -41,14 +41,34 @@ export type WebviewInboundMessage =
 	| { type: 'requestSuggestions' }
 	| { type: 'requestAtComplete'; prefix: string };
 
-export type ChatActivityItem = { id: string; label: string; done?: boolean; turn?: number; totalTurns?: number };
+export type ChatActivityStatus =
+	| 'confirming'
+	| 'running'
+	| 'succeeded'
+	| 'failed'
+	| 'cancelled'
+	| 'timeout';
+
+export type ChatActivityItem = {
+	id: string;
+	label: string;
+	done?: boolean;
+	turn?: number;
+	totalTurns?: number;
+	kind?: 'step' | 'terminal';
+	command?: string;
+	elapsedMs?: number;
+	preview?: string;
+	status?: ChatActivityStatus;
+	exitCode?: number;
+};
 
 export type WebviewOutboundMessage =
 	| { type: 'addMessage'; role: 'user' | 'assistant'; content: string; isLoading: boolean; stopped?: boolean }
 	| { type: 'appendToken'; content: string }
 	| { type: 'finishMessage' }
 	| { type: 'generationRunning'; running: boolean }
-	| { type: 'chatActivity'; items: ChatActivityItem[] }
+	| { type: 'chatActivity'; items: ChatActivityItem[]; caption?: string }
 	| { type: 'chatActivityClear' }
 	| { type: 'backendStatus'; connected: boolean }
 	| { type: 'authStatus'; github: boolean; vercel: boolean; supabase?: boolean; stripe?: boolean; v0?: boolean; elevenlabs?: boolean; tavily?: boolean }
@@ -68,7 +88,8 @@ export type WebviewOutboundMessage =
 		type: 'atCompleteResults';
 		items: Array<{ icon: string; label: string; path: string; kind: 'file' | 'folder' }>;
 	}
-	| { type: 'costUpdate'; cost_usd: number; tokens_in: number; tokens_out: number };
+	| { type: 'costUpdate'; cost_usd: number; tokens_in: number; tokens_out: number }
+	| { type: 'composerSettings'; submitWithCtrlEnter: boolean };
 
 export type ChatInitialState = {
 	connected: boolean;
@@ -85,5 +106,6 @@ export type ChatInitialState = {
 	sessions?: Array<{ id: string; name: string }>;
 	activeSessionId?: string;
 	sessionRailWidth?: number;
+	submitWithCtrlEnter?: boolean;
 };
 

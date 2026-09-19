@@ -1843,6 +1843,110 @@ body
 	background: color-mix(in srgb, var(--vscode-charts-purple, #a371f7) 14%, transparent);
 }
 
+.nx-activityRowFailed .nx-activityMark
+{
+	color: var(--vscode-charts-red, #f85149);
+}
+
+.nx-activityRowCancelled .nx-activityMark,
+.nx-activityRowCancelled .nx-activityTermCmd,
+.nx-activityRowCancelled .nx-activityTermMeta
+{
+	opacity: 0.7;
+}
+
+.nx-activityTermRow
+{
+	align-items: flex-start;
+	padding: 4px 0 6px 0;
+}
+
+.nx-activityTermGlyph
+{
+	flex-shrink: 0;
+	font-family: var(--nx-font-mono);
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--vscode-charts-green, #3fb950);
+	opacity: 0.9;
+	line-height: 1.35;
+}
+
+.nx-activityTermBody
+{
+	flex: 1;
+	min-width: 0;
+}
+
+.nx-activityTermHead
+{
+	display: flex;
+	align-items: baseline;
+	gap: var(--nx-space-2);
+	min-width: 0;
+}
+
+.nx-activityTermCmd
+{
+	flex: 1;
+	min-width: 0;
+	word-break: break-word;
+	color: var(--nx-fg);
+}
+
+.nx-activityTermMeta
+{
+	flex-shrink: 0;
+	font-size: 10px;
+	font-variant-numeric: tabular-nums;
+	opacity: 0.75;
+}
+
+.nx-activityTermLog
+{
+	margin: 4px 0 0 0;
+	padding: 6px 8px;
+	max-height: 9.6em;
+	overflow: hidden;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--nx-fg) 6%, var(--nx-surface-2));
+	border: 1px solid var(--nx-border);
+	font-family: var(--nx-font-mono);
+	font-size: 10px;
+	line-height: 1.4;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: var(--nx-muted);
+}
+
+.nx-activityTermLogExpanded
+{
+	max-height: 18em;
+	overflow: auto;
+}
+
+.nx-activityRowLive .nx-activityTermLog
+{
+	color: var(--nx-fg);
+}
+
+.nx-activityTermToggle
+{
+	margin-top: 4px;
+	padding: 0;
+	border: none;
+	background: transparent;
+	color: var(--nx-muted);
+	font-family: var(--nx-font-mono);
+	font-size: 10px;
+	cursor: pointer;
+}
+
+.nx-activityTermToggle:hover
+{
+	color: var(--nx-fg);
+}
+
 /* Running cost ticker under activity card */
 .nx-costTicker
 {

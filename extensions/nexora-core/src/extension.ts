@@ -189,9 +189,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Wire IDE keys into every backend HTTP call (primary runtime credentials)
 	setApiKeyHeaderProvider(async () => {
 		const headers: Record<string, string> = {};
-		const openai = await settingsService.getApiKey('openai');
-		const anthropic = await settingsService.getApiKey('anthropic');
-		const openrouter = await settingsService.getApiKey('openrouter');
+		const [openai, anthropic, openrouter] = await Promise.all([
+			settingsService.getApiKey('openai'),
+			settingsService.getApiKey('anthropic'),
+			settingsService.getApiKey('openrouter')
+		]);
 		if (openai) {
 			headers['X-Nexora-OpenAI-Key'] = openai;
 		}
