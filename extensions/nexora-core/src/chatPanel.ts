@@ -15,6 +15,7 @@ import { getOrchestrationWebSocket, type WebSocketMessage } from './services/web
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
 import { getSettingsService } from './services/settingsService';
 import { getNotificationService } from './services/notificationService';
+import { showEngineOutput } from './services/engineProcess';
 import {
 	allLlmNotConfigured,
 	getCachedCapabilities,
@@ -409,6 +410,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._handleBrowsePlatforms();
 			} else if (data.type === 'indexWorkspace') {
 				await this._handleIndexWorkspace();
+			} else if (data.type === 'showEngineOutput') {
+				showEngineOutput();
 			} else if (data.type === 'executeRequest') {
 				await this._handleExecuteRequest(data.request, data.model);
 			} else if (data.type === 'runAgent') {
@@ -573,6 +576,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		let modelUsed = '';
 		let toolCalls: ToolCall[] | undefined;
 		let startedTokens = false;
+		let usagePromptTokens = 0;
+		let usageCompletionTokens = 0;
 
 		for await (const ev of client.agentTurnStream(
 			messages,
@@ -610,9 +615,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				if (ev.model_used) {
 					modelUsed = ev.model_used;
 				}
+				if (ev.usage) {
+					usagePromptTokens = ev.usage.prompt_tokens || 0;
+					usageCompletionTokens = ev.usage.completion_tokens || 0;
+				}
 			} else if (ev.type === 'error') {
 				throw new Error(ev.message || 'Agent stream error');
 			}
+		}
+
+		// Post per-turn cost estimate when usage data is available
+		if (this._view && (usagePromptTokens > 0 || usageCompletionTokens > 0)) {
+			const costUsd = this._computeCostEstimate(modelUsed, usagePromptTokens, usageCompletionTokens);
+			this._view.webview.postMessage({
+				type: 'costUpdate',
+				cost_usd: costUsd,
+				tokens_in: usagePromptTokens,
+				tokens_out: usageCompletionTokens
+			});
 		}
 
 		if (toolCalls && toolCalls.length > 0) {
@@ -1070,7 +1090,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		const notifications = getNotificationService();
 		const { workspaceId, workspacePath } = await this._workspaceContext();
 		if (!workspaceId) {
-			void notifications.showWarning('Index this workspace before running a suggestion.');
+			if (suggestionId === 'index-workspace') {
+				void notifications.showWarning('Open a folder first, then Index workspace.');
+			} else {
+				void notifications.showWarning('Index this workspace before running a suggestion.');
+			}
 			return;
 		}
 		try {
@@ -1508,7 +1532,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		sessionId?: string,
 		reply?: InFlightReply
 	): Promise<string> {
-		const maxTurns = 10;
+		const maxTurns = 25;
 		let turn = 0;
 
 		// Build initial messages
@@ -1526,6 +1550,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		while (turn < maxTurns) {
 			turn++;
+			// Update turn counter in activity item fields
+			const agentItem = activityItems.find(a => a.id === 'agent');
+			if (agentItem) {
+				agentItem.turn = turn;
+				agentItem.totalTurns = maxTurns;
+			}
+			this._emitChatActivity(activityItems);
 			this._assertReply(reply);
 
 			const response = await this._nextAgentLoopTurn(
@@ -1593,7 +1624,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 		}
 
-		const maxMsg = 'Agent reached maximum turns without completing. Try a more specific question.';
+		const maxMsg = `Agent reached maximum turns (${turn}/${maxTurns}) without completing. Try breaking the request into smaller steps or continue in a new message.`;
 		if (this._view) {
 			this._view.webview.postMessage({
 				type: 'addMessage',
@@ -1603,6 +1634,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 		}
 		return maxMsg;
+	}
+
+	private _computeCostEstimate(model: string, promptTokens: number, completionTokens: number): number {
+		const m = (model || '').toLowerCase();
+		let inPer1k = 0.001;
+		let outPer1k = 0.003;
+		if (m.includes('gpt-4o')) {
+			inPer1k = 0.00015;
+			outPer1k = 0.0006;
+		} else if (m.includes('claude-3-5-sonnet') || m.includes('claude-3.5-sonnet') || m.includes('claude-3-haiku')) {
+			inPer1k = 0.003;
+			outPer1k = 0.015;
+		}
+		return (promptTokens / 1000) * inPer1k + (completionTokens / 1000) * outPer1k;
 	}
 
 	private _formatToolLabel(toolName: string, args: Record<string, any>): string {
@@ -1621,6 +1666,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return `apply_patch: ${args.path || ''}`.slice(0, 60);
 			case 'insert_lines':
 				return `insert_lines: ${args.path || ''}:${args.line_number || ''}`.slice(0, 60);
+			case 'run_terminal_command':
+				return `run_terminal_command: ${args.command || ''}`.slice(0, 60);
 			default:
 				return `${toolName}`.slice(0, 60);
 		}
@@ -2301,6 +2348,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			// This will trigger execution - WebSocket will send real-time updates
 			const result = await client.approvePlan(planId);
 
+			await this._rememberIndexedWorkspace(result);
+
 			// Final result (WebSocket may have already sent updates, but this is the definitive result)
 			this._view.webview.postMessage({
 				type: 'planExecutionComplete',
@@ -2596,53 +2645,27 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		const workspacePath = workspaceFolders[0].uri.fsPath;
+		await this._handleAcceptSuggestion('index-workspace');
+	}
 
-		this._view.webview.postMessage({
-			type: 'addMessage',
-			role: 'assistant',
-			content: `Indexing workspace: ${workspacePath}...`,
-			isLoading: true
+	private async _rememberIndexedWorkspace(result: { tasks?: Array<{ operation?: string; status?: string; result?: { workspace_id?: string } }> }): Promise<void> {
+		const tasks = result.tasks || [];
+		const indexed = tasks.find((task) => {
+			const op = (task.operation || '').toLowerCase();
+			const status = (task.status || '').toLowerCase();
+			return (op === 'index' || op === 'index_workspace') && status === 'success' && !!task.result?.workspace_id;
 		});
-
-		try {
-			const client = getBackendClient();
-			const result = await client.indexWorkspace(workspacePath);
-
-			const wid =
-				(typeof result?.workspace_id === 'string' && result.workspace_id) ? result.workspace_id :
-					(typeof result?.workspace_context?.workspace_id === 'string' ? result.workspace_context.workspace_id : undefined);
-
-			const active = this._getActiveSession();
-			if (active && wid) {
-				active.memoryWorkspaceId = wid;
-				active.memoryWorkspacePath = workspacePath;
-				await this._persistSessions();
-			}
-
-			let response = `**Workspace Indexed**\n\n`;
-			response += `- **Workspace ID:** ${wid || 'unknown'}\n`;
-			response += `- **Files indexed:** ${result.files_indexed || 'N/A'}\n`;
-			response += `- **Status:** ${result.status || 'completed'}\n`;
-
-			await this._appendAssistantToSession(response);
-			this._view.webview.postMessage({
-				type: 'addMessage',
-				role: 'assistant',
-				content: response,
-				isLoading: false
-			});
-
-		} catch (error) {
-			const errMsg = `Error indexing workspace: ${error instanceof Error ? error.message : 'Unknown error'}`;
-			await this._appendAssistantToSession(errMsg);
-			this._view.webview.postMessage({
-				type: 'addMessage',
-				role: 'assistant',
-				content: errMsg,
-				isLoading: false
-			});
+		if (!indexed?.result?.workspace_id) {
+			return;
 		}
+		const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const active = this._getActiveSession();
+		if (!active || !folder) {
+			return;
+		}
+		active.memoryWorkspaceId = indexed.result.workspace_id;
+		active.memoryWorkspacePath = folder;
+		await this._persistSessions();
 	}
 
 	private async _handleExecuteRequest(request: string, model?: string): Promise<void> {
@@ -2675,6 +2698,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				});
 
 				const result = await client.approvePlan(this._currentPlanId);
+				await this._rememberIndexedWorkspace(result);
 
 				const resultMsg = this._formatExecutionResult(result);
 				const sessionAfter = this._getActiveSession();
@@ -2758,6 +2782,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 
 			const result = await client.approvePlan(plan.plan_id);
+			await this._rememberIndexedWorkspace(result);
 
 			const resultMsg = this._formatExecutionResult(result);
 			const sessionAfter = this._getActiveSession();
@@ -2935,13 +2960,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		sessionId?: string,
 		reply?: InFlightReply
 	): Promise<string> {
-		const maxTurns = 10;
+		const maxTurns = 25;
 		let turn = 0;
 
 		// Build initial messages
 		const messages: AgentMessage[] = [
 			{ role: 'user', content: userMessage }
 		];
+
+		// Track files modified during this agent loop
+		const modifiedFiles = new Set<string>();
 
 		// Track activity items for UI
 		const activityItems: ChatActivityItem[] = [
@@ -2953,6 +2981,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		while (turn < maxTurns) {
 			turn++;
+			// Update turn counter in activity item fields
+			const agentItem = activityItems.find(a => a.id === 'agent');
+			if (agentItem) {
+				agentItem.turn = turn;
+				agentItem.totalTurns = maxTurns;
+			}
+			this._emitChatActivity(activityItems);
 			this._assertReply(reply);
 
 			const response = await this._nextAgentLoopTurn(
@@ -3017,10 +3052,29 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				for (const tm of toolMessages) {
 					messages.push(tm);
 				}
+
+				// Track modified files for multi-file awareness
+				const writeToolNames = new Set(['write_file', 'apply_patch', 'insert_lines']);
+				for (const tc of response.tool_calls) {
+					if (writeToolNames.has(tc.name) && tc.arguments.path) {
+						const ex = executed.find(e => e.id === tc.id);
+						if (ex && ex.result.success) {
+							modifiedFiles.add(tc.arguments.path as string);
+						}
+					}
+				}
+
+				// Inject modified-file context before the next LLM turn
+				if (modifiedFiles.size > 0) {
+					messages.push({
+						role: 'system',
+						content: `[Files modified so far: ${Array.from(modifiedFiles).join(', ')}]`
+					});
+				}
 			}
 		}
 
-		const maxMsg = 'Agent reached maximum turns without completing. Try a more specific request.';
+		const maxMsg = `Agent reached maximum turns (${turn}/${maxTurns}) without completing. Try breaking the request into smaller steps or continue in a new message.`;
 		if (this._view) {
 			this._view.webview.postMessage({
 				type: 'addMessage',
