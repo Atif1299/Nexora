@@ -349,10 +349,69 @@
           "default": "",
           "description": "Override the engine HTTP URL. Empty uses http://127.0.0.1:<engine port>."
         },
+        "nexora.agent.runMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto-edit",
+            "allowlist",
+            "run-everything"
+          ],
+          "enumDescriptions": [
+            "Confirm every file edit (Accept/Reject) and terminal command (Allow/Deny).",
+            "Apply file edits without asking. Terminal still asks Allow/Deny. Dangerous commands stay blocked.",
+            "Apply file edits without asking. Safe commands (npm, git, python, …) skip Allow/Deny. Other commands still ask.",
+            "Apply file edits and run terminal commands without asking. Dangerous commands stay blocked."
+          ],
+          "default": "auto-edit",
+          "description": "How the agent runs file edits and terminal commands."
+        },
         "nexora.agent.autoApply": {
           "type": "boolean",
           "default": false,
-          "description": "When enabled, the agent applies file edits directly without showing a diff preview. A brief notification is shown instead of the Accept/Reject dialog."
+          "description": "Deprecated. Use nexora.agent.runMode. If true and runMode is unset, treated as Auto-edit.",
+          "deprecationMessage": "Use nexora.agent.runMode instead. true maps to auto-edit."
+        },
+        "nexora.agent.maxTurns": {
+          "type": "number",
+          "enum": [
+            10,
+            15,
+            25,
+            40
+          ],
+          "default": 25,
+          "description": "Maximum LLM turns in the Ask/Agent loop before the agent stops."
+        },
+        "nexora.agent.includeOpenEditors": {
+          "type": "boolean",
+          "default": true,
+          "description": "Attach the active editor and other open text files as context on the first send (up to 5)."
+        },
+        "nexora.agent.inlineDiffs": {
+          "type": "boolean",
+          "default": true,
+          "description": "When Auto-edit applies files, open a non-blocking diff preview. Ask mode still waits for Accept/Reject."
+        },
+        "nexora.agent.autoFormat": {
+          "type": "boolean",
+          "default": true,
+          "description": "Format the document after a successful write_file, apply_patch, or insert_lines."
+        },
+        "nexora.agent.autoApproveModeSwitch": {
+          "type": "boolean",
+          "default": false,
+          "description": "Skip Approve & Execute after Plan generation and run the plan immediately."
+        },
+        "nexora.agent.autoCloseTerminal": {
+          "type": "boolean",
+          "default": true,
+          "description": "Close the Nexora Agent terminal shortly after a command finishes."
+        },
+        "nexora.chat.submitWithCtrlEnter": {
+          "type": "boolean",
+          "default": false,
+          "description": "Submit chat with Ctrl+Enter. Enter inserts a newline."
         }
       }
     }

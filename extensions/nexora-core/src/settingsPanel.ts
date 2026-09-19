@@ -7,10 +7,12 @@ import * as vscode from 'vscode';
 import { getSettingsWebviewHtml } from './webview/settings';
 import { acquireEditorPanel, gateEditorPanel } from './services/editorPage';
 import { getSettingsService, type ApiKeyProvider, type NexoraPreferences } from './services/settingsService';
+import { getAgentUiSettings, type AgentRunMode } from './services/agentRunMode';
 import { getBackendClient } from './services/backendClient';
 import { getNotificationService } from './services/notificationService';
 import type { SaasConnector } from './services/backend/auth';
 import {
+	getCachedCapabilities,
 	onDidChangeCapabilities,
 	refreshCapabilities,
 	type CapabilitiesReport
@@ -36,6 +38,8 @@ export class SettingsPanelProvider {
 	private _attached = false;
 	private _pendingSection?: string;
 	private _disposables: vscode.Disposable[] = [];
+	private _pushTimer: ReturnType<typeof setTimeout> | undefined;
+	private _pushInflight: Promise<void> | undefined;
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -102,8 +106,11 @@ export class SettingsPanelProvider {
 				switch (msg.type) {
 					case 'ready':
 					case 'refreshStatus':
+						await this._pushState(msg.type === 'refreshStatus');
+						this._revealSection(this._pendingSection);
+						break;
 					case 'refreshAnalytics':
-						await this._pushState();
+						await this._pushState(true);
 						this._revealSection(this._pendingSection);
 						break;
 					case 'validateApiKey':
@@ -117,6 +124,12 @@ export class SettingsPanelProvider {
 						break;
 					case 'savePreferences':
 						await this._savePreferences(msg.preferences || {});
+						break;
+					case 'saveRunMode':
+						await this._saveRunMode(msg.runMode);
+						break;
+					case 'saveConfig':
+						await this._saveConfig(msg.key, msg.value);
 						break;
 					case 'connectOAuth':
 						await this._connectOAuth(msg.provider);
@@ -144,12 +157,18 @@ export class SettingsPanelProvider {
 			}),
 			panel.onDidChangeViewState(() => {
 				if (panel.visible && this._attached) {
-					void this._pushState();
+					this._schedulePush(false);
 				}
 			}),
-			onDidChangeCapabilities(() => {
-				if (this._panel?.visible) {
-					void this._pushState();
+			onDidChangeCapabilities((capabilities) => {
+				if (!this._view || !this._panel?.visible) {
+					return;
+				}
+				this._view.postMessage({ type: 'updateState', capabilities: capabilities || null });
+			}),
+			vscode.workspace.onDidChangeConfiguration((e) => {
+				if ((e.affectsConfiguration('nexora.agent') || e.affectsConfiguration('nexora.chat')) && this._panel?.visible) {
+					this._schedulePush(false);
 				}
 			})
 		];
@@ -163,13 +182,42 @@ export class SettingsPanelProvider {
 	}
 
 	private _disposeBindings(): void {
+		if (this._pushTimer) {
+			clearTimeout(this._pushTimer);
+			this._pushTimer = undefined;
+		}
 		for (const disposable of this._disposables) {
 			disposable.dispose();
 		}
 		this._disposables = [];
 	}
 
-	private async _pushState(): Promise<void> {
+	private _schedulePush(force = false): void {
+		if (this._pushTimer) {
+			clearTimeout(this._pushTimer);
+		}
+		this._pushTimer = setTimeout(() => {
+			this._pushTimer = undefined;
+			void this._pushState(force);
+		}, 200);
+	}
+
+	private async _pushState(force = false): Promise<void> {
+		if (!this._view || !this._attached) {
+			return;
+		}
+		if (this._pushInflight) {
+			return this._pushInflight;
+		}
+		this._pushInflight = this._loadAndPost(force);
+		try {
+			await this._pushInflight;
+		} finally {
+			this._pushInflight = undefined;
+		}
+	}
+
+	private async _loadAndPost(force: boolean): Promise<void> {
 		if (!this._view || !this._attached) {
 			return;
 		}
@@ -185,8 +233,10 @@ export class SettingsPanelProvider {
 		}
 
 		const connections = await client.getConnectionStatus('default');
-		const capabilities: CapabilitiesReport | undefined = await refreshCapabilities();
-		const analytics = await client.getAnalyticsDashboard('default');
+		const capabilities: CapabilitiesReport | undefined = force || !getCachedCapabilities()
+			? await refreshCapabilities()
+			: getCachedCapabilities();
+		const analytics = await client.getAnalyticsDashboard('default', force);
 
 		// Week 13: Check SaaS connector status from auth status endpoint
 		const authStatus = await client.getAuthStatus('default');
@@ -197,11 +247,14 @@ export class SettingsPanelProvider {
 		configured['elevenlabs'] = !!authStatus.elevenlabs_configured;
 		configured['tavily'] = !!authStatus.tavily_configured;
 
+		const agent = getAgentUiSettings();
 		this._view.postMessage({
 			type: 'updateState',
 			keyMasks,
 			configured,
 			preferences: settings.getPreferences(),
+			runMode: agent.runMode,
+			agentSettings: agent,
 			connections,
 			capabilities: capabilities || null,
 			analytics
@@ -282,6 +335,48 @@ export class SettingsPanelProvider {
 				error: error instanceof Error ? error.message : 'Clear failed'
 			});
 		}
+	}
+
+	private async _saveRunMode(runMode: unknown): Promise<void> {
+		const valid: AgentRunMode[] = ['ask', 'auto-edit', 'allowlist', 'run-everything'];
+		if (typeof runMode !== 'string' || !valid.includes(runMode as AgentRunMode)) {
+			return;
+		}
+		await vscode.workspace.getConfiguration('nexora').update(
+			'agent.runMode',
+			runMode,
+			vscode.ConfigurationTarget.Global
+		);
+		await this._pushState();
+	}
+
+	private async _saveConfig(key: unknown, value: unknown): Promise<void> {
+		const cfg = vscode.workspace.getConfiguration('nexora');
+		if (key === 'agent.maxTurns') {
+			const n = Number(value);
+			if (n === 10 || n === 15 || n === 25 || n === 40) {
+				await cfg.update('agent.maxTurns', n, vscode.ConfigurationTarget.Global);
+			} else {
+				return;
+			}
+		} else if (key === 'chat.submitWithCtrlEnter' && typeof value === 'boolean') {
+			await cfg.update('chat.submitWithCtrlEnter', value, vscode.ConfigurationTarget.Global);
+		} else if (
+			typeof key === 'string' &&
+			typeof value === 'boolean' &&
+			(
+				key === 'agent.includeOpenEditors' ||
+				key === 'agent.inlineDiffs' ||
+				key === 'agent.autoFormat' ||
+				key === 'agent.autoApproveModeSwitch' ||
+				key === 'agent.autoCloseTerminal'
+			)
+		) {
+			await cfg.update(key, value, vscode.ConfigurationTarget.Global);
+		} else {
+			return;
+		}
+		await this._pushState();
 	}
 
 	private async _savePreferences(preferences: Record<string, unknown>): Promise<void> {

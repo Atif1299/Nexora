@@ -56,6 +56,7 @@ export function getSettingsWebviewHtml(
 			<button type="button" class="nx-nav-item" data-section="saas">SaaS Connectors</button>
 			<button type="button" class="nx-nav-item" data-section="connections">Connections</button>
 			<button type="button" class="nx-nav-item" data-section="analytics">Cost &amp; Analytics</button>
+			<button type="button" class="nx-nav-item" data-section="approvals">Execution</button>
 			<button type="button" class="nx-nav-item" data-section="preferences">Preferences</button>
 			<button type="button" class="nx-nav-item" data-section="about">About</button>
 		</nav>
@@ -119,6 +120,12 @@ export function getSettingsWebviewHtml(
 						<div id="memory-insights" class="nx-analytics-memory"></div>
 					</section>
 				</div>
+			</section>
+
+			<section class="nx-section" data-section="approvals" aria-labelledby="approvals-heading" hidden>
+				<h2 id="approvals-heading">Execution and Approvals</h2>
+				<p class="nx-hint">Choose how Agents run tools like command execution and file writes. Dangerous commands stay blocked.</p>
+				<div id="run-mode" class="nx-stack"></div>
 			</section>
 
 			<section class="nx-section" data-section="preferences" aria-labelledby="prefs-heading" hidden>

@@ -21,7 +21,7 @@
 		{ id: 'tavily', label: 'Tavily API Key', placeholder: 'tvly-...' }
 	];
 
-	const NAV_SECTIONS = ['keys', 'saas', 'connections', 'analytics', 'preferences', 'about'];
+	const NAV_SECTIONS = ['keys', 'saas', 'connections', 'analytics', 'approvals', 'preferences', 'about'];
 
 	const SECTION_ALIASES = {
 		llm: 'keys',
@@ -52,7 +52,12 @@
 		usage: 'analytics',
 		'cost-analytics': 'analytics',
 		prefs: 'preferences',
-		preference: 'preferences'
+		preference: 'preferences',
+		approvals: 'approvals',
+		execution: 'approvals',
+		'run-mode': 'approvals',
+		runmode: 'approvals',
+		agent: 'approvals'
 	};
 
 	let currentSection = 'keys';
@@ -65,6 +70,16 @@
 			autoIndexWorkspace: true,
 			showCostEstimates: true,
 			theme: 'auto'
+		},
+		runMode: 'auto-edit',
+		agentSettings: {
+			maxTurns: 25,
+			includeOpenEditors: true,
+			inlineDiffs: true,
+			autoFormat: true,
+			autoApproveModeSwitch: false,
+			autoCloseTerminal: true,
+			submitWithCtrlEnter: false
 		},
 		connections: null,
 		capabilities: null,
@@ -615,6 +630,107 @@
 		`;
 	}
 
+	function renderRunMode() {
+		const root = document.getElementById('run-mode');
+		if (!root) {
+			return;
+		}
+		const modes = [
+			{ id: 'ask', label: 'Ask', desc: 'Confirm every file edit and terminal command.' },
+			{ id: 'auto-edit', label: 'Auto-edit', desc: 'Apply file edits without asking. Terminal still asks Allow/Deny.' },
+			{ id: 'allowlist', label: 'Allowlist', desc: 'Apply file edits without asking. Safe commands (npm, git, python, …) skip Allow/Deny.' },
+			{ id: 'run-everything', label: 'Run everything', desc: 'Apply files and run terminal without asking. Dangerous commands stay blocked.' }
+		];
+		const current = modes.some(m => m.id === state.runMode) ? state.runMode : 'auto-edit';
+		const selected = modes.find(m => m.id === current) || modes[1];
+		const a = state.agentSettings || {};
+		const maxTurns = [10, 15, 25, 40].indexOf(a.maxTurns) >= 0 ? a.maxTurns : 25;
+
+		root.innerHTML = `
+			<div class="nx-card">
+				<div class="nx-row" style="align-items:flex-start">
+					<div>
+						<label class="nx-label" for="pref-run-mode">Run Mode</label>
+						<p class="nx-hint" id="run-mode-desc">${escapeHtml(selected.desc)}</p>
+					</div>
+					<select id="pref-run-mode" class="nx-select nx-select-inline" aria-label="Run Mode" aria-describedby="run-mode-desc">
+						${modes.map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}</option>`).join('')}
+					</select>
+				</div>
+			</div>
+			<div class="nx-card">
+				<div class="nx-row" style="align-items:flex-start">
+					<div>
+						<label class="nx-label" for="pref-max-turns">Max agent turns</label>
+						<p class="nx-hint">Stop the Ask/Agent loop after this many LLM turns.</p>
+					</div>
+					<select id="pref-max-turns" class="nx-select nx-select-inline" aria-label="Max agent turns">
+						<option value="10">10</option>
+						<option value="15">15</option>
+						<option value="25">25</option>
+						<option value="40">40</option>
+					</select>
+				</div>
+			</div>
+			${execToggle('pref-include-editors', 'Include open editors', 'Attach the active editor and other open files on send (up to 5).', a.includeOpenEditors !== false)}
+			${execToggle('pref-inline-diffs', 'Inline diffs', 'Show a non-blocking diff when Auto-edit applies files. Ask mode still waits for Accept.', a.inlineDiffs !== false)}
+			${execToggle('pref-auto-format', 'Auto-format', 'Format the file after a successful write, patch, or insert.', a.autoFormat !== false)}
+			${execToggle('pref-auto-approve', 'Auto-approve mode transitions', 'Skip Approve & Execute after Plan and run immediately.', !!a.autoApproveModeSwitch)}
+			${execToggle('pref-auto-close-term', 'Auto-close agent terminal', 'Close the Nexora Agent terminal shortly after a command finishes.', a.autoCloseTerminal !== false)}
+		`;
+
+		const select = document.getElementById('pref-run-mode');
+		if (select) {
+			select.value = current;
+			select.addEventListener('change', () => {
+				const next = modes.find(m => m.id === select.value) || selected;
+				const desc = document.getElementById('run-mode-desc');
+				if (desc) {
+					desc.textContent = next.desc;
+				}
+				vscode.postMessage({ type: 'saveRunMode', runMode: select.value });
+			});
+		}
+		const turns = document.getElementById('pref-max-turns');
+		if (turns) {
+			turns.value = String(maxTurns);
+			turns.addEventListener('change', () => {
+				vscode.postMessage({ type: 'saveConfig', key: 'agent.maxTurns', value: Number(turns.value) });
+			});
+		}
+		bindConfigToggle('pref-include-editors', 'agent.includeOpenEditors');
+		bindConfigToggle('pref-inline-diffs', 'agent.inlineDiffs');
+		bindConfigToggle('pref-auto-format', 'agent.autoFormat');
+		bindConfigToggle('pref-auto-approve', 'agent.autoApproveModeSwitch');
+		bindConfigToggle('pref-auto-close-term', 'agent.autoCloseTerminal');
+	}
+
+	function execToggle(id, label, hint, checked) {
+		return `
+			<div class="nx-card">
+				<div class="nx-row" style="align-items:flex-start">
+					<div>
+						<label class="nx-label" for="${id}">${escapeHtml(label)}</label>
+						<p class="nx-hint">${escapeHtml(hint)}</p>
+					</div>
+					<label class="nx-check">
+						<input type="checkbox" id="${id}" ${checked ? 'checked' : ''} aria-label="${escapeHtml(label)}" />
+					</label>
+				</div>
+			</div>
+		`;
+	}
+
+	function bindConfigToggle(id, key) {
+		const el = document.getElementById(id);
+		if (!el) {
+			return;
+		}
+		el.addEventListener('change', () => {
+			vscode.postMessage({ type: 'saveConfig', key: key, value: el.checked });
+		});
+	}
+
 	function renderPreferences() {
 		const root = document.getElementById('preferences');
 		if (!root) {
@@ -645,6 +761,17 @@
 					Show cost estimates
 				</label>
 			</div>
+			<div class="nx-card">
+				<div class="nx-row" style="align-items:flex-start">
+					<div>
+						<label class="nx-label" for="pref-ctrl-enter">Submit with Ctrl+Enter</label>
+						<p class="nx-hint">Ctrl+Enter sends. Enter inserts a newline.</p>
+					</div>
+					<label class="nx-check">
+						<input type="checkbox" id="pref-ctrl-enter" ${(state.agentSettings && state.agentSettings.submitWithCtrlEnter) ? 'checked' : ''} aria-label="Submit with Ctrl+Enter" />
+					</label>
+				</div>
+			</div>
 		`;
 
 		const model = document.getElementById('pref-model');
@@ -666,6 +793,7 @@
 				vscode.postMessage({ type: 'savePreferences', preferences: { showCostEstimates: costs.checked } });
 			});
 		}
+		bindConfigToggle('pref-ctrl-enter', 'chat.submitWithCtrlEnter');
 	}
 
 	function bindChrome() {
@@ -707,6 +835,8 @@
 					keyMasks: msg.keyMasks || state.keyMasks,
 					configured: msg.configured || state.configured,
 					preferences: msg.preferences || state.preferences,
+					runMode: msg.runMode || state.runMode,
+					agentSettings: msg.agentSettings || state.agentSettings,
 					connections: msg.connections !== undefined ? msg.connections : state.connections,
 					capabilities: msg.capabilities !== undefined ? msg.capabilities : state.capabilities,
 					analytics: msg.analytics !== undefined ? msg.analytics : state.analytics
@@ -714,6 +844,7 @@
 				renderApiKeys();
 				renderSaasKeys();
 				renderConnections();
+				renderRunMode();
 				renderPreferences();
 				renderAnalytics();
 				break;
@@ -765,6 +896,7 @@
 	renderApiKeys();
 	renderSaasKeys();
 	renderConnections();
+	renderRunMode();
 	renderPreferences();
 	renderAnalytics();
 	vscode.postMessage({ type: 'ready' });

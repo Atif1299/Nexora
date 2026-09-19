@@ -365,6 +365,18 @@ body
 	outline: none;
 }
 
+.nx-select-inline
+{
+	width: auto;
+	min-width: 168px;
+	flex-shrink: 0;
+}
+
+.nx-card .nx-hint
+{
+	margin: 4px 0 0 0;
+}
+
 .nx-check
 {
 	display: flex;
