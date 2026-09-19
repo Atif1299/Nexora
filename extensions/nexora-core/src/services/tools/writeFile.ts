@@ -6,8 +6,9 @@
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import * as vscode from 'vscode';
+import { getAgentFlag, shouldConfirmFileEdits } from '../agentRunMode';
 import type { ToolResult } from './executor';
-import { previewDiffAndConfirm } from './diffProvider';
+import { confirmOrPreviewDiff } from './diffProvider';
 
 const SKIP_PATTERNS = ['.env', '.pem', 'credentials', 'secret', '.key', 'node_modules', '.git'];
 
@@ -25,6 +26,24 @@ function isPathSafe(workspaceRoot: string, filePath: string): boolean {
 function isSensitivePath(filePath: string): boolean {
 	const lower = filePath.toLowerCase();
 	return SKIP_PATTERNS.some(p => lower.includes(p));
+}
+
+/** Format the written URI. Failures are ignored. */
+export async function formatAfterWrite(fullPath: string): Promise<void> {
+	if (!getAgentFlag('autoFormat')) {
+		return;
+	}
+	try {
+		const uri = vscode.Uri.file(fullPath);
+		const doc = await vscode.workspace.openTextDocument(uri);
+		await vscode.window.showTextDocument(doc, { preview: true, preserveFocus: true });
+		await vscode.commands.executeCommand('editor.action.formatDocument');
+		if (doc.isDirty) {
+			await doc.save();
+		}
+	} catch {
+		// ignore formatter errors
+	}
 }
 
 /**
@@ -55,22 +74,21 @@ export async function writeFileTool(
 
 	const fullPath = path.resolve(workspaceRoot, filePath);
 	const isNewFile = !await fs.access(fullPath).then(() => true).catch(() => false);
+	const originalContent = isNewFile ? '' : await fs.readFile(fullPath, 'utf8').catch(() => '');
 
-	const autoApply = vscode.workspace.getConfiguration('nexora').get<boolean>('agent.autoApply', false);
-
-	if (requireConfirmation && !autoApply) {
-		const accepted = await previewDiffAndConfirm({
-			filePath,
-			fullPath,
-			proposedContent: content,
-			existsOnDisk: !isNewFile
-		});
-		if (!accepted) {
-			return {
-				success: false,
-				error: 'User rejected'
-			};
-		}
+	const accepted = await confirmOrPreviewDiff({
+		filePath,
+		fullPath,
+		proposedContent: content,
+		existsOnDisk: !isNewFile,
+		originalContent,
+		requireConfirmation
+	});
+	if (!accepted) {
+		return {
+			success: false,
+			error: 'User rejected'
+		};
 	}
 
 	try {
@@ -80,8 +98,9 @@ export async function writeFileTool(
 
 		// Write file
 		await fs.writeFile(fullPath, content, 'utf8');
+		await formatAfterWrite(fullPath);
 
-		if (requireConfirmation && autoApply) {
+		if (requireConfirmation && !shouldConfirmFileEdits()) {
 			void vscode.window.showInformationMessage(`Applied edit to ${filePath}`);
 		}
 

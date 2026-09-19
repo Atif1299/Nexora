@@ -6,8 +6,10 @@
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import * as vscode from 'vscode';
+import { shouldConfirmFileEdits } from '../agentRunMode';
 import type { ToolResult } from './executor';
-import { previewDiffAndConfirm } from './diffProvider';
+import { confirmOrPreviewDiff } from './diffProvider';
+import { formatAfterWrite } from './writeFile';
 
 const SKIP_PATTERNS = ['.env', '.pem', 'credentials', 'secret', '.key', 'node_modules', '.git'];
 
@@ -79,27 +81,26 @@ export async function applyPatchTool(
 		// Build new content
 		const newContent = content.replace(oldText, newText);
 
-		const autoApply = vscode.workspace.getConfiguration('nexora').get<boolean>('agent.autoApply', false);
-
-		if (requireConfirmation && !autoApply) {
-			const accepted = await previewDiffAndConfirm({
-				filePath,
-				fullPath,
-				proposedContent: newContent,
-				existsOnDisk: true
-			});
-			if (!accepted) {
-				return {
-					success: false,
-					error: 'User rejected'
-				};
-			}
+		const accepted = await confirmOrPreviewDiff({
+			filePath,
+			fullPath,
+			proposedContent: newContent,
+			existsOnDisk: true,
+			originalContent: content,
+			requireConfirmation
+		});
+		if (!accepted) {
+			return {
+				success: false,
+				error: 'User rejected'
+			};
 		}
 
 		// Write patched content
 		await fs.writeFile(fullPath, newContent, 'utf8');
+		await formatAfterWrite(fullPath);
 
-		if (requireConfirmation && autoApply) {
+		if (requireConfirmation && !shouldConfirmFileEdits()) {
 			void vscode.window.showInformationMessage(`Applied edit to ${filePath}`);
 		}
 
@@ -162,26 +163,25 @@ export async function insertLinesTool(
 		contentLines.splice(insertAt, 0, ...newLines);
 		const newContent = contentLines.join('\n');
 
-		const autoApply = vscode.workspace.getConfiguration('nexora').get<boolean>('agent.autoApply', false);
-
-		if (requireConfirmation && !autoApply) {
-			const accepted = await previewDiffAndConfirm({
-				filePath,
-				fullPath,
-				proposedContent: newContent,
-				existsOnDisk: true
-			});
-			if (!accepted) {
-				return {
-					success: false,
-					error: 'User rejected'
-				};
-			}
+		const accepted = await confirmOrPreviewDiff({
+			filePath,
+			fullPath,
+			proposedContent: newContent,
+			existsOnDisk: true,
+			originalContent: content,
+			requireConfirmation
+		});
+		if (!accepted) {
+			return {
+				success: false,
+				error: 'User rejected'
+			};
 		}
 
 		await fs.writeFile(fullPath, newContent, 'utf8');
+		await formatAfterWrite(fullPath);
 
-		if (requireConfirmation && autoApply) {
+		if (requireConfirmation && !shouldConfirmFileEdits()) {
 			void vscode.window.showInformationMessage(`Applied edit to ${filePath}`);
 		}
 

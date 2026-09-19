@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
+import { getAgentFlag, shouldConfirmFileEdits } from '../agentRunMode';
 
 export const NEXORA_DIFF_SCHEME = 'nexora-diff';
 
@@ -113,4 +114,37 @@ export async function previewDiffAndConfirm(options: {
 			nexoraDiffProvider.clear(originalUri);
 		}
 	}
+}
+
+/** Non-blocking diff tab. Does not wait for Accept/Reject. */
+export function previewInlineDiff(filePath: string, originalContent: string, proposedContent: string): void {
+	const originalUri = makeDiffUri(filePath, 'original');
+	const proposedUri = makeDiffUri(filePath, 'proposed');
+	nexoraDiffProvider.setContent(originalUri, originalContent);
+	nexoraDiffProvider.setContent(proposedUri, proposedContent);
+	void vscode.commands.executeCommand('vscode.diff', originalUri, proposedUri, `Nexora: ${filePath}`);
+}
+
+/** Ask mode: blocking Accept/Reject. Auto-edit: optional inline preview, never waits. */
+export async function confirmOrPreviewDiff(options: {
+	filePath: string;
+	fullPath: string;
+	proposedContent: string;
+	existsOnDisk: boolean;
+	originalContent: string;
+	requireConfirmation: boolean;
+}): Promise<boolean> {
+	const askToApply = options.requireConfirmation && shouldConfirmFileEdits();
+	if (askToApply) {
+		return previewDiffAndConfirm({
+			filePath: options.filePath,
+			fullPath: options.fullPath,
+			proposedContent: options.proposedContent,
+			existsOnDisk: options.existsOnDisk
+		});
+	}
+	if (options.requireConfirmation && getAgentFlag('inlineDiffs')) {
+		previewInlineDiff(options.filePath, options.originalContent, options.proposedContent);
+	}
+	return true;
 }
