@@ -348,6 +348,11 @@
           "type": "string",
           "default": "",
           "description": "Override the engine HTTP URL. Empty uses http://127.0.0.1:<engine port>."
+        },
+        "nexora.agent.autoApply": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, the agent applies file edits directly without showing a diff preview. A brief notification is shown instead of the Accept/Reject dialog."
         }
       }
     }

@@ -5,6 +5,7 @@
 
 import * as path from 'path';
 import { promises as fs } from 'fs';
+import * as vscode from 'vscode';
 import type { ToolResult } from './executor';
 import { previewDiffAndConfirm } from './diffProvider';
 
@@ -55,7 +56,9 @@ export async function writeFileTool(
 	const fullPath = path.resolve(workspaceRoot, filePath);
 	const isNewFile = !await fs.access(fullPath).then(() => true).catch(() => false);
 
-	if (requireConfirmation) {
+	const autoApply = vscode.workspace.getConfiguration('nexora').get<boolean>('agent.autoApply', false);
+
+	if (requireConfirmation && !autoApply) {
 		const accepted = await previewDiffAndConfirm({
 			filePath,
 			fullPath,
@@ -77,6 +80,10 @@ export async function writeFileTool(
 
 		// Write file
 		await fs.writeFile(fullPath, content, 'utf8');
+
+		if (requireConfirmation && autoApply) {
+			void vscode.window.showInformationMessage(`Applied edit to ${filePath}`);
+		}
 
 		return {
 			success: true,

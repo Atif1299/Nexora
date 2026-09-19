@@ -5,6 +5,7 @@
 
 import * as path from 'path';
 import { promises as fs } from 'fs';
+import * as vscode from 'vscode';
 import type { ToolResult } from './executor';
 import { previewDiffAndConfirm } from './diffProvider';
 
@@ -78,7 +79,9 @@ export async function applyPatchTool(
 		// Build new content
 		const newContent = content.replace(oldText, newText);
 
-		if (requireConfirmation) {
+		const autoApply = vscode.workspace.getConfiguration('nexora').get<boolean>('agent.autoApply', false);
+
+		if (requireConfirmation && !autoApply) {
 			const accepted = await previewDiffAndConfirm({
 				filePath,
 				fullPath,
@@ -95,6 +98,10 @@ export async function applyPatchTool(
 
 		// Write patched content
 		await fs.writeFile(fullPath, newContent, 'utf8');
+
+		if (requireConfirmation && autoApply) {
+			void vscode.window.showInformationMessage(`Applied edit to ${filePath}`);
+		}
 
 		return {
 			success: true,
@@ -155,7 +162,9 @@ export async function insertLinesTool(
 		contentLines.splice(insertAt, 0, ...newLines);
 		const newContent = contentLines.join('\n');
 
-		if (requireConfirmation) {
+		const autoApply = vscode.workspace.getConfiguration('nexora').get<boolean>('agent.autoApply', false);
+
+		if (requireConfirmation && !autoApply) {
 			const accepted = await previewDiffAndConfirm({
 				filePath,
 				fullPath,
@@ -171,6 +180,10 @@ export async function insertLinesTool(
 		}
 
 		await fs.writeFile(fullPath, newContent, 'utf8');
+
+		if (requireConfirmation && autoApply) {
+			void vscode.window.showInformationMessage(`Applied edit to ${filePath}`);
+		}
 
 		return {
 			success: true,
