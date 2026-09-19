@@ -11,6 +11,7 @@ import { grepTool } from './grep';
 import { listFilesTool } from './listFiles';
 import { writeFileTool } from './writeFile';
 import { applyPatchTool, insertLinesTool } from './applyPatch';
+import { runTerminalCommandTool } from './terminalCommand';
 
 export interface ToolResult {
 	success: boolean;
@@ -105,6 +106,15 @@ export async function executeToolCalls(
 						args.line_number,
 						args.lines,
 						true
+					);
+					break;
+
+				case 'run_terminal_command':
+					result = await runTerminalCommandTool(
+						workspaceRoot,
+						args.command,
+						args.cwd,
+						args.timeout_ms
 					);
 					break;
 
