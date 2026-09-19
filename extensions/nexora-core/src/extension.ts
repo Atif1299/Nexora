@@ -160,7 +160,7 @@ function updateEngineStatusBar(item: vscode.StatusBarItem, state: EngineState): 
 			break;
 		case 'ready':
 			item.text = '$(check) Nexora Engine: ready';
-			item.tooltip = 'Nexora engine is ready.';
+			item.tooltip = 'Nexora engine is ready. Click to open the Nexora Engine output channel (engine logs).';
 			item.backgroundColor = undefined;
 			break;
 		case 'failed':
