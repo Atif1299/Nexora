@@ -129,6 +129,12 @@
         "category": "Nexora"
       },
       {
+        "command": "nexora.openBrowser",
+        "title": "Open Nexora Browser",
+        "category": "Nexora",
+        "icon": "$(globe)"
+      },
+      {
         "command": "nexora.openTaskPlan",
         "title": "Open Nexora Task Plan",
         "category": "Nexora"
@@ -260,6 +266,11 @@
           "command": "nexora.openSettings",
           "when": "view == nexora.chatPanel",
           "group": "navigation@1"
+        },
+        {
+          "command": "nexora.openBrowser",
+          "when": "view == nexora.chatPanel",
+          "group": "navigation@2"
         },
         {
           "command": "nexora.decomposeRequest",
@@ -412,6 +423,21 @@
           "type": "boolean",
           "default": false,
           "description": "Submit chat with Ctrl+Enter. Enter inserts a newline."
+        },
+        "nexora.browser.openLocalLinks": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open localhost URLs from chat in the Nexora Browser tab instead of the system browser."
+        },
+        "nexora.browser.allowAgentControl": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow the agent to open, read, click, and type in the browser. Off denies all browser tools (Browser Protection)."
+        },
+        "nexora.browser.chromePath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to chrome.exe. Used when Chrome is not found in the default install locations."
         }
       }
     }
@@ -428,6 +454,7 @@
     "typescript": "^5.3.0"
   },
   "dependencies": {
+    "playwright-core": "^1.56.1",
     "ws": "^8.20.0"
   }
 }
