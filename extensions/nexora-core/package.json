@@ -24,11 +24,6 @@
           "icon": "media/icon-platforms.svg"
         },
         {
-          "id": "nexora-templates",
-          "title": "Templates",
-          "icon": "media/icon-templates.svg"
-        },
-        {
           "id": "nexora-timeline",
           "title": "Timeline",
           "icon": "media/icon-timeline.svg"
@@ -39,6 +34,11 @@
           "id": "nexora-sidebar",
           "title": "Nexora AI",
           "icon": "media/nexora-icon.svg"
+        },
+        {
+          "id": "nexora-sessions",
+          "title": "Nexora Sessions",
+          "icon": "media/icon-timeline.svg"
         }
       ],
       "panel": [
@@ -58,19 +58,19 @@
           "visibility": "visible"
         }
       ],
+      "nexora-sessions": [
+        {
+          "type": "webview",
+          "id": "nexora.sessionsPanel",
+          "name": "Nexora Sessions",
+          "visibility": "visible"
+        }
+      ],
       "nexora-platforms": [
         {
           "type": "webview",
           "id": "nexora.platformBrowser",
           "name": "Platforms",
-          "visibility": "visible"
-        }
-      ],
-      "nexora-templates": [
-        {
-          "type": "webview",
-          "id": "nexora.templates",
-          "name": "Templates",
           "visibility": "visible"
         }
       ],
@@ -127,6 +127,24 @@
         "command": "nexora.openChat",
         "title": "Open Nexora Chat",
         "category": "Nexora"
+      },
+      {
+        "command": "nexora.openChatInEditor",
+        "title": "Open Chat in Editor",
+        "category": "Nexora",
+        "icon": "$(window)"
+      },
+      {
+        "command": "nexora.toggleChatSidebar",
+        "title": "Toggle Chat Sidebar",
+        "category": "Nexora",
+        "icon": "$(layout-sidebar-right)"
+      },
+      {
+        "command": "nexora.toggleSessions",
+        "title": "Toggle Nexora Sessions",
+        "category": "Nexora",
+        "icon": "$(history)"
       },
       {
         "command": "nexora.openBrowser",
@@ -236,6 +254,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "nexora.useTemplate",
+        "title": "Use Template",
+        "category": "Nexora",
+        "icon": "$(notebook-template)"
+      },
+      {
         "command": "nexora.openTemplates",
         "title": "Templates",
         "category": "Nexora",
@@ -263,6 +287,16 @@
     "menus": {
       "view/title": [
         {
+          "command": "nexora.openChatInEditor",
+          "when": "view == nexora.chatPanel",
+          "group": "navigation@0"
+        },
+        {
+          "command": "nexora.toggleChatSidebar",
+          "when": "view == nexora.chatPanel",
+          "group": "navigation@0"
+        },
+        {
           "command": "nexora.openSettings",
           "when": "view == nexora.chatPanel",
           "group": "navigation@1"
@@ -271,6 +305,11 @@
           "command": "nexora.openBrowser",
           "when": "view == nexora.chatPanel",
           "group": "navigation@2"
+        },
+        {
+          "command": "nexora.useTemplate",
+          "when": "view == nexora.chatPanel",
+          "group": "navigation@3"
         },
         {
           "command": "nexora.decomposeRequest",
@@ -288,14 +327,22 @@
           "group": "navigation"
         },
         {
-          "command": "nexora.refreshTemplates",
-          "when": "view == nexora.templates",
-          "group": "navigation"
-        },
-        {
           "command": "nexora.refreshTimeline",
           "when": "view == nexora.timeline",
           "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "nexora.toggleSessions",
+          "group": "navigation@0",
+          "when": "activeWebviewPanelId == nexora.chatEditor"
+        }
+      ],
+      "commandCenter": [
+        {
+          "command": "nexora.toggleSessions",
+          "group": "navigation@0"
         }
       ]
     },

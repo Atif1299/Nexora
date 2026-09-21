@@ -5,6 +5,7 @@
 
 import * as vscode from 'vscode';
 import { ChatPanelProvider } from './chatPanel';
+import { SessionsViewProvider } from './sessionsView';
 import { PlatformBrowserProvider } from './platformPanel';
 import { TaskTreeProvider } from './taskTreeProvider';
 import { WorkflowPanelProvider } from './workflowPanel';
@@ -36,6 +37,38 @@ async function setOperationInProgress(value: boolean): Promise<void> {
 
 async function setChatFocused(value: boolean): Promise<void> {
 	await vscode.commands.executeCommand('setContext', 'nexora.chatFocused', value);
+}
+
+/** One-line summary for Task Output blocks (no engine log dump). */
+function taskStepSummary(message: WebSocketMessage, status: string): string {
+	if (status === 'skipped') {
+		const reason = (message.error || message.message || 'skipped').trim();
+		return reason.slice(0, 200);
+	}
+	if (status === 'failed') {
+		const reason = (message.error || message.message || 'failed').trim();
+		return reason.slice(0, 200);
+	}
+	if (status === 'running') {
+		return 'Running';
+	}
+	const result = message.result;
+	if (result && typeof result === 'object') {
+		const record = result as Record<string, unknown>;
+		if (typeof record.summary === 'string' && record.summary.trim()) {
+			return record.summary.trim().slice(0, 200);
+		}
+		if (typeof record.message === 'string' && record.message.trim()) {
+			return record.message.trim().slice(0, 200);
+		}
+		if (typeof record.url === 'string' && record.url.trim()) {
+			return record.url.trim().slice(0, 200);
+		}
+	}
+	if (typeof result === 'string' && result.trim()) {
+		return result.trim().slice(0, 200);
+	}
+	return status === 'success' ? 'Done' : status;
 }
 
 const NEVER_CANCELLED: vscode.CancellationToken = {
@@ -191,9 +224,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Wire IDE keys into every backend HTTP call (primary runtime credentials)
 	setApiKeyHeaderProvider(async () => {
 		const headers: Record<string, string> = {};
-		const [openai, anthropic, openrouter] = await Promise.all([
+		const [openai, anthropic, gemini, openrouter] = await Promise.all([
 			settingsService.getApiKey('openai'),
 			settingsService.getApiKey('anthropic'),
+			settingsService.getApiKey('gemini'),
 			settingsService.getApiKey('openrouter')
 		]);
 		if (openai) {
@@ -201,6 +235,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 		if (anthropic) {
 			headers['X-Nexora-Anthropic-Key'] = anthropic;
+		}
+		if (gemini) {
+			headers['X-Nexora-Gemini-Key'] = gemini;
 		}
 		if (openrouter) {
 			headers['X-Nexora-OpenRouter-Key'] = openrouter;
@@ -243,10 +280,17 @@ export async function activate(context: vscode.ExtensionContext) {
 	const gatedProviders: EngineGatedWebviewProvider[] = [];
 
 	const chatProvider = new ChatPanelProvider(context.extensionUri, context);
+	const sessionsProvider = new SessionsViewProvider(chatProvider);
+	chatProvider.setOnSessionsChanged(() => sessionsProvider.refresh());
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
 			'nexora.chatPanel',
 			gateWebview(chatProvider, context.subscriptions, gatedProviders),
+			retainHidden
+		),
+		vscode.window.registerWebviewViewProvider(
+			SessionsViewProvider.viewType,
+			sessionsProvider,
 			retainHidden
 		)
 	);
@@ -338,9 +382,16 @@ export async function activate(context: vscode.ExtensionContext) {
 				message.cost
 			);
 
+			const taskName = message.task_name || message.task_id || 'Unknown';
+			const summary = taskStepSummary(message, status);
+			const statusLabel = status === 'success'
+				? 'success'
+				: status === 'skipped'
+					? 'skipped'
+					: status;
 			const taskOutput: TaskOutput = {
 				taskId: message.task_id || '',
-				taskName: message.task_name || message.task_id || 'Unknown',
+				taskName: taskName,
 				platform: message.platform || 'unknown',
 				operation: message.operation || 'unknown',
 				status: status,
@@ -353,11 +404,13 @@ export async function activate(context: vscode.ExtensionContext) {
 			};
 			outputProvider.updateTaskOutput(taskOutput);
 
-			outputProvider.addLog(message.task_id || '', {
-				timestamp: new Date().toISOString(),
-				level: status === 'failed' ? 'error' : 'info',
-				message: `Task ${status}: ${message.task_name || message.task_id}`
-			});
+			if (status !== 'running') {
+				outputProvider.addLog(message.task_id || '', {
+					timestamp: new Date().toISOString(),
+					level: status === 'failed' ? 'error' : 'info',
+					message: `${taskName}: ${statusLabel}. ${summary}`
+				});
+			}
 
 			// Only a running task counts as an in-progress operation. Setting this on
 			// terminal events would leave Escape bound to cancel after execution ends.
@@ -383,6 +436,25 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.openChat', async () => {
 			await vscode.commands.executeCommand('nexora.chatPanel.focus');
 			await setChatFocused(true);
+		}),
+		vscode.commands.registerCommand('nexora.openChatInEditor', async () => {
+			await chatProvider.openInEditor();
+			await setChatFocused(true);
+		}),
+		vscode.commands.registerCommand('nexora.toggleChatSidebar', async () => {
+			if (chatProvider.isSidebarVisible()) {
+				await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+			} else {
+				await vscode.commands.executeCommand('nexora.chatPanel.focus');
+			}
+			await setChatFocused(true);
+		}),
+		vscode.commands.registerCommand('nexora.toggleSessions', async () => {
+			if (sessionsProvider.isVisible()) {
+				await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+			} else {
+				await vscode.commands.executeCommand('nexora.sessionsPanel.focus');
+			}
 		}),
 		vscode.commands.registerCommand('nexora.openBrowser', async (url?: string | vscode.Uri) => {
 			await openNexoraBrowser(url);
@@ -507,6 +579,9 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.refreshAnalytics', async () => {
 			await settingsProvider.refresh();
 			void notifications.showInfo('Analytics refreshed');
+		}),
+		vscode.commands.registerCommand('nexora.useTemplate', async () => {
+			await templatesProvider.useTemplate();
 		}),
 		vscode.commands.registerCommand('nexora.openTemplates', async () => {
 			await templatesProvider.open();
