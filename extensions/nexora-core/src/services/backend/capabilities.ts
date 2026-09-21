@@ -23,6 +23,7 @@ export interface CapabilitiesReport {
 	llm: {
 		openai: CapabilityStatus;
 		anthropic: CapabilityStatus;
+		gemini: CapabilityStatus;
 		openrouter: CapabilityStatus;
 	};
 	connectors: {
@@ -116,6 +117,7 @@ export function normalizeCapabilities(raw: unknown): CapabilitiesReport {
 		llm: {
 			openai: asStatus(llm.openai),
 			anthropic: asStatus(llm.anthropic),
+			gemini: asStatus(llm.gemini),
 			openrouter: asStatus(llm.openrouter)
 		},
 		connectors: {
@@ -163,6 +165,7 @@ export function allLlmNotConfigured(report: CapabilitiesReport | undefined): boo
 	}
 	return report.llm.openai === 'not_configured'
 		&& report.llm.anthropic === 'not_configured'
+		&& report.llm.gemini === 'not_configured'
 		&& report.llm.openrouter === 'not_configured';
 }
 

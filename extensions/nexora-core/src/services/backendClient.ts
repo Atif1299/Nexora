@@ -21,6 +21,7 @@ import { createAnalyticsApi, type AnalyticsDashboardData, type CostSummary, type
 import { createAgentApi, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './backend/agent';
 import { createStatusApi, type ConnectionsResponse, type TestResult, type ProviderStatus } from './backend/status';
 import { createCapabilitiesApi, type CapabilitiesReport } from './backend/capabilities';
+import { createModelsApi, type ModelCatalog } from './backend/models';
 import { createMcpApi, type McpServerRow } from './backend/mcp';
 import { createA2AApi, type A2ADelegateResult } from './backend/a2a';
 
@@ -28,6 +29,7 @@ export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
 export type { SSEEvent };
 export type { ConnectionsResponse, TestResult, ProviderStatus };
 export type { CapabilitiesReport };
+export type { ModelCatalog };
 export type { SaasConnector };
 export type { McpServerRow };
 export type { A2ADelegateResult };
@@ -512,6 +514,14 @@ export class BackendClient {
 	}
 
 	/**
+	 * Model catalog for Settings toggles and the chat composer picker.
+	 * Pass refresh=true to force the backend to rebuild (GET ?refresh=1).
+	 */
+	async getModelCatalog(refresh = false): Promise<ModelCatalog> {
+		return createModelsApi(this.transport).getModelCatalog(refresh);
+	}
+
+	/**
 	 * Week 12: Get connection status for LLM / deployment / database providers.
 	 * Reflects backend .env + OAuth tokens (Option A - not IDE SecretStorage).
 	 */
@@ -584,9 +594,26 @@ export class BackendClient {
 		request: string,
 		userId: string = 'default',
 		workspacePath?: string,
-		model?: string
+		model?: string,
+		options?: { session_id?: string; workspace_id?: string }
 	): Promise<any> {
-		return createOrchestrateApi(this.transport).generatePlan(request, userId, workspacePath, model);
+		return createOrchestrateApi(this.transport).generatePlan(
+			request,
+			userId,
+			workspacePath,
+			model,
+			options
+		);
+	}
+
+	async submitTaskResult(payload: {
+		plan_id: string;
+		task_id: string;
+		success: boolean;
+		summary: string;
+		files: string[];
+	}): Promise<any> {
+		return createOrchestrateApi(this.transport).submitTaskResult(payload);
 	}
 
 	/**
