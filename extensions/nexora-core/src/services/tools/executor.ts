@@ -12,6 +12,7 @@ import { listFilesTool } from './listFiles';
 import { writeFileTool } from './writeFile';
 import { applyPatchTool, insertLinesTool } from './applyPatch';
 import { runTerminalCommandTool, type TerminalCommandProgress } from './terminalCommand';
+import { browserClickTool, browserSnapshotTool, browserTypeTool, openBrowserTool } from './openBrowser';
 
 export interface ToolResult {
 	success: boolean;
@@ -128,6 +129,22 @@ export async function executeToolCalls(
 								: undefined
 						}
 					);
+					break;
+
+				case 'open_browser':
+					result = await openBrowserTool(args.url);
+					break;
+
+				case 'browser_snapshot':
+					result = await browserSnapshotTool();
+					break;
+
+				case 'browser_click':
+					result = await browserClickTool(args.selector, args.text);
+					break;
+
+				case 'browser_type':
+					result = await browserTypeTool(args.text, args.selector, args.submit);
 					break;
 
 				default:
