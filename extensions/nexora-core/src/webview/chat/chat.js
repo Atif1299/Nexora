@@ -84,6 +84,14 @@
 	let atCompleteSuppressEnter = false;
 	let submitWithCtrlEnter = !!initial.submitWithCtrlEnter;
 
+	const modelDdList = document.getElementById('modelDdList');
+	const modelDdSearch = document.getElementById('modelDdSearch');
+	const modelDdSearchWrap = document.getElementById('modelDdSearchWrap');
+
+	let modelCatalog = null;
+	let enabledModelIds = [];
+	const selectedModelLabelCache = {};
+
 	const modeHints = {
 		'chat': 'Chat mode: Have a conversation, ask questions, get explanations',
 		'ask': 'Ask mode: Answer using indexed workspace memory (.mv2). Index the workspace first if needed.',
@@ -100,21 +108,168 @@
 		'agent': 'Run Agent'
 	};
 
+	const PROVIDER_TITLE_CASE = {
+		openai: 'OpenAI',
+		openrouter: 'OpenRouter',
+		anthropic: 'Anthropic',
+		gemini: 'Gemini'
+	};
+
+	let ddCloseTimer = null;
+
+	function getDdMenu(root) {
+		if (!root) {
+			return null;
+		}
+		const trigger = root.querySelector('.nx-ddTrigger');
+		const id = trigger && trigger.getAttribute('aria-controls');
+		if (id) {
+			const byId = document.getElementById(id);
+			if (byId) {
+				return byId;
+			}
+		}
+		return root.querySelector('.nx-ddMenu');
+	}
+
 	function getDdOptions(menu) {
 		return Array.prototype.slice.call(menu.querySelectorAll('[role="option"]'));
+	}
+
+	function findDdOptionByValue(menu, val) {
+		const items = getDdOptions(menu);
+		for (let i = 0; i < items.length; i++) {
+			if (items[i].getAttribute('data-value') === val) {
+				return items[i];
+			}
+		}
+		return null;
+	}
+
+	function optionDisplayLabel(opt) {
+		if (!opt) {
+			return '';
+		}
+		const fromAttr = opt.getAttribute('data-label');
+		if (fromAttr) {
+			return fromAttr;
+		}
+		const labelEl = opt.querySelector('.nx-ddItemLabel');
+		if (labelEl) {
+			return (labelEl.textContent || '').trim();
+		}
+		return (opt.textContent || '').trim();
+	}
+
+	function prettifyModelId(id) {
+		let s = String(id || '').trim();
+		if (!s) {
+			return '';
+		}
+		s = s.replace(/:(free|paid)$/i, '');
+		const slash = s.lastIndexOf('/');
+		if (slash >= 0) {
+			s = s.slice(slash + 1);
+		}
+		s = s.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+		return s.split(' ').map(function (word) {
+			if (!word) {
+				return word;
+			}
+			if (/^gpt\d/i.test(word) || /^gpt$/i.test(word)) {
+				return word.replace(/^gpt/i, 'GPT');
+			}
+			if (/^o\d/i.test(word)) {
+				return word;
+			}
+			return word.charAt(0).toUpperCase() + word.slice(1);
+		}).join(' ');
+	}
+
+	function resolveModelLabel(model) {
+		const id = model && model.id ? String(model.id) : '';
+		const label = model && model.label ? String(model.label).trim() : '';
+		if (label && label !== id) {
+			return label;
+		}
+		if (label && label.indexOf('/') === -1 && label.indexOf(':') === -1) {
+			return label;
+		}
+		return prettifyModelId(id || label) || label || id;
+	}
+
+	function humanProviderLabel(provider) {
+		if (!provider) {
+			return '';
+		}
+		const id = String(provider.id || '').toLowerCase();
+		if (PROVIDER_TITLE_CASE[id]) {
+			return PROVIDER_TITLE_CASE[id];
+		}
+		const raw = String(provider.label || provider.id || '').trim();
+		if (!raw) {
+			return '';
+		}
+		if (raw === raw.toUpperCase() && raw.length > 1) {
+			return raw.charAt(0) + raw.slice(1).toLowerCase();
+		}
+		return raw;
+	}
+
+	function ddItemHtml(value, label, opts) {
+		opts = opts || {};
+		const tierHtml = opts.tier === 'free'
+			? '<span class="nx-ddItemTier">Free</span>'
+			: '';
+		return '<button type="button" class="nx-ddItem" role="option" data-value="'
+			+ escapeHtml(value) + '" data-label="' + escapeHtml(label) + '">'
+			+ '<span class="nx-ddItemCheck" aria-hidden="true"></span>'
+			+ '<span class="nx-ddItemLabel">' + escapeHtml(label) + '</span>'
+			+ tierHtml
+			+ '</button>';
+	}
+
+	function portalDdMenu(menu) {
+		if (!menu || menu.parentElement === document.body) {
+			return;
+		}
+		menu._nxDdHome = {
+			parent: menu.parentElement,
+			next: menu.nextSibling
+		};
+		document.body.appendChild(menu);
+	}
+
+	function restoreDdMenu(menu) {
+		if (!menu || !menu._nxDdHome || !menu._nxDdHome.parent) {
+			return;
+		}
+		const home = menu._nxDdHome;
+		if (home.next && home.next.parentNode === home.parent) {
+			home.parent.insertBefore(menu, home.next);
+		} else {
+			home.parent.appendChild(menu);
+		}
+		menu._nxDdHome = null;
 	}
 
 	function syncOneDd(root) {
 		const hidden = root.querySelector('input[type="hidden"]');
 		const textEl = root.querySelector('.nx-ddTriggerText');
-		const menu = root.querySelector('.nx-ddMenu');
+		const menu = getDdMenu(root);
 		if (!hidden || !textEl || !menu) {
 			return;
 		}
 		const val = hidden.value;
-		const opt = menu.querySelector('[role="option"][data-value="' + val + '"]');
+		const opt = findDdOptionByValue(menu, val);
 		if (opt) {
-			textEl.textContent = (opt.textContent || '').trim();
+			const label = optionDisplayLabel(opt);
+			textEl.textContent = label;
+			if (val) {
+				selectedModelLabelCache[val] = label;
+			}
+		} else if (root.getAttribute('data-dd-kind') === 'model') {
+			textEl.textContent = selectedModelLabelCache[val] || (val === 'auto' ? 'Auto' : prettifyModelId(val) || val);
 		}
 		getDdOptions(menu).forEach(function (o) {
 			const on = o.getAttribute('data-value') === val;
@@ -125,110 +280,143 @@
 
 	function positionDdMenu(root) {
 		const trigger = root.querySelector('.nx-ddTrigger');
-		const menu = root.querySelector('.nx-ddMenu');
+		const menu = getDdMenu(root);
 		if (!trigger || !menu) {
 			return;
 		}
 		const rect = trigger.getBoundingClientRect();
-		const gap = 4;
-		const cap = 240;
-		const minW = Math.max(rect.width, 148);
+		const gap = 6;
+		const isModel = root.getAttribute('data-dd-kind') === 'model';
+		const cap = isModel ? 320 : 240;
+		const minW = Math.max(rect.width, isModel ? 240 : 148);
 		let left = rect.left;
 		if (left + minW > window.innerWidth - 6) {
 			left = window.innerWidth - 6 - minW;
 		}
+		const spaceAbove = Math.max(48, Math.floor(rect.top - gap - 4));
+		const maxH = Math.min(cap, spaceAbove);
+
 		menu.style.left = Math.max(4, left) + 'px';
+		menu.style.right = 'auto';
 		menu.style.minWidth = minW + 'px';
-		menu.style.maxHeight = '';
-
-		const spaceBelow = window.innerHeight - rect.bottom - gap;
-		const spaceAbove = rect.top - gap;
-		let h = menu.getBoundingClientRect().height;
-
-		function applyMax(px) {
-			const m = Math.max(40, Math.min(cap, Math.floor(Math.max(0, px))));
-			menu.style.maxHeight = m + 'px';
-			return menu.getBoundingClientRect().height;
-		}
-
-		let topPx;
-		if (h <= spaceBelow) {
-			topPx = rect.bottom + gap;
-		} else if (h <= spaceAbove) {
-			topPx = rect.top - gap - h;
-		} else if (spaceAbove >= spaceBelow) {
-			h = applyMax(spaceAbove);
-			topPx = Math.max(gap, rect.top - gap - h);
-		} else {
-			h = applyMax(spaceBelow);
-			topPx = rect.bottom + gap;
-			if (topPx + h > window.innerHeight - gap) {
-				topPx = Math.max(gap, window.innerHeight - gap - h);
-			}
-		}
-		menu.style.top = topPx + 'px';
+		menu.style.maxWidth = Math.min(360, window.innerWidth - 8) + 'px';
+		menu.style.maxHeight = maxH + 'px';
+		menu.style.top = 'auto';
+		menu.style.bottom = Math.max(gap, Math.round(window.innerHeight - rect.top + gap)) + 'px';
 	}
 
 	function setDdKeyboardHighlight(menu, index) {
-		const items = getDdOptions(menu);
-		items.forEach(function (el, i) {
-			el.classList.toggle('nx-ddItemKeyboard', i === index);
+		const items = getDdOptions(menu).filter(function (el) {
+			return !el.hidden && el.style.display !== 'none';
 		});
+		const all = getDdOptions(menu);
+		all.forEach(function (el) {
+			el.classList.remove('nx-ddItemKeyboard');
+		});
+		if (items[index]) {
+			items[index].classList.add('nx-ddItemKeyboard');
+		}
 		ddKbIndex = index;
 	}
 
-	function closeDd(root) {
+	function clearDdMenuInline(menu) {
+		menu.style.top = '';
+		menu.style.bottom = '';
+		menu.style.left = '';
+		menu.style.right = '';
+		menu.style.minWidth = '';
+		menu.style.maxWidth = '';
+		menu.style.maxHeight = '';
+	}
+
+	function closeDd(root, immediate) {
 		if (!root) {
 			return;
 		}
+		if (ddCloseTimer) {
+			window.clearTimeout(ddCloseTimer);
+			ddCloseTimer = null;
+		}
 		const trigger = root.querySelector('.nx-ddTrigger');
-		const menu = root.querySelector('.nx-ddMenu');
+		const menu = getDdMenu(root);
 		if (trigger) {
 			trigger.setAttribute('aria-expanded', 'false');
-		}
-		if (menu) {
-			menu.hidden = true;
-			menu.style.top = '';
-			menu.style.left = '';
-			menu.style.minWidth = '';
-			menu.style.maxHeight = '';
-			getDdOptions(menu).forEach(function (o) {
-				o.classList.remove('nx-ddItemKeyboard');
-			});
 		}
 		root.classList.remove('nx-ddOpen');
 		if (openDdRoot === root) {
 			openDdRoot = null;
 		}
+		if (!menu) {
+			return;
+		}
+		menu.classList.remove('nx-ddMenuOpen');
+		getDdOptions(menu).forEach(function (o) {
+			o.classList.remove('nx-ddItemKeyboard');
+		});
+
+		function finishClose() {
+			ddCloseTimer = null;
+			menu.hidden = true;
+			clearDdMenuInline(menu);
+			restoreDdMenu(menu);
+		}
+
+		if (immediate) {
+			finishClose();
+		} else {
+			ddCloseTimer = window.setTimeout(finishClose, 130);
+		}
 	}
 
 	function openDd(root) {
+		if (ddCloseTimer) {
+			window.clearTimeout(ddCloseTimer);
+			ddCloseTimer = null;
+		}
 		if (openDdRoot && openDdRoot !== root) {
-			closeDd(openDdRoot);
+			closeDd(openDdRoot, true);
 		}
 		const trigger = root.querySelector('.nx-ddTrigger');
-		const menu = root.querySelector('.nx-ddMenu');
+		const menu = getDdMenu(root);
 		const hidden = root.querySelector('input[type="hidden"]');
 		if (!trigger || !menu || !hidden) {
 			return;
 		}
+		if (root.getAttribute('data-dd-kind') === 'model') {
+			vscode.postMessage({ type: 'requestModelPicker' });
+			if (modelDdSearch) {
+				modelDdSearch.value = '';
+				filterModelMenu('');
+			}
+		}
+		portalDdMenu(menu);
 		openDdRoot = root;
 		root.classList.add('nx-ddOpen');
 		trigger.setAttribute('aria-expanded', 'true');
 		menu.hidden = false;
-		const items = getDdOptions(menu);
-		const idx = Math.max(0, items.findIndex(function (i) {
+		menu.classList.remove('nx-ddMenuOpen');
+		const visible = getDdOptions(menu).filter(function (el) {
+			return !el.hidden && el.style.display !== 'none';
+		});
+		const focusItems = visible.length ? visible : getDdOptions(menu);
+		const idx = Math.max(0, focusItems.findIndex(function (i) {
 			return i.getAttribute('data-value') === hidden.value;
 		}));
 		setDdKeyboardHighlight(menu, idx);
 		positionDdMenu(root);
 		requestAnimationFrame(function () {
-			if (openDdRoot === root) {
-				positionDdMenu(root);
+			if (openDdRoot !== root) {
+				return;
 			}
+			positionDdMenu(root);
+			menu.classList.add('nx-ddMenuOpen');
 		});
 		try {
-			menu.focus({ preventScroll: true });
+			if (root.getAttribute('data-dd-kind') === 'model' && modelDdSearch && modelDdSearchWrap && !modelDdSearchWrap.hidden) {
+				modelDdSearch.focus({ preventScroll: true });
+			} else {
+				menu.focus({ preventScroll: true });
+			}
 		} catch (_e) {
 			menu.focus();
 		}
@@ -244,6 +432,8 @@
 		closeDd(root);
 		if (root.getAttribute('data-dd-kind') === 'mode') {
 			updateModeUI();
+		} else if (root.getAttribute('data-dd-kind') === 'model') {
+			vscode.postMessage({ type: 'selectModel', modelId: value });
 		}
 	}
 
@@ -253,7 +443,7 @@
 		}
 		root.dataset.nxDdWired = '1';
 		const trigger = root.querySelector('.nx-ddTrigger');
-		const menu = root.querySelector('.nx-ddMenu');
+		const menu = getDdMenu(root);
 		if (!trigger || !menu) {
 			return;
 		}
@@ -284,7 +474,9 @@
 		});
 
 		menu.addEventListener('keydown', function (e) {
-			const items = getDdOptions(menu);
+			const items = getDdOptions(menu).filter(function (el) {
+				return !el.hidden && el.style.display !== 'none';
+			});
 			if (!items.length) {
 				return;
 			}
@@ -305,6 +497,10 @@
 					applyDdSelection(root, pick.getAttribute('data-value'));
 					trigger.focus();
 				}
+			} else if (e.key === 'Escape') {
+				e.preventDefault();
+				closeDd(root);
+				trigger.focus();
 			}
 		});
 	}
@@ -324,6 +520,131 @@
 		messages.addEventListener('wheel', showThumb, { passive: true });
 	}
 
+	function filterModelMenu(query) {
+		if (!modelDdList) {
+			return;
+		}
+		const q = String(query || '').trim().toLowerCase();
+		const sections = modelDdList.querySelectorAll('.nx-ddSection');
+		const options = modelDdList.querySelectorAll('[role="option"]');
+		options.forEach(function (opt) {
+			const label = (opt.getAttribute('data-label') || optionDisplayLabel(opt) || '').toLowerCase();
+			const id = (opt.getAttribute('data-value') || '').toLowerCase();
+			const match = !q || label.indexOf(q) !== -1 || id.indexOf(q) !== -1;
+			opt.hidden = !match;
+			opt.style.display = match ? '' : 'none';
+		});
+		sections.forEach(function (section) {
+			let el = section.nextElementSibling;
+			let any = false;
+			while (el && !el.classList.contains('nx-ddSection')) {
+				if (el.getAttribute('role') === 'option' && !el.hidden) {
+					any = true;
+					break;
+				}
+				el = el.nextElementSibling;
+			}
+			section.hidden = q ? !any : false;
+			section.style.display = section.hidden ? 'none' : '';
+		});
+		if (modelDdRoot && modelDdRoot.classList.contains('nx-ddOpen')) {
+			positionDdMenu(modelDdRoot);
+		}
+	}
+
+	function wireModelSearch() {
+		if (!modelDdSearch || modelDdSearch.dataset.nxWired) {
+			return;
+		}
+		modelDdSearch.dataset.nxWired = '1';
+		modelDdSearch.addEventListener('input', function () {
+			filterModelMenu(modelDdSearch.value);
+		});
+		modelDdSearch.addEventListener('keydown', function (e) {
+			if (e.key === 'ArrowDown' || e.key === 'Enter') {
+				e.preventDefault();
+				const menu = modelDdRoot && getDdMenu(modelDdRoot);
+				if (!menu) {
+					return;
+				}
+				const items = getDdOptions(menu).filter(function (el) {
+					return !el.hidden;
+				});
+				if (!items.length) {
+					return;
+				}
+				setDdKeyboardHighlight(menu, 0);
+				try {
+					items[0].focus();
+				} catch (_e) { /* ignore */ }
+			} else if (e.key === 'Escape') {
+				e.preventDefault();
+				closeDd(modelDdRoot);
+			}
+		});
+		modelDdSearch.addEventListener('click', function (e) {
+			e.stopPropagation();
+		});
+	}
+
+	function renderModelPicker(catalog, enabledIds, selectedId) {
+		modelCatalog = catalog || null;
+		enabledModelIds = Array.isArray(enabledIds) ? enabledIds : [];
+		const enabled = new Set(enabledModelIds);
+		const list = modelDdList || document.getElementById('modelDdList');
+		if (!list) {
+			return;
+		}
+
+		const autoLabel = (catalog && catalog.auto && catalog.auto.label) || 'Auto';
+		selectedModelLabelCache.auto = autoLabel;
+
+		let html = ddItemHtml('auto', autoLabel);
+
+		const providers = (catalog && Array.isArray(catalog.providers)) ? catalog.providers : [];
+		let optionCount = 1;
+		providers.forEach(function (provider) {
+			if (!provider || !provider.configured) {
+				return;
+			}
+			const models = Array.isArray(provider.models) ? provider.models : [];
+			const visible = models.filter(function (m) {
+				return m && enabled.has(m.id);
+			});
+			if (!visible.length) {
+				return;
+			}
+			html += '<div class="nx-ddSection" role="presentation">'
+				+ escapeHtml(humanProviderLabel(provider)) + '</div>';
+			visible.forEach(function (model) {
+				const label = resolveModelLabel(model);
+				selectedModelLabelCache[model.id] = label;
+				html += ddItemHtml(model.id, label, { tier: model.tier });
+				optionCount += 1;
+			});
+		});
+
+		list.innerHTML = html;
+
+		if (modelDdSearchWrap) {
+			modelDdSearchWrap.hidden = optionCount < 8;
+		}
+
+		if (modelSelect) {
+			const nextId = selectedId || modelSelect.value || 'auto';
+			modelSelect.value = nextId;
+		}
+		if (modelDdRoot) {
+			syncOneDd(modelDdRoot);
+			if (modelDdRoot.classList.contains('nx-ddOpen')) {
+				positionDdMenu(modelDdRoot);
+			}
+		}
+		if (modelDdSearch && modelDdSearch.value) {
+			filterModelMenu(modelDdSearch.value);
+		}
+	}
+
 	function wireComposerDropdowns() {
 		if (modeDdRoot) {
 			wireDd(modeDdRoot);
@@ -331,6 +652,7 @@
 		if (modelDdRoot) {
 			wireDd(modelDdRoot);
 		}
+		wireModelSearch();
 		if (ddGlobalsBound) {
 			return;
 		}
@@ -340,6 +662,10 @@
 				return;
 			}
 			if (openDdRoot.contains(e.target)) {
+				return;
+			}
+			const menu = getDdMenu(openDdRoot);
+			if (menu && menu.contains(e.target)) {
 				return;
 			}
 			closeDd(openDdRoot);
@@ -884,27 +1210,111 @@
 		input.focus();
 	}
 
-	function formatContent(content) {
-		let html = escapeHtml(content);
+	function wrapFenceHtml(code, lang) {
+		const copyId = 'code-' + Math.random().toString(36).slice(2, 11);
+		const title = lang || 'Code';
+		return (
+			'<div class="nx-codeHeader">' +
+			'<span class="nx-codeTitle">' + title + '</span>' +
+			'<button class="nx-copyBtn" data-copy-target="' + copyId + '">Copy</button>' +
+			'</div>' +
+			'<pre class="nx-codeBlock" id="' + copyId + '">' +
+			code +
+			'</pre>'
+		);
+	}
 
-		const codeBlockRegex = /```([\s\S]*?)```/g;
-		html = html.replace(codeBlockRegex, function (_match, code) {
-			const trimmed = String(code).trim();
-			const copyId = 'code-' + Math.random().toString(36).slice(2, 11);
-			return (
-				'<div class="nx-codeHeader">' +
-				'<span class="nx-codeTitle">Code</span>' +
-				'<button class="nx-copyBtn" data-copy-target="' + copyId + '">Copy</button>' +
-				'</div>' +
-				'<pre class="nx-codeBlock" id="' + copyId + '">' +
-				trimmed +
-				'</pre>'
-			);
+	function stashMarkdownBlock(blocks, html) {
+		const token = '%%NXCB' + blocks.length + '%%';
+		blocks.push(html);
+		return token;
+	}
+
+	function extractMarkdownFences(html, blocks) {
+		let out = '';
+		let i = 0;
+		while (i < html.length) {
+			const start = html.indexOf('```', i);
+			if (start < 0) {
+				out += html.slice(i);
+				break;
+			}
+			out += html.slice(i, start);
+			const afterOpen = start + 3;
+			const close = html.indexOf('```', afterOpen);
+			const body = close < 0 ? html.slice(afterOpen) : html.slice(afterOpen, close);
+			let lang = '';
+			let code = body;
+			const nl = body.indexOf('\n');
+			if (nl >= 0) {
+				const first = body.slice(0, nl).trim();
+				if (/^[A-Za-z0-9_+-]*$/.test(first)) {
+					lang = first;
+					code = body.slice(nl + 1);
+				}
+			}
+			out += stashMarkdownBlock(blocks, wrapFenceHtml(code.trim(), lang));
+			if (close < 0) {
+				break;
+			}
+			i = close + 3;
+		}
+		return out;
+	}
+
+	function applyMarkdownLists(html) {
+		html = html.replace(/(^|\n)((?:[*+-] .+(?:\n|$))+)/g, function (_match, lead, block) {
+			const items = block.replace(/\n$/, '').split('\n').map(function (line) {
+				return '<li>' + line.replace(/^[*+-] /, '') + '</li>';
+			}).join('');
+			return lead + '<ul>' + items + '</ul>';
 		});
+		html = html.replace(/(^|\n)((?:\d+\. .+(?:\n|$))+)/g, function (_match, lead, block) {
+			const items = block.replace(/\n$/, '').split('\n').map(function (line) {
+				return '<li>' + line.replace(/^\d+\. /, '') + '</li>';
+			}).join('');
+			return lead + '<ol>' + items + '</ol>';
+		});
+		return html;
+	}
 
+	function applyMarkdownInline(html) {
 		html = html.replace(/`([^`]+)`/g, '<code class="nx-inlineCode">$1</code>');
 		html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+		html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+		html = html.replace(/\*\*/g, '');
+		html = html.replace(/`/g, '');
+		return html;
+	}
+
+	function safeMarkdownHref(url) {
+		const href = String(url || '').trim();
+		const protocol = href.replace(/&amp;/g, '&').toLowerCase();
+		if (protocol.indexOf('https://') === 0 || protocol.indexOf('http://') === 0 || protocol.indexOf('mailto:') === 0) {
+			return href;
+		}
+		return undefined;
+	}
+
+	function formatContent(content) {
+		const blocks = [];
+		let html = escapeHtml(String(content || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+		html = extractMarkdownFences(html, blocks);
+
+		html = html.replace(/^#{1,6}\s+(.+)$/gm, '<strong class="nx-mdH">$1</strong>');
+		html = html.replace(/^#{1,6}\s*/gm, '');
+		html = applyMarkdownLists(html);
+		html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_match, text, url) {
+			const href = safeMarkdownHref(url);
+			const label = applyMarkdownInline(text);
+			return stashMarkdownBlock(blocks, href ? '<a href="' + href + '">' + label + '</a>' : label);
+		});
+		html = applyMarkdownInline(html);
 		html = html.replace(/\n/g, '<br/>');
+
+		for (let i = 0; i < blocks.length; i++) {
+			html = html.split('%%NXCB' + i + '%%').join(blocks[i]);
+		}
 		return html;
 	}
 
@@ -1245,7 +1655,7 @@
 		} else if (lower.startsWith('read_file:')) {
 			iconClass = 'nx-activityFileIcon nx-activityFileIconRead';
 			iconText = 'R';
-		} else if (lower.startsWith('open_browser:') || lower.startsWith('browser_snapshot') || lower.startsWith('browser_click:') || lower.startsWith('browser_type:')) {
+		} else if (lower.startsWith('open_browser:') || lower.startsWith('browser_snapshot') || lower.startsWith('browser_click:') || lower.startsWith('browser_type:') || lower.startsWith('browser_select:') || lower.startsWith('browser_press:')) {
 			iconClass = 'nx-activityFileIcon nx-activityFileIconSearch';
 			iconText = 'B';
 		} else if (lower.startsWith('search_codebase:') || lower.startsWith('grep:') || lower.startsWith('search_chat_history:')) {
@@ -1452,6 +1862,26 @@
 		});
 	}
 
+	function planTaskStatusMark(status) {
+		const s = (status || 'pending').toLowerCase();
+		if (s === 'success') {
+			return '+';
+		}
+		if (s === 'failed' || s === 'cancelled') {
+			return 'x';
+		}
+		if (s === 'running' || s === 'retrying') {
+			return '>';
+		}
+		if (s === 'skipped') {
+			return '-';
+		}
+		if (s === 'queued') {
+			return 'q';
+		}
+		return 'o';
+	}
+
 	function createPlanApprovalCard(plan) {
 		if (welcome) {
 			welcome.style.display = 'none';
@@ -1495,29 +1925,19 @@
 		taskList.className = 'nx-planTasks';
 		taskList.id = 'plan-tasks-' + plan.plan_id;
 
-		(plan.tasks || []).forEach((task, index) => {
+		(plan.tasks || []).forEach((task) => {
+			const initialStatus = (task.status || 'pending').toLowerCase();
 			const taskEl = document.createElement('div');
 			taskEl.className = 'nx-planTask';
 			taskEl.id = 'task-' + task.task_id;
-			taskEl.setAttribute('data-status', 'pending');
-
-			const deps = task.dependencies && task.dependencies.length > 0
-				? `<span class="nx-taskDeps">after ${task.dependencies.join(', ')}</span>`
-				: '';
-
+			taskEl.setAttribute('data-status', initialStatus);
 			taskEl.innerHTML = `
 				<div class="nx-taskStatus">
-					<span class="nx-taskDot"></span>
-					<span class="nx-taskIndex">${index + 1}</span>
+					<span class="nx-taskMark">${planTaskStatusMark(initialStatus)}</span>
 				</div>
 				<div class="nx-taskInfo">
-					<div class="nx-taskName">${escapeHtml(task.name)}</div>
-					<div class="nx-taskDetails">
-						<span class="nx-taskPlatform">${task.platform}</span>
-						${deps}
-					</div>
+					<div class="nx-taskName">${escapeHtml(task.name || task.task_id)}</div>
 				</div>
-				<div class="nx-taskCost">$${(task.estimated_cost || 0).toFixed(4)}</div>
 			`;
 			taskList.appendChild(taskEl);
 		});
@@ -1544,28 +1964,32 @@
 	}
 
 	function updateTaskStatus(taskId, status, error, cost) {
+		const normalized = (status || 'pending').toLowerCase();
 		const taskEl = document.getElementById('task-' + taskId);
 		if (!taskEl) {
 			return;
 		}
 
-		taskEl.setAttribute('data-status', status);
+		taskEl.setAttribute('data-status', normalized);
 
-		if (cost !== undefined && cost !== null) {
-			const costEl = taskEl.querySelector('.nx-taskCost');
-			if (costEl) {
-				costEl.textContent = '$' + cost.toFixed(4);
-			}
+		const markEl = taskEl.querySelector('.nx-taskMark');
+		if (markEl) {
+			markEl.textContent = planTaskStatusMark(normalized);
 		}
 
-		if (status === 'failed' && error) {
-			let errorEl = taskEl.querySelector('.nx-taskError');
-			if (!errorEl) {
-				errorEl = document.createElement('div');
-				errorEl.className = 'nx-taskError';
-				taskEl.querySelector('.nx-taskInfo').appendChild(errorEl);
+		if (currentPlan && currentPlan.tasks) {
+			const task = currentPlan.tasks.find(function (t) {
+				return t.task_id === taskId;
+			});
+			if (task) {
+				task.status = normalized;
+				if (error !== undefined) {
+					task.error = error;
+				}
+				if (cost !== undefined && cost !== null) {
+					task.actual_cost = cost;
+				}
 			}
-			errorEl.textContent = error;
 		}
 	}
 
@@ -1687,10 +2111,11 @@
 
 	function showPlanComplete(planId, status, tasks, actualCost) {
 		const actionsEl = document.getElementById('plan-actions-' + planId);
+		const resolvedTasks = tasks || (currentPlan && currentPlan.plan_id === planId ? currentPlan.tasks : null);
 		if (actionsEl) {
 			const isSuccess = status === 'completed';
-			const successCount = tasks ? tasks.filter(t => t.status === 'success').length : 0;
-			const failedCount = tasks ? tasks.filter(t => t.status === 'failed').length : 0;
+			const successCount = resolvedTasks ? resolvedTasks.filter(t => t.status === 'success').length : 0;
+			const failedCount = resolvedTasks ? resolvedTasks.filter(t => t.status === 'failed').length : 0;
 
 			actionsEl.innerHTML = `
 				<div class="nx-planResult ${isSuccess ? 'nx-planSuccess' : 'nx-planFailed'}">
@@ -1705,8 +2130,26 @@
 			`;
 		}
 
-		if (tasks) {
-			tasks.forEach(task => {
+		// Clear leftover "Running the plan..." loading bubble once the plan finishes.
+		if (lastLoadingMessage) {
+			const body = lastLoadingMessage.querySelector('.nx-msgBody');
+			const text = (body && body.textContent) ? body.textContent.trim() : '';
+			if (!text || text === 'Running the plan...') {
+				lastLoadingMessage.remove();
+				lastLoadingMessage = null;
+			}
+		}
+		if (messages) {
+			messages.querySelectorAll('.nx-msg.nx-assistant').forEach(function (el) {
+				const body = el.querySelector('.nx-msgBody');
+				if (body && body.textContent && body.textContent.trim() === 'Running the plan...') {
+					el.remove();
+				}
+			});
+		}
+
+		if (resolvedTasks) {
+			resolvedTasks.forEach(task => {
 				updateTaskStatus(task.task_id, task.status, task.error, task.actual_cost);
 			});
 		}
@@ -2290,10 +2733,26 @@
 				submitWithCtrlEnter = !!data.submitWithCtrlEnter;
 				applySendButtonChrome();
 				break;
+
+			case 'modelPickerState':
+				renderModelPicker(data.catalog, data.enabledModelIds, data.selectedModelId);
+				break;
+
+			case 'modelSelected':
+				if (modelSelect && data.modelId) {
+					modelSelect.value = data.modelId;
+					if (modelDdRoot) {
+						syncOneDd(modelDdRoot);
+					}
+				}
+				break;
 		}
 	});
 
 	// Initialize
+	if (modelSelect && initial.selectedModelId) {
+		modelSelect.value = initial.selectedModelId;
+	}
 	updateModeUI();
 	updateStatus(!!initial.connected);
 	updateAuthStatus(!!initial.auth.github, !!initial.auth.vercel, !!initial.auth.supabase, !!initial.auth.stripe, !!initial.auth.v0, !!initial.auth.elevenlabs, !!initial.auth.tavily);
@@ -2302,6 +2761,54 @@
 		renderSessions(initial.sessions, initial.activeSessionId);
 		loadSessionMessages(initial.activeSessionId, initial.messages || []);
 	}
+
+	function injectDdTriggerIcon(root, svgHtml) {
+		if (!root) {
+			return;
+		}
+		const trigger = root.querySelector('.nx-ddTrigger');
+		if (!trigger || trigger.querySelector('.nx-ddTriggerIcon')) {
+			return;
+		}
+		const icon = document.createElement('span');
+		icon.className = 'nx-ddTriggerIcon';
+		icon.setAttribute('aria-hidden', 'true');
+		icon.innerHTML = svgHtml;
+		const text = trigger.querySelector('.nx-ddTriggerText');
+		if (text) {
+			trigger.insertBefore(icon, text);
+		} else {
+			trigger.insertBefore(icon, trigger.firstChild);
+		}
+	}
+
+	function syncComposerCompact() {
+		const card = document.getElementById('composerCard');
+		if (!card) {
+			return;
+		}
+		const narrow = card.clientWidth > 0 && card.clientWidth < 280;
+		card.classList.toggle('nx-composerCompact', narrow);
+	}
+
+	injectDdTriggerIcon(
+		modeDdRoot,
+		'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3 14.2 8.8 20 11 14.2 13.2 12 19 9.8 13.2 4 11 9.8 8.8 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>'
+	);
+	injectDdTriggerIcon(
+		modelDdRoot,
+		'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 10h8M8 14h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
+	);
+
+	const composerCardEl = document.getElementById('composerCard');
+	if (composerCardEl && typeof ResizeObserver !== 'undefined') {
+		const ro = new ResizeObserver(function () {
+			syncComposerCompact();
+		});
+		ro.observe(composerCardEl);
+	}
+	window.addEventListener('resize', syncComposerCompact);
+	syncComposerCompact();
 
 	vscode.postMessage({ type: 'checkBackend' });
 	vscode.postMessage({ type: 'checkAuthStatus' });
