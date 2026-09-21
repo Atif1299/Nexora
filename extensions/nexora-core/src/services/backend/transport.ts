@@ -40,6 +40,18 @@ export class RequestCancelledError extends Error {
 	}
 }
 
+async function errorFromHttpResponse(response: Response): Promise<Error> {
+	try {
+		const body = await response.json() as { detail?: unknown };
+		if (typeof body?.detail === 'string' && body.detail.trim()) {
+			return new Error(body.detail);
+		}
+	} catch {
+		// body was not JSON
+	}
+	return new Error(`HTTP ${response.status}`);
+}
+
 export function isRequestCancelled(error: unknown): boolean {
 	return error instanceof RequestCancelledError
 		|| (error instanceof Error && error.name === 'RequestCancelledError');
@@ -157,7 +169,7 @@ export function createTransport(
 		}, config.timeout);
 
 		if (!response.ok) {
-			throw new Error(`HTTP ${response.status}`);
+			throw await errorFromHttpResponse(response);
 		}
 
 		return await response.json();
@@ -176,7 +188,7 @@ export function createTransport(
 			}, timeoutMs ?? config.timeout, signal);
 
 			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
+				throw await errorFromHttpResponse(response);
 			}
 
 			return await response.json();
