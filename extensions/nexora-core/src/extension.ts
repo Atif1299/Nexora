@@ -27,6 +27,8 @@ import {
 } from './services/engineProcess';
 import { enginePlaceholderHtml, engineStateLabel } from './services/editorPage';
 import { nexoraDiffProvider, NEXORA_DIFF_SCHEME } from './services/tools/diffProvider';
+import { openNexoraBrowser } from './services/browser';
+import { closeAgentBrowser } from './services/tools/browserSession';
 
 async function setOperationInProgress(value: boolean): Promise<void> {
 	await vscode.commands.executeCommand('setContext', 'nexora.operationInProgress', value);
@@ -382,6 +384,9 @@ export async function activate(context: vscode.ExtensionContext) {
 			await vscode.commands.executeCommand('nexora.chatPanel.focus');
 			await setChatFocused(true);
 		}),
+		vscode.commands.registerCommand('nexora.openBrowser', async (url?: string | vscode.Uri) => {
+			await openNexoraBrowser(url);
+		}),
 		vscode.commands.registerCommand('nexora.openTaskPlan', () => {
 			void showOnlyNexoraPanelView('nexora.taskTree');
 		}),
@@ -572,6 +577,7 @@ async function checkBackendOnStartup(notifications: ReturnType<typeof getNotific
 
 export async function deactivate() {
 	console.log('Nexora Core extension deactivated');
+	await closeAgentBrowser();
 	disposeWebSocket();
 	await stopNexoraEngine();
 }
