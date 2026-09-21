@@ -31,9 +31,13 @@
 	display: none;
 }
 
+html,
 body {
 	margin: 0;
 	padding: 0;
+	width: 100%;
+	height: 100%;
+	min-height: 220px;
 	font-family: var(--vscode-font-family);
 	font-size: var(--vscode-font-size, 13px);
 	color: var(--wf-fg);
@@ -41,8 +45,13 @@ body {
 }
 
 #workflow-root {
+	display: block;
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 220px;
+	height: 100%;
 	padding: var(--wf-space);
-	min-height: 100vh;
+	overflow: auto;
 }
 
 /* Empty state */
@@ -51,7 +60,7 @@ body {
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	height: 300px;
+	min-height: 180px;
 	text-align: center;
 	color: var(--wf-muted);
 }
@@ -123,30 +132,15 @@ body {
 /* Container */
 .wf-container {
 	position: relative;
-	min-height: 200px;
+	min-height: 140px;
 	overflow: auto;
-}
-
-.wf-connections {
-	position: absolute;
-	top: 0;
-	left: 0;
-	width: 100%;
-	height: 100%;
-	pointer-events: none;
-	z-index: 0;
-}
-
-.wf-line {
-	fill: none;
-	stroke: var(--wf-border);
-	stroke-width: 2;
 }
 
 .wf-levels {
 	position: relative;
 	display: flex;
-	gap: 24px;
+	align-items: stretch;
+	gap: 0;
 	padding: 8px 0;
 	z-index: 1;
 }
@@ -156,6 +150,23 @@ body {
 	flex-direction: column;
 	gap: 12px;
 	min-width: 160px;
+	flex-shrink: 0;
+}
+
+.wf-levelArrow {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 28px;
+	padding: 0 4px;
+	color: var(--wf-muted);
+	font-size: 12px;
+	font-weight: 600;
+	border-left: 1px solid var(--wf-border);
+	border-right: 1px solid var(--wf-border);
+	align-self: center;
+	height: 24px;
+	margin: 0 4px;
 }
 
 /* Task nodes */
@@ -168,6 +179,7 @@ body {
 	transition: transform 0.15s ease, box-shadow 0.15s ease;
 	position: relative;
 	overflow: hidden;
+	min-width: 150px;
 }
 
 .wf-node:hover {
@@ -182,7 +194,7 @@ body {
 	outline: 2px solid var(--vscode-focusBorder);
 	outline-offset: 2px;
 }
-.wf-node-running { 
+.wf-node-running {
 	border-left-color: var(--wf-running);
 	animation: wf-pulse 2s infinite;
 }
@@ -206,13 +218,17 @@ body {
 }
 
 .wf-nodeIcon {
-	font-size: 14px;
+	font-size: 12px;
+	font-weight: 700;
 	flex-shrink: 0;
+	min-width: 14px;
+	text-align: center;
 }
 
 .wf-node-success .wf-nodeIcon { color: var(--wf-success); }
 .wf-node-failed .wf-nodeIcon { color: var(--wf-failed); }
 .wf-node-running .wf-nodeIcon { color: var(--wf-running); }
+.wf-node-skipped .wf-nodeIcon { color: var(--wf-skipped); }
 
 .wf-nodeName {
 	font-size: 12px;
@@ -226,27 +242,23 @@ body {
 	padding: 8px 10px;
 }
 
-.wf-nodeRow {
-	display: flex;
-	justify-content: space-between;
+.wf-nodeStatus {
 	font-size: 10px;
-	margin-bottom: 4px;
-}
-
-.wf-nodeRow:last-child {
-	margin-bottom: 0;
-}
-
-.wf-nodeLabel {
+	text-transform: lowercase;
 	color: var(--wf-muted);
 }
 
-.wf-nodeValue {
-	font-weight: 500;
-	max-width: 80px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+.wf-node-running .wf-nodeStatus { color: var(--wf-running); }
+.wf-node-success .wf-nodeStatus { color: var(--wf-success); }
+.wf-node-failed .wf-nodeStatus { color: var(--wf-failed); }
+.wf-node-skipped .wf-nodeStatus { color: var(--wf-skipped); }
+
+.wf-nodeError {
+	margin-top: 4px;
+	font-size: 10px;
+	color: var(--wf-failed);
+	line-height: 1.3;
+	word-break: break-word;
 }
 
 /* Spinner */
@@ -269,6 +281,7 @@ body {
 /* Legend */
 .wf-legend {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 16px;
 	margin-top: 16px;
 	padding-top: 12px;
@@ -293,3 +306,4 @@ body {
 .wf-dot-running { background: var(--wf-running); }
 .wf-dot-success { background: var(--wf-success); }
 .wf-dot-failed { background: var(--wf-failed); }
+.wf-dot-skipped { background: var(--wf-skipped); }

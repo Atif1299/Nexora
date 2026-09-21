@@ -9,13 +9,23 @@
 	let currentPlan = null;
 	let taskElements = {};
 
-	const STATUS_ICONS = {
-		pending: '...',
-		queued: '[Q]',
-		running: '[R]',
-		success: 'OK',
-		failed: 'X',
-		skipped: '>>',
+	const STATUS_LABELS = {
+		pending: 'pending',
+		queued: 'queued',
+		running: 'running',
+		success: 'success',
+		failed: 'failed',
+		skipped: 'skipped',
+		cancelled: 'cancelled'
+	};
+
+	const STATUS_MARKS = {
+		pending: 'o',
+		queued: 'q',
+		running: '>',
+		success: '+',
+		failed: 'x',
+		skipped: '-',
 		cancelled: 'x'
 	};
 
@@ -60,6 +70,10 @@
 
 	function renderWorkflow(plan) {
 		const root = document.getElementById('workflow-root');
+		if (!root) {
+			return;
+		}
+
 		currentPlan = plan;
 		taskElements = {};
 
@@ -92,12 +106,11 @@
 			<div class="wf-header">
 				<h3 class="wf-title">${escapeHtml(plan.user_request || 'Workflow')}</h3>
 				<div class="wf-meta">
-					<span class="wf-status wf-status-${statusClass}">${plan.status || 'planning'}</span>
+					<span class="wf-status wf-status-${statusClass}">${escapeHtml(plan.status || 'planning')}</span>
 					<span class="wf-cost">Est: $${(plan.estimated_total_cost || 0).toFixed(4)}</span>
 				</div>
 			</div>
 			<div class="wf-container">
-				<svg class="wf-connections" id="connections-svg"></svg>
 				<div class="wf-levels" id="levels-container"></div>
 			</div>
 			<div class="wf-legend">
@@ -105,15 +118,24 @@
 				<span class="wf-legendItem"><span class="wf-dot wf-dot-running"></span>Running</span>
 				<span class="wf-legendItem"><span class="wf-dot wf-dot-success"></span>Success</span>
 				<span class="wf-legendItem"><span class="wf-dot wf-dot-failed"></span>Failed</span>
+				<span class="wf-legendItem"><span class="wf-dot wf-dot-skipped"></span>Skipped</span>
 			</div>
 		`;
 
 		const levelsContainer = document.getElementById('levels-container');
 
 		levels.forEach(function (levelTasks, levelIndex) {
+			if (levelIndex > 0) {
+				const arrowCol = document.createElement('div');
+				arrowCol.className = 'wf-levelArrow';
+				arrowCol.setAttribute('aria-hidden', 'true');
+				arrowCol.textContent = '->';
+				levelsContainer.appendChild(arrowCol);
+			}
+
 			const levelDiv = document.createElement('div');
 			levelDiv.className = 'wf-level';
-			levelDiv.setAttribute('data-level', levelIndex);
+			levelDiv.setAttribute('data-level', String(levelIndex));
 
 			levelTasks.forEach(function (task) {
 				const node = createTaskNode(task);
@@ -123,44 +145,34 @@
 
 			levelsContainer.appendChild(levelDiv);
 		});
-
-		setTimeout(function () {
-			drawConnections(plan.tasks);
-		}, 50);
 	}
 
 	function createTaskNode(task) {
-		const status = task.status || 'pending';
-		const statusIcon = STATUS_ICONS[status] || '?';
+		const status = (task.status || 'pending').toLowerCase();
+		const statusMark = STATUS_MARKS[status] || '?';
+		const statusLabel = STATUS_LABELS[status] || status;
 
 		const node = document.createElement('div');
 		node.className = 'wf-node wf-node-' + status;
 		node.id = 'wf-task-' + task.task_id;
 		node.setAttribute('data-task-id', task.task_id);
+		node.setAttribute('data-status', status);
 		node.setAttribute('role', 'button');
 		node.setAttribute('tabindex', '0');
-		node.setAttribute('aria-label', `Task ${task.name || task.task_id}, status ${status}`);
+		node.setAttribute('aria-label', 'Task ' + (task.name || task.task_id) + ', status ' + statusLabel);
+
+		const errorHtml = (status === 'skipped' || status === 'failed') && task.error
+			? `<div class="wf-nodeError">${escapeHtml(task.error)}</div>`
+			: '';
 
 		node.innerHTML = `
 			<div class="wf-nodeHeader">
-				<span class="wf-nodeIcon">${statusIcon}</span>
+				<span class="wf-nodeIcon">${statusMark}</span>
 				<span class="wf-nodeName">${escapeHtml(task.name || task.task_id)}</span>
 			</div>
 			<div class="wf-nodeBody">
-				<div class="wf-nodeRow">
-					<span class="wf-nodeLabel">Platform:</span>
-					<span class="wf-nodeValue">${escapeHtml(task.platform || 'N/A')}</span>
-				</div>
-				<div class="wf-nodeRow">
-					<span class="wf-nodeLabel">Operation:</span>
-					<span class="wf-nodeValue">${escapeHtml(task.operation || 'N/A')}</span>
-				</div>
-				${task.estimated_cost > 0 ? `
-				<div class="wf-nodeRow">
-					<span class="wf-nodeLabel">Cost:</span>
-					<span class="wf-nodeValue">$${task.estimated_cost.toFixed(4)}</span>
-				</div>
-				` : ''}
+				<div class="wf-nodeStatus">${escapeHtml(statusLabel)}</div>
+				${errorHtml}
 			</div>
 			${status === 'running' ? '<div class="wf-spinner"></div>' : ''}
 		`;
@@ -180,88 +192,68 @@
 		return node;
 	}
 
-	function drawConnections(tasks) {
-		const svg = document.getElementById('connections-svg');
-		if (!svg) {
-			return;
-		}
-
-		svg.innerHTML = '';
-		const rect = svg.getBoundingClientRect();
-
-		const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-		defs.innerHTML = `
-			<marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-				<polygon points="0 0, 10 3.5, 0 7" fill="var(--vscode-editorWidget-border, #6b7280)" />
-			</marker>
-		`;
-		svg.appendChild(defs);
-
-		tasks.forEach(function (task) {
-			if (!task.dependencies || task.dependencies.length === 0) {
-				return;
-			}
-
-			const targetNode = taskElements[task.task_id];
-			if (!targetNode) {
-				return;
-			}
-
-			task.dependencies.forEach(function (depId) {
-				const sourceNode = taskElements[depId];
-				if (!sourceNode) {
-					return;
-				}
-
-				const sourceRect = sourceNode.getBoundingClientRect();
-				const targetRect = targetNode.getBoundingClientRect();
-
-				const x1 = sourceRect.right - rect.left;
-				const y1 = sourceRect.top + sourceRect.height / 2 - rect.top;
-				const x2 = targetRect.left - rect.left;
-				const y2 = targetRect.top + targetRect.height / 2 - rect.top;
-
-				const midX = (x1 + x2) / 2;
-				const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-				path.setAttribute('d', `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`);
-				path.setAttribute('class', 'wf-line');
-				path.setAttribute('marker-end', 'url(#arrowhead)');
-
-				svg.appendChild(path);
-			});
-		});
-	}
-
 	function updateTaskStatus(taskId, status, result, error, cost) {
+		const normalized = (status || 'pending').toLowerCase();
 		const node = taskElements[taskId];
 		if (!node) {
+			if (currentPlan && currentPlan.tasks) {
+				const task = currentPlan.tasks.find(function (t) {
+					return t.task_id === taskId;
+				});
+				if (task) {
+					task.status = normalized;
+					if (result !== undefined) {
+						task.result = result;
+					}
+					if (error !== undefined) {
+						task.error = error;
+					}
+					if (cost !== undefined) {
+						task.actual_cost = cost;
+					}
+					renderWorkflow(currentPlan);
+				}
+			}
 			return;
 		}
 
-		node.className = 'wf-node wf-node-' + status;
+		node.className = 'wf-node wf-node-' + normalized;
+		node.setAttribute('data-status', normalized);
 
 		const iconSpan = node.querySelector('.wf-nodeIcon');
 		if (iconSpan) {
-			iconSpan.textContent = STATUS_ICONS[status] || '?';
+			iconSpan.textContent = STATUS_MARKS[normalized] || '?';
+		}
+
+		const statusEl = node.querySelector('.wf-nodeStatus');
+		if (statusEl) {
+			statusEl.textContent = STATUS_LABELS[normalized] || normalized;
+		}
+
+		let errorEl = node.querySelector('.wf-nodeError');
+		if ((normalized === 'skipped' || normalized === 'failed') && error) {
+			if (!errorEl) {
+				const body = node.querySelector('.wf-nodeBody');
+				if (body) {
+					errorEl = document.createElement('div');
+					errorEl.className = 'wf-nodeError';
+					body.appendChild(errorEl);
+				}
+			}
+			if (errorEl) {
+				errorEl.textContent = error;
+			}
+		} else if (errorEl) {
+			errorEl.remove();
 		}
 
 		const existingSpinner = node.querySelector('.wf-spinner');
-		if (status === 'running' && !existingSpinner) {
+		if (normalized === 'running' && !existingSpinner) {
 			const spinner = document.createElement('div');
 			spinner.className = 'wf-spinner';
 			node.appendChild(spinner);
-		} else if (status !== 'running' && existingSpinner) {
+		} else if (normalized !== 'running' && existingSpinner) {
 			existingSpinner.remove();
-		}
-
-		if (cost !== undefined && cost > 0) {
-			const costRow = node.querySelector('.wf-nodeRow:last-child');
-			if (costRow) {
-				const valueSpan = costRow.querySelector('.wf-nodeValue');
-				if (valueSpan && costRow.textContent.includes('Cost')) {
-					valueSpan.textContent = '$' + cost.toFixed(4);
-				}
-			}
 		}
 
 		if (currentPlan && currentPlan.tasks) {
@@ -269,7 +261,7 @@
 				return t.task_id === taskId;
 			});
 			if (task) {
-				task.status = status;
+				task.status = normalized;
 				if (result !== undefined) {
 					task.result = result;
 				}
@@ -287,6 +279,9 @@
 		currentPlan = null;
 		taskElements = {};
 		const root = document.getElementById('workflow-root');
+		if (!root) {
+			return;
+		}
 		root.innerHTML = `
 			<div class="wf-empty">
 				<div class="wf-emptyIcon">
@@ -309,6 +304,9 @@
 
 	window.addEventListener('message', function (event) {
 		const message = event.data;
+		if (!message || !message.type) {
+			return;
+		}
 
 		switch (message.type) {
 			case 'updatePlan':
