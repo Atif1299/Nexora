@@ -103,7 +103,7 @@ export function formatContent(content: string): string {
 	let html = escapeHtml(String(content || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
 	html = extractFences(html, blocks);
 
-	html = html.replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>');
+	html = html.replace(/^#{1,6}\s+(.+)$/gm, '<strong class="nx-mdH">$1</strong>');
 	html = html.replace(/^#{1,6}\s*/gm, '');
 	html = applyLists(html);
 	html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, text: string, url: string) => {
