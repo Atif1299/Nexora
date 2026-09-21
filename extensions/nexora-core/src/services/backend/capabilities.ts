@@ -30,8 +30,32 @@ export interface CapabilitiesReport {
 		vercel: CapabilityStatus;
 		crewai: CapabilityStatus;
 		gpt_researcher: CapabilityStatus;
+		supabase: CapabilityStatus;
+		stripe: CapabilityStatus;
+		v0: CapabilityStatus;
+		elevenlabs: CapabilityStatus;
+		tavily: CapabilityStatus;
 	};
 	mcp: { configured: number; connected: number };
+}
+
+/** Named DAG adapters. Catalogue rows in platforms.json are not in this set. */
+const LIVE_PLATFORM_IDS = new Set([
+	'openai',
+	'claude',
+	'v0-dev',
+	'crewai',
+	'github',
+	'vercel',
+	'supabase',
+	'stripe',
+	'gpt-researcher',
+	'tavily',
+	'elevenlabs'
+]);
+
+export function isLivePlatform(platformId: string): boolean {
+	return LIVE_PLATFORM_IDS.has((platformId || '').trim().toLowerCase());
 }
 
 const STATUSES: CapabilityStatus[] = ['ready', 'not_configured', 'unavailable', 'failed'];
@@ -98,7 +122,12 @@ export function normalizeCapabilities(raw: unknown): CapabilitiesReport {
 			github: asStatus(connectors.github),
 			vercel: asStatus(connectors.vercel),
 			crewai: asStatus(connectors.crewai, 'unavailable'),
-			gpt_researcher: asStatus(connectors.gpt_researcher, 'unavailable')
+			gpt_researcher: asStatus(connectors.gpt_researcher, 'unavailable'),
+			supabase: asStatus(connectors.supabase),
+			stripe: asStatus(connectors.stripe),
+			v0: asStatus(connectors.v0),
+			elevenlabs: asStatus(connectors.elevenlabs),
+			tavily: asStatus(connectors.tavily)
 		},
 		mcp: {
 			configured: asNumber(mcp.configured),
@@ -163,7 +192,7 @@ export function capabilityReason(status: CapabilityStatus): string {
 	}
 }
 
-/** Map a platform catalog id to llm.* or connectors.* when capabilities reports it. */
+/** Map a live platform id to llm.* or connectors.* . Catalogue ids stay undefined. */
 export function platformCapabilityStatus(
 	platformId: string,
 	report: CapabilitiesReport | undefined
@@ -172,19 +201,23 @@ export function platformCapabilityStatus(
 		return undefined;
 	}
 	const id = (platformId || '').trim().toLowerCase();
+	if (!isLivePlatform(id)) {
+		return undefined;
+	}
 	const llmKeys: Record<string, keyof CapabilitiesReport['llm']> = {
 		openai: 'openai',
-		openrouter: 'openrouter',
-		anthropic: 'anthropic',
-		claude: 'anthropic',
-		'claude-code': 'anthropic'
+		claude: 'anthropic'
 	};
 	const connectorKeys: Record<string, keyof CapabilitiesReport['connectors']> = {
 		github: 'github',
 		vercel: 'vercel',
 		crewai: 'crewai',
 		'gpt-researcher': 'gpt_researcher',
-		gpt_researcher: 'gpt_researcher'
+		supabase: 'supabase',
+		stripe: 'stripe',
+		'v0-dev': 'v0',
+		elevenlabs: 'elevenlabs',
+		tavily: 'tavily'
 	};
 	if (llmKeys[id]) {
 		return report.llm[llmKeys[id]];
