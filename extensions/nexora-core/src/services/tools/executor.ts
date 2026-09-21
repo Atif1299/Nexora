@@ -12,7 +12,14 @@ import { listFilesTool } from './listFiles';
 import { writeFileTool } from './writeFile';
 import { applyPatchTool, insertLinesTool } from './applyPatch';
 import { runTerminalCommandTool, type TerminalCommandProgress } from './terminalCommand';
-import { browserClickTool, browserSnapshotTool, browserTypeTool, openBrowserTool } from './openBrowser';
+import {
+	browserClickTool,
+	browserPressTool,
+	browserSelectTool,
+	browserSnapshotTool,
+	browserTypeTool,
+	openBrowserTool
+} from './openBrowser';
 
 export interface ToolResult {
 	success: boolean;
@@ -145,6 +152,14 @@ export async function executeToolCalls(
 
 				case 'browser_type':
 					result = await browserTypeTool(args.text, args.selector, args.submit);
+					break;
+
+				case 'browser_select':
+					result = await browserSelectTool(args.selector, args.text, args.option);
+					break;
+
+				case 'browser_press':
+					result = await browserPressTool(args.key);
 					break;
 
 				default:

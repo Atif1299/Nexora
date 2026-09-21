@@ -13,6 +13,8 @@ const MAX_TEXT = 8 * 1024;
 const MAX_LINKS = 15;
 const CAPTCHA_WAIT_MS = 90_000;
 const CAPTCHA_POLL_MS = 2000;
+const GOTO_TIMEOUT_MS = 20_000;
+const CLICK_OUTLINE_MS = 1200;
 
 export type BrowserLink = { text: string; href: string };
 
@@ -24,11 +26,19 @@ export type BrowserSnapshot = {
 	truncated: boolean;
 	blocked?: boolean;
 	reason?: string;
+	/** Defaults to true when omitted. */
+	reachable?: boolean;
+	error?: string;
 };
 
 export type ScreencastPayload = { jpeg: string; url: string; width: number; height: number };
 
 const CONSENT_NAME = /^(Accept all|I agree|Accept)$/i;
+const SPECIAL_KEYS = new Set([
+	'Enter', 'Backspace', 'Tab', 'Escape',
+	'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+	'Delete', 'Home', 'End', 'PageUp', 'PageDown'
+]);
 
 let context: BrowserContext | undefined;
 let page: Page | undefined;
@@ -38,6 +48,11 @@ let frameSize = { width: 1280, height: 800 };
 let frameListener: ((p: ScreencastPayload) => void) | undefined;
 let statusListener: ((text: string) => void) | undefined;
 let captchaWait: Promise<BrowserSnapshot> | undefined;
+/** Last URL the user or agent asked to open (never chrome-error). */
+let requestedUrl = '';
+/** Successful requested URLs for Back. */
+const urlHistory: string[] = [];
+let historyIndex = -1;
 
 export function setScreencastListener(fn: (p: ScreencastPayload) => void): void {
 	frameListener = fn;
@@ -48,7 +63,18 @@ export function setBrowserStatusListener(fn: (text: string) => void): void {
 }
 
 export function agentPageUrl(): string {
-	return page && !page.isClosed() ? page.url() : '';
+	if (page && !page.isClosed()) {
+		const live = page.url();
+		if (isChromeErrorUrl(live)) {
+			return requestedUrl;
+		}
+		return live || requestedUrl;
+	}
+	return requestedUrl;
+}
+
+export function hasAgentPage(): boolean {
+	return !!(page && !page.isClosed());
 }
 
 function profileDir(): string {
@@ -117,6 +143,70 @@ export async function resumeScreencast(): Promise<void> {
 	}
 }
 
+function isChromeErrorUrl(url: string): boolean {
+	return String(url || '').startsWith('chrome-error://');
+}
+
+async function detectUnreachable(target: Page): Promise<boolean> {
+	if (isChromeErrorUrl(target.url())) {
+		return true;
+	}
+	const title = await target.title().catch(() => '');
+	if (/can'?t be reached|site can'?t be reached|took too long to respond|err_connection/i.test(title)) {
+		return true;
+	}
+	const bodyStart = await target.evaluate(() => {
+		const t = String((globalThis as { document?: { body?: { innerText?: string } } }).document?.body?.innerText || '');
+		return t.slice(0, 200).toLowerCase();
+	}).catch(() => '');
+	return /this site can'?t be reached|err_connection_refused|err_connection_timed_out/.test(bodyStart);
+}
+
+function hostPortLabel(url: string): string {
+	try {
+		const u = new URL(url);
+		return u.port ? `${u.hostname}:${u.port}` : u.hostname;
+	} catch {
+		return url;
+	}
+}
+
+function closedPortStatus(url: string): string {
+	return `Nothing is running on ${hostPortLabel(url)}`;
+}
+
+function displayUrlForFrame(target: Page): string {
+	const live = target.url();
+	if (isChromeErrorUrl(live)) {
+		return requestedUrl || '';
+	}
+	return live || requestedUrl;
+}
+
+function pushUrlHistory(url: string): void {
+	if (historyIndex >= 0 && historyIndex < urlHistory.length - 1) {
+		urlHistory.length = historyIndex + 1;
+	}
+	if (urlHistory[urlHistory.length - 1] !== url) {
+		urlHistory.push(url);
+	}
+	historyIndex = urlHistory.length - 1;
+}
+
+function unreachableSnapshot(url: string): BrowserSnapshot {
+	const error = closedPortStatus(url);
+	statusListener?.(error);
+	return {
+		url,
+		title: '',
+		text: '',
+		links: [],
+		truncated: false,
+		reachable: false,
+		error
+	};
+}
+
 async function startScreencast(target: Page): Promise<void> {
 	if (screencast && screencastPage === target) {
 		return;
@@ -139,7 +229,7 @@ async function startScreencast(target: Page): Promise<void> {
 		const width = event.metadata?.deviceWidth || frameSize.width;
 		const height = event.metadata?.deviceHeight || frameSize.height;
 		frameSize = { width, height };
-		frameListener?.({ jpeg: event.data, url: target.url(), width, height });
+		frameListener?.({ jpeg: event.data, url: displayUrlForFrame(target), width, height });
 	});
 }
 
@@ -168,7 +258,13 @@ function requirePage(): Page {
 }
 
 async function waitSettled(target: Page): Promise<void> {
-	await target.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => undefined);
+	if (isChromeErrorUrl(target.url()) || await detectUnreachable(target)) {
+		return;
+	}
+	await target.waitForLoadState('domcontentloaded', { timeout: GOTO_TIMEOUT_MS }).catch(() => undefined);
+	if (isChromeErrorUrl(target.url()) || await detectUnreachable(target)) {
+		return;
+	}
 	await target.waitForSelector('a[href], h1, h3, input, button', { timeout: 10000 }).catch(() => undefined);
 }
 
@@ -207,6 +303,10 @@ function looksBlocked(snap: BrowserSnapshot): boolean {
 }
 
 export async function takeSnapshot(target: Page): Promise<BrowserSnapshot> {
+	if (await detectUnreachable(target)) {
+		return unreachableSnapshot(requestedUrl || target.url());
+	}
+
 	const url = target.url();
 	const title = await target.title();
 	const extracted = await target.evaluate((maxLinks: number) => {
@@ -288,22 +388,73 @@ async function waitIfBlocked(snap: BrowserSnapshot): Promise<BrowserSnapshot> {
 	return captchaWait;
 }
 
-export async function gotoAgentPage(url: string): Promise<void> {
+/**
+ * Navigate the shared page. On connection error, keeps requestedUrl and sets status;
+ * does not throw for chrome-error / refused connections.
+ */
+export async function gotoAgentPage(url: string, opts?: { recordHistory?: boolean }): Promise<void> {
+	const recordHistory = opts?.recordHistory !== false;
 	const target = await ensurePage();
-	await target.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+	requestedUrl = url;
+	statusListener?.('Loading...');
+	try {
+		await target.goto(url, { waitUntil: 'domcontentloaded', timeout: GOTO_TIMEOUT_MS });
+	} catch {
+		// Connection refused and similar leave chrome-error:// ; handled below.
+	}
+	if (await detectUnreachable(target)) {
+		statusListener?.(closedPortStatus(url));
+		return;
+	}
 	await waitSettled(target);
+	if (await detectUnreachable(target)) {
+		statusListener?.(closedPortStatus(url));
+		return;
+	}
+	if (recordHistory) {
+		pushUrlHistory(url);
+	}
+	statusListener?.('');
+}
+
+export async function goBackAgentPage(): Promise<void> {
+	if (historyIndex <= 0) {
+		statusListener?.(requestedUrl ? '' : 'Enter a URL');
+		return;
+	}
+	historyIndex -= 1;
+	const url = urlHistory[historyIndex];
+	await gotoAgentPage(url, { recordHistory: false });
+}
+
+export async function reloadAgentPage(): Promise<void> {
+	const url = requestedUrl || agentPageUrl();
+	if (!url || isChromeErrorUrl(url)) {
+		statusListener?.('Enter a URL');
+		return;
+	}
+	await gotoAgentPage(url, { recordHistory: false });
 }
 
 export async function navigateAgentPage(url: string): Promise<BrowserSnapshot> {
 	await gotoAgentPage(url);
 	const target = requirePage();
+	if (await detectUnreachable(target)) {
+		return unreachableSnapshot(requestedUrl || url);
+	}
 	await dismissConsentOnce(target);
 	return waitIfBlocked(await takeSnapshot(target));
 }
 
 export async function snapshotAgentPage(): Promise<BrowserSnapshot> {
 	const target = requirePage();
+	if (await detectUnreachable(target)) {
+		return unreachableSnapshot(requestedUrl || target.url());
+	}
 	await waitSettled(target);
+	if (await detectUnreachable(target)) {
+		return unreachableSnapshot(requestedUrl || target.url());
+	}
 	return waitIfBlocked(await takeSnapshot(target));
 }
 
@@ -319,12 +470,28 @@ function locate(target: Page, selector?: string, text?: string) {
 	return undefined;
 }
 
+async function outlineElement(loc: ReturnType<Page['locator']>): Promise<void> {
+	await loc.evaluate((el: { style: { outline: string; outlineOffset: string } }, ms: number) => {
+		const prevOutline = el.style.outline;
+		const prevOffset = el.style.outlineOffset;
+		el.style.outline = '2px solid #f59e0b';
+		el.style.outlineOffset = '2px';
+		setTimeout(() => {
+			el.style.outline = prevOutline;
+			el.style.outlineOffset = prevOffset;
+		}, ms);
+	}, CLICK_OUTLINE_MS).catch(() => undefined);
+}
+
 export async function clickAgentPage(selector?: string, text?: string): Promise<BrowserSnapshot> {
 	const target = requirePage();
 	const loc = locate(target, selector, text);
 	if (!loc) {
 		throw new Error('Provide selector or text to click');
 	}
+	const label = String(text || selector || 'element').trim();
+	await outlineElement(loc);
+	statusListener?.(`Clicked "${label}"`);
 	await loc.click({ timeout: 10000 });
 	await waitSettled(target);
 	return waitIfBlocked(await takeSnapshot(target));
@@ -341,22 +508,84 @@ export async function typeAgentPage(text: string, selector?: string, submit?: bo
 	return waitIfBlocked(await takeSnapshot(target));
 }
 
-export async function clickPageNorm(nx: number, ny: number): Promise<void> {
+export async function selectAgentPage(selector?: string, text?: string, option?: string): Promise<BrowserSnapshot> {
 	const target = requirePage();
+	const loc = locate(target, selector, text);
+	if (!loc) {
+		throw new Error('Provide selector or text for the select');
+	}
+	const choice = String(option || '').trim();
+	if (!choice) {
+		throw new Error('Provide option label or value');
+	}
+	try {
+		await loc.selectOption({ label: choice }, { timeout: 10000 });
+	} catch {
+		await loc.selectOption({ value: choice }, { timeout: 10000 });
+	}
+	statusListener?.(`Selected "${choice}"`);
+	await waitSettled(target);
+	return waitIfBlocked(await takeSnapshot(target));
+}
+
+export async function pressAgentPage(key: string): Promise<BrowserSnapshot> {
+	const target = requirePage();
+	const raw = String(key || '').trim();
+	if (!raw) {
+		throw new Error('key is required');
+	}
+	const normalized = raw === 'Space' || raw === 'space' ? ' ' : raw;
+	await target.keyboard.press(normalized);
+	statusListener?.(`Pressed ${raw}`);
+	await waitSettled(target);
+	return waitIfBlocked(await takeSnapshot(target));
+}
+
+export async function clickPageNorm(nx: number, ny: number): Promise<void> {
+	if (!page || page.isClosed()) {
+		return;
+	}
 	const x = Math.min(Math.max(nx, 0), 1) * frameSize.width;
 	const y = Math.min(Math.max(ny, 0), 1) * frameSize.height;
-	await target.mouse.click(x, y);
+	await page.mouse.click(x, y);
 }
 
 export async function wheelPage(dx: number, dy: number): Promise<void> {
-	const target = requirePage();
-	await target.mouse.wheel(dx, dy);
+	if (!page || page.isClosed()) {
+		return;
+	}
+	await page.mouse.wheel(dx, dy);
+}
+
+/** Forward a webview keydown to the Playwright page (address bar must not be focused). */
+export async function keydownPage(key: string): Promise<void> {
+	if (!page || page.isClosed()) {
+		return;
+	}
+	const k = String(key || '');
+	if (!k || k === 'Shift' || k === 'Control' || k === 'Alt' || k === 'Meta' || k === 'Dead') {
+		return;
+	}
+	if (k === ' ') {
+		await page.keyboard.press(' ');
+		return;
+	}
+	if (SPECIAL_KEYS.has(k)) {
+		await page.keyboard.press(k);
+		return;
+	}
+	if (k.length === 1) {
+		await page.keyboard.insertText(k);
+	}
 }
 
 export async function closeAgentBrowser(): Promise<void> {
 	const current = context;
 	context = undefined;
 	page = undefined;
+	requestedUrl = '';
+	urlHistory.length = 0;
+	historyIndex = -1;
 	await stopScreencast();
 	if (current) {
 		await current.close().catch(() => undefined);

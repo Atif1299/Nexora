@@ -9,7 +9,11 @@ import { acquireEditorPanel } from './editorPage';
 import {
 	agentPageUrl,
 	clickPageNorm,
+	goBackAgentPage,
 	gotoAgentPage,
+	hasAgentPage,
+	keydownPage,
+	reloadAgentPage,
 	resumeScreencast,
 	setBrowserStatusListener,
 	setScreencastListener,
@@ -30,11 +34,25 @@ export function getBrowserUiSettings(): BrowserUiSettings {
 	};
 }
 
+/**
+ * Parse http/https URLs. Also accepts loose local forms:
+ * `localhost:3000`, `localhost 3000`, `127.0.0.1:3000` → http (not https).
+ */
 export function parseHttpUrl(raw: string): URL | undefined {
 	const text = String(raw || '').trim();
 	if (!text) {
 		return undefined;
 	}
+
+	const looseLocal = text.match(/^(localhost|127\.0\.0\.1)(?:[\s:]+)(\d{1,5})$/i);
+	if (looseLocal) {
+		try {
+			return new URL(`http://${looseLocal[1]}:${looseLocal[2]}`);
+		} catch {
+			return undefined;
+		}
+	}
+
 	try {
 		const parsed = new URL(text);
 		if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -74,22 +92,28 @@ function panelHtml(): string {
 	<style>
 		html, body { margin: 0; height: 100%; background: var(--vscode-editor-background); color: var(--vscode-foreground); font-family: var(--vscode-font-family); }
 		#bar { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--vscode-panel-border); }
+		#bar button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: 1px solid var(--vscode-button-border, transparent); padding: 2px 8px; cursor: pointer; }
 		#url { flex: 1; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); padding: 4px 8px; }
-		#status { font-size: 12px; opacity: 0.8; white-space: nowrap; }
-		#frame { display: block; width: 100%; height: auto; }
+		#status { font-size: 12px; opacity: 0.8; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+		#frame { display: block; width: 100%; height: auto; outline: none; }
+		#frame:not([src]) { display: none; }
 	</style>
 </head>
 <body>
 	<div id="bar">
+		<button id="back" type="button" title="Back">Back</button>
+		<button id="reload" type="button" title="Reload">Reload</button>
 		<input id="url" type="text" placeholder="https://" />
 		<span id="status"></span>
 	</div>
-	<img id="frame" alt="Nexora Browser" />
+	<img id="frame" alt="Nexora Browser" tabindex="0" />
 	<script nonce="${nonce}">
 		const vscode = acquireVsCodeApi();
 		const urlEl = document.getElementById('url');
 		const statusEl = document.getElementById('status');
 		const img = document.getElementById('frame');
+		const backBtn = document.getElementById('back');
+		const reloadBtn = document.getElementById('reload');
 		window.addEventListener('message', (e) => {
 			const m = e.data || {};
 			if (m.type === 'frame') {
@@ -99,20 +123,31 @@ function panelHtml(): string {
 				if (document.activeElement !== urlEl) { urlEl.value = m.url || ''; }
 			} else if (m.type === 'status') {
 				statusEl.textContent = m.text || '';
+			} else if (m.type === 'clear') {
+				img.removeAttribute('src');
 			}
 		});
 		urlEl.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter') { vscode.postMessage({ type: 'navigate', url: urlEl.value }); }
 		});
+		backBtn.addEventListener('click', () => { vscode.postMessage({ type: 'back' }); });
+		reloadBtn.addEventListener('click', () => { vscode.postMessage({ type: 'reload' }); });
 		img.addEventListener('click', (e) => {
 			const r = img.getBoundingClientRect();
 			if (!r.width || !r.height) { return; }
 			vscode.postMessage({ type: 'click', x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height });
+			img.focus();
 		});
 		img.addEventListener('wheel', (e) => {
 			e.preventDefault();
 			vscode.postMessage({ type: 'wheel', dx: e.deltaX, dy: e.deltaY });
 		}, { passive: false });
+		window.addEventListener('keydown', (e) => {
+			if (document.activeElement === urlEl) { return; }
+			if (e.ctrlKey || e.metaKey || e.altKey) { return; }
+			e.preventDefault();
+			vscode.postMessage({ type: 'keydown', key: e.key });
+		});
 	</script>
 </body>
 </html>`;
@@ -124,12 +159,34 @@ function bindPanel(panel: vscode.WebviewPanel): void {
 	}
 	boundPanel = panel;
 	panel.webview.html = panelHtml();
-	panel.webview.onDidReceiveMessage(async (message: { type?: string; url?: string; x?: number; y?: number; dx?: number; dy?: number }) => {
+	panel.webview.onDidReceiveMessage(async (message: {
+		type?: string;
+		url?: string;
+		x?: number;
+		y?: number;
+		dx?: number;
+		dy?: number;
+		key?: string;
+	}) => {
 		try {
 			if (message.type === 'click') {
 				await clickPageNorm(Number(message.x), Number(message.y));
 			} else if (message.type === 'wheel') {
 				await wheelPage(Number(message.dx) || 0, Number(message.dy) || 0);
+			} else if (message.type === 'keydown') {
+				await keydownPage(String(message.key || ''));
+			} else if (message.type === 'back') {
+				await goBackAgentPage();
+				const url = agentPageUrl();
+				if (url) {
+					panel.webview.postMessage({ type: 'url', url });
+				}
+			} else if (message.type === 'reload') {
+				await reloadAgentPage();
+				const url = agentPageUrl();
+				if (url) {
+					panel.webview.postMessage({ type: 'url', url });
+				}
 			} else if (message.type === 'navigate') {
 				const parsed = parseHttpUrl(String(message.url || '')) ?? parseHttpUrl('https://' + String(message.url || '').trim());
 				if (!parsed) {
@@ -141,6 +198,10 @@ function bindPanel(panel: vscode.WebviewPanel): void {
 			}
 		} catch (err) {
 			const text = err instanceof Error ? err.message : String(err);
+			if (text.indexOf('Call open_browser first') >= 0) {
+				panel.webview.postMessage({ type: 'status', text: 'Enter a URL' });
+				return;
+			}
 			panel.webview.postMessage({ type: 'status', text });
 		}
 	});
@@ -175,9 +236,12 @@ export async function openNexoraBrowser(urlOrUri?: string | vscode.Uri): Promise
 	});
 	bindPanel(panel);
 	const current = agentPageUrl();
-	if (current) {
+	if (current && hasAgentPage()) {
 		void panel.webview.postMessage({ type: 'url', url: current });
 		void resumeScreencast();
+	} else if (!urlOrUri) {
+		void panel.webview.postMessage({ type: 'clear' });
+		void panel.webview.postMessage({ type: 'status', text: 'Enter a URL' });
 	}
 
 	if (urlOrUri === undefined || urlOrUri === '') {

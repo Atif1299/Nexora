@@ -8,6 +8,8 @@ import type { ToolResult } from './executor';
 import {
 	clickAgentPage,
 	navigateAgentPage,
+	pressAgentPage,
+	selectAgentPage,
 	snapshotAgentPage,
 	typeAgentPage,
 	type BrowserSnapshot
@@ -38,6 +40,7 @@ function okSnapshot(snap: BrowserSnapshot): ToolResult {
 	};
 }
 
+/** Shared with address bar: loose local URLs become http via parseHttpUrl. */
 function parseToolUrl(url: string): URL | undefined {
 	const raw = String(url || '').trim();
 	return parseHttpUrl(raw) ?? parseHttpUrl('https://' + raw);
@@ -105,6 +108,39 @@ export async function browserTypeTool(text: string, selector?: string, submit?: 
 	}
 	try {
 		return okSnapshot(await typeAgentPage(String(text), selector, submit === true));
+	} catch (err) {
+		return fail(err);
+	}
+}
+
+export async function browserSelectTool(selector?: string, text?: string, option?: string): Promise<ToolResult> {
+	const blocked = denied();
+	if (blocked) {
+		return blocked;
+	}
+	if (!String(selector || '').trim() && !String(text || '').trim()) {
+		return { success: false, error: 'Provide selector or text for the select' };
+	}
+	if (!String(option || '').trim()) {
+		return { success: false, error: 'Provide option label or value' };
+	}
+	try {
+		return okSnapshot(await selectAgentPage(selector, text, option));
+	} catch (err) {
+		return fail(err);
+	}
+}
+
+export async function browserPressTool(key: string): Promise<ToolResult> {
+	const blocked = denied();
+	if (blocked) {
+		return blocked;
+	}
+	if (!String(key || '').trim()) {
+		return { success: false, error: 'key is required' };
+	}
+	try {
+		return okSnapshot(await pressAgentPage(String(key)));
 	} catch (err) {
 		return fail(err);
 	}

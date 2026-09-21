@@ -19,6 +19,7 @@ import { getSettingsService } from './services/settingsService';
 import { getAgentFlag, getAgentMaxTurns, getSubmitWithCtrlEnter } from './services/agentRunMode';
 import { getNotificationService } from './services/notificationService';
 import { showEngineOutput } from './services/engineProcess';
+import { acquireEditorPanel, gateEditorPanel } from './services/editorPage';
 import {
 	allLlmNotConfigured,
 	getCachedCapabilities,
@@ -30,7 +31,7 @@ import {
 type ChatMode = 'chat' | 'ask' | 'plan' | 'execute' | 'agent';
 
 const FIRST_RUN_DISMISSED_KEY = 'nexora.firstRunKeyCardDismissed';
-const FIRST_RUN_PROVIDERS = ['openai', 'anthropic', 'openrouter'] as const;
+const FIRST_RUN_PROVIDERS = ['openai', 'anthropic', 'gemini', 'openrouter'] as const;
 const SESSION_RAIL_WIDTH_KEY = 'nexora.sessionRailWidth';
 const SESSION_RAIL_WIDTH_DEFAULT = 196;
 const SESSION_RAIL_WIDTH_MIN = 140;
@@ -42,6 +43,31 @@ function deriveWorkspaceId(workspacePath: string): string {
 	const base = path.basename(workspacePath).replace(/ /g, '_').toLowerCase();
 	const name = Array.from(base).filter((c) => /[a-z0-9_]/.test(c)).join('');
 	return `${name}_${pathHash}`;
+}
+
+/** Thrown when the selected model returns 401/403/429 and the backend stops without fallback. */
+class ModelUnavailableSignal extends Error {
+	readonly modelId: string;
+
+	constructor(modelId: string) {
+		super(`model_unavailable:${modelId}`);
+		this.name = 'ModelUnavailableSignal';
+		this.modelId = modelId;
+	}
+}
+
+function parseModelUnavailable(text: string | undefined | null): string | undefined {
+	const raw = (text || '').trim();
+	if (!raw) {
+		return undefined;
+	}
+	const marker = 'model_unavailable:';
+	const idx = raw.toLowerCase().indexOf(marker);
+	if (idx < 0) {
+		return undefined;
+	}
+	const id = raw.slice(idx + marker.length).trim();
+	return id || undefined;
 }
 
 function formatElapsedMs(ms: number): string {
@@ -76,10 +102,14 @@ type InFlightReply = {
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nexora.chatPanel';
+	public static readonly editorViewType = 'nexora.chatEditor';
 	private _view?: vscode.WebviewView;
+	private _editorPanel?: vscode.WebviewPanel;
+	private _editorAttached = false;
 	private _wsUnsubscribe?: () => void;
 	private _currentPlanId?: string;
 	private _saveTemplateOfferedFor?: string;
+	private _onSessionsChanged?: () => void;
 
 	private readonly _context: vscode.ExtensionContext;
 	private _sessions: ChatSessionRecord[] = [];
@@ -90,6 +120,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	private _cachedWorkspacePath?: string;
 	private _replyAbort?: AbortController;
 	private _lastActivityItems: ChatActivityItem[] = [];
+	/** In-flight workspace_task handlers keyed by task_id (dedupe concurrent WS deliveries). */
+	private readonly _workspaceTaskInFlight = new Set<string>();
 
 	constructor(private readonly _extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
 		this._context = context;
@@ -149,6 +181,82 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		this._retitleDefaultSessions();
 		await this._context.globalState.update('nexora.chatSessions', this._sessions);
 		await this._context.globalState.update('nexora.activeSessionId', this._activeSessionId);
+		this._onSessionsChanged?.();
+	}
+
+	private _hasChatSurface(): boolean {
+		return !!(this._view || this._editorPanel);
+	}
+
+	private _postToWebviews(message: unknown): void {
+		void this._view?.webview.postMessage(message);
+		void this._editorPanel?.webview.postMessage(message);
+	}
+
+	public setOnSessionsChanged(cb: () => void): void {
+		this._onSessionsChanged = cb;
+	}
+
+	public isSidebarVisible(): boolean {
+		return !!this._view?.visible;
+	}
+
+	public async switchToSession(sessionId: string): Promise<void> {
+		await this._handleSwitchSession(sessionId);
+	}
+
+	public getSessionList(): Array<{ id: string; name: string; createdAt: number }> {
+		return this._sessions
+			.slice()
+			.sort((a, b) => b.createdAt - a.createdAt)
+			.map(s => ({ id: s.id, name: s.name, createdAt: s.createdAt }));
+	}
+
+	public getActiveSessionId(): string {
+		return this._activeSessionId;
+	}
+
+	/** Open chat as a draggable editor tab (singleton). */
+	public async openInEditor(): Promise<void> {
+		const panel = acquireEditorPanel({
+			viewType: ChatPanelProvider.editorViewType,
+			title: 'Nexora Chat',
+			extensionUri: this._extensionUri
+		});
+		const isNew = this._editorPanel !== panel;
+		this._editorPanel = panel;
+
+		if (!isNew) {
+			return;
+		}
+
+		this._editorAttached = false;
+		panel.onDidDispose(() => {
+			if (this._editorPanel !== panel) {
+				return;
+			}
+			this._editorPanel = undefined;
+			this._editorAttached = false;
+		});
+
+		gateEditorPanel(panel, (ready) => {
+			if (this._editorAttached && this._editorPanel === ready) {
+				return;
+			}
+			this._editorAttached = true;
+			this._editorPanel = ready;
+			this._attachChatHtml(ready.webview);
+			ready.webview.onDidReceiveMessage((data: WebviewInboundMessage) => {
+				void this._onWebviewMessage(data);
+			});
+			this._checkBackendStatus();
+			this._checkAuthStatus();
+			if (!this._wsUnsubscribe) {
+				this._setupWebSocketListener();
+			}
+			void this._pushFirstRunCard();
+			void this._broadcastSessions();
+		});
 	}
 
 	private _readSessionRailWidth(): number {
@@ -267,10 +375,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _broadcastSessions(): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'updateSessions',
 			sessions: this._sessionSummaries(),
 			activeSessionId: this._activeSessionId
@@ -280,10 +388,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	/** Re-sync webview message list from in-memory session (e.g. after sidebar visibility changes). */
 	private _pushActiveSessionToWebview(): void {
 		const session = this._getActiveSession();
-		if (!this._view || !session) {
+		if (!this._hasChatSurface() || !session) {
 			return;
 		}
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'loadSession',
 			sessionId: session.id,
 			messages: session.messages ? [...session.messages] : []
@@ -296,10 +404,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 	private _emitChatActivity(items: ChatActivityItem[]): void {
 		this._lastActivityItems = this._cloneActivityItems(items);
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'chatActivity',
 			items,
 			caption: this._activityCaption(items)
@@ -395,8 +503,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	private _clearChatActivity(): void {
 		const items = this._lastActivityItems;
 		this._attachActivityToLastUser(items);
-		if (this._view) {
-			this._view.webview.postMessage({
+		if (this._hasChatSurface()) {
+			this._postToWebviews({
 				type: 'chatActivityFold',
 				items
 			});
@@ -414,16 +522,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private _mapUiModelToLiteLlm(model?: string): string | undefined {
+		// Legacy session aliases only. Catalog ids (including "auto") pass through unchanged.
 		const modelMap: Record<string, string> = {
 			'claude-haiku': 'anthropic/claude-3-haiku-20240307',
 			'claude-sonnet': 'anthropic/claude-3-5-sonnet-20241022',
 			'gpt-4o-mini': 'openai/gpt-4o-mini',
 			'gpt-4o': 'openai/gpt-4o',
-			// Settings panel preference values use marketing names; normalise to
-			// ids LiteLLM accepts when calling Anthropic directly.
 			'anthropic/claude-3.5-sonnet': 'anthropic/claude-3-5-sonnet-20241022'
 		};
-		// Fall back to the Week 12 Settings preference when the chat UI sends no model
 		const raw = (model || '').trim() || getSettingsService().getPreferences().defaultModel.trim();
 		if (!raw) {
 			return undefined;
@@ -447,21 +553,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		};
 		webviewView.webview.options = webviewOpts;
 
-		const initialState: ChatInitialState = {
-			connected: false,
-			auth: { github: false, vercel: false, supabase: false, stripe: false, v0: false, elevenlabs: false, tavily: false },
-			messages: this._getActiveSession()?.messages || [],
-			sessions: this._sessionSummaries(),
-			activeSessionId: this._activeSessionId,
-			sessionRailWidth: this._readSessionRailWidth(),
-			submitWithCtrlEnter: getSubmitWithCtrlEnter()
-		};
-
-		webviewView.webview.html = getChatWebviewHtml(
-			webviewView.webview,
-			this._extensionUri,
-			initialState
-		);
+		this._attachChatHtml(webviewView.webview);
 
 		webviewView.onDidChangeVisibility(() => {
 			if (!webviewView.visible) {
@@ -471,97 +563,123 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			void this._broadcastSessions();
 			void this._pushSuggestions();
 			void this._pushFirstRunCard();
+			void this._pushModelPicker();
 		});
 
-		webviewView.webview.onDidReceiveMessage(async (data: WebviewInboundMessage) => {
-			if (data.type === 'chatWebviewReady') {
-				this._pushActiveSessionToWebview();
-				this._pushChatComposerSettings();
-				void this._broadcastSessions();
-				void this._pushSuggestions();
-				void this._pushFirstRunCard();
-				return;
-			}
-			if (data.type === 'sendMessage') {
-				await this._handleUserMessage(data.message, data.model);
-			} else if (data.type === 'requestAtComplete') {
-				await this._handleRequestAtComplete(data.prefix);
-			} else if (data.type === 'askWorkspace') {
-				await this._handleAskWorkspaceMessage(data.message, data.model);
-			} else if (data.type === 'newSession') {
-				await this._handleNewSession();
-			} else if (data.type === 'switchSession') {
-				await this._handleSwitchSession(data.sessionId);
-			} else if (data.type === 'deleteSession') {
-				await this._handleDeleteSession(data.sessionId);
-			} else if (data.type === 'persistSessionRailWidth') {
-				await this._persistSessionRailWidth(data.width);
-			} else if (data.type === 'checkBackend') {
-				await this._checkBackendStatus();
-			} else if (data.type === 'generateCode') {
-				await this._handleCodeGeneration(data.prompt, data.connector);
-			} else if (data.type === 'connectGitHub') {
-				await this._handleGitHubConnect();
-			} else if (data.type === 'connectVercel') {
-				await this._handleVercelConnect();
-			} else if (data.type === 'toggleSaas') {
-				await this._handleSaasToggle(data.provider);
-			} else if (data.type === 'openSettings') {
-				await this._handleOpenSettings(data.section);
-			} else if (data.type === 'openUrl') {
-				await openUrlFromChat(data.url);
-			} else if (data.type === 'saveFirstRunKey') {
-				await this._handleSaveFirstRunKey(data.provider, data.key);
-			} else if (data.type === 'dismissFirstRunCard') {
-				await this._dismissFirstRunCard();
-			} else if (data.type === 'deployProject') {
-				await this._handleDeployment(data.prompt, data.repoName, data.projectName);
-			} else if (data.type === 'checkAuthStatus') {
-				await this._checkAuthStatus();
-			} else if (data.type === 'generatePlan') {
-				await this._handlePlanGeneration(data.request, data.model);
-			} else if (data.type === 'approvePlan') {
-				await this._handleApprovePlan(data.planId);
-			} else if (data.type === 'cancelPlan') {
-				await this._handleCancelPlan(data.planId);
-			} else if (data.type === 'modifyPlan') {
-				await this._handleModifyPlan(data.planId, data.modification);
-			} else if (data.type === 'getHistory') {
-				await this._handleGetHistory();
-			} else if (data.type === 'getRollbackable') {
-				await this._handleGetRollbackable();
-			} else if (data.type === 'rollback') {
-				await this._handleRollback(data.historyId);
-			} else if (data.type === 'browsePlatforms') {
-				await this._handleBrowsePlatforms();
-			} else if (data.type === 'indexWorkspace') {
-				await this._handleIndexWorkspace();
-			} else if (data.type === 'showEngineOutput') {
-				showEngineOutput();
-			} else if (data.type === 'executeRequest') {
-				await this._handleExecuteRequest(data.request, data.model);
-			} else if (data.type === 'runAgent') {
-				await this._handleRunAgent(data.request, data.model);
-			} else if (data.type === 'stopGeneration') {
-				this._abortInFlightReply();
-			} else if (data.type === 'confirmSaveTemplate') {
-				await this._handleConfirmSaveTemplate(data);
-			} else if (data.type === 'cancelSaveTemplate') {
-				return;
-			} else if (data.type === 'acceptSuggestion') {
-				await this._handleAcceptSuggestion(data.id);
-			} else if (data.type === 'dismissSuggestion') {
-				await this._handleDismissSuggestion(data.id, data.permanent);
-			} else if (data.type === 'requestSuggestions') {
-				void this._pushSuggestions();
-			}
+		webviewView.webview.onDidReceiveMessage((data: WebviewInboundMessage) => {
+			void this._onWebviewMessage(data);
 		});
 
 		this._checkBackendStatus();
 		this._checkAuthStatus();
-		this._setupWebSocketListener();
+		if (!this._wsUnsubscribe) {
+			this._setupWebSocketListener();
+		}
 		void this._pushFirstRunCard();
 		void this._broadcastSessions();
+	}
+
+	private _attachChatHtml(webview: vscode.Webview): void {
+		const initialState: ChatInitialState = {
+			connected: false,
+			auth: { github: false, vercel: false, supabase: false, stripe: false, v0: false, elevenlabs: false, tavily: false },
+			messages: this._getActiveSession()?.messages || [],
+			sessions: this._sessionSummaries(),
+			activeSessionId: this._activeSessionId,
+			sessionRailWidth: this._readSessionRailWidth(),
+			submitWithCtrlEnter: getSubmitWithCtrlEnter(),
+			selectedModelId: getSettingsService(this._context).getPreferences().defaultModel || 'auto'
+		};
+		webview.html = getChatWebviewHtml(webview, this._extensionUri, initialState);
+	}
+
+	private async _onWebviewMessage(data: WebviewInboundMessage): Promise<void> {
+		if (data.type === 'chatWebviewReady') {
+			this._pushActiveSessionToWebview();
+			this._pushChatComposerSettings();
+			void this._pushModelPicker();
+			void this._broadcastSessions();
+			void this._pushSuggestions();
+			void this._pushFirstRunCard();
+			return;
+		}
+		if (data.type === 'sendMessage') {
+			await this._handleUserMessage(data.message, data.model);
+		} else if (data.type === 'requestAtComplete') {
+			await this._handleRequestAtComplete(data.prefix);
+		} else if (data.type === 'askWorkspace') {
+			await this._handleAskWorkspaceMessage(data.message, data.model);
+		} else if (data.type === 'newSession') {
+			await this._handleNewSession();
+		} else if (data.type === 'switchSession') {
+			await this._handleSwitchSession(data.sessionId);
+		} else if (data.type === 'deleteSession') {
+			await this._handleDeleteSession(data.sessionId);
+		} else if (data.type === 'persistSessionRailWidth') {
+			await this._persistSessionRailWidth(data.width);
+		} else if (data.type === 'checkBackend') {
+			await this._checkBackendStatus();
+		} else if (data.type === 'generateCode') {
+			await this._handleCodeGeneration(data.prompt, data.connector);
+		} else if (data.type === 'connectGitHub') {
+			await this._handleGitHubConnect();
+		} else if (data.type === 'connectVercel') {
+			await this._handleVercelConnect();
+		} else if (data.type === 'toggleSaas') {
+			await this._handleSaasToggle(data.provider);
+		} else if (data.type === 'openSettings') {
+			await this._handleOpenSettings(data.section);
+		} else if (data.type === 'openUrl') {
+			await openUrlFromChat(data.url);
+		} else if (data.type === 'saveFirstRunKey') {
+			await this._handleSaveFirstRunKey(data.provider, data.key);
+		} else if (data.type === 'dismissFirstRunCard') {
+			await this._dismissFirstRunCard();
+		} else if (data.type === 'deployProject') {
+			await this._handleDeployment(data.prompt, data.repoName, data.projectName);
+		} else if (data.type === 'checkAuthStatus') {
+			await this._checkAuthStatus();
+		} else if (data.type === 'generatePlan') {
+			await this._handlePlanGeneration(data.request, data.model);
+		} else if (data.type === 'approvePlan') {
+			await this._handleApprovePlan(data.planId);
+		} else if (data.type === 'cancelPlan') {
+			await this._handleCancelPlan(data.planId);
+		} else if (data.type === 'modifyPlan') {
+			await this._handleModifyPlan(data.planId, data.modification);
+		} else if (data.type === 'getHistory') {
+			await this._handleGetHistory();
+		} else if (data.type === 'getRollbackable') {
+			await this._handleGetRollbackable();
+		} else if (data.type === 'rollback') {
+			await this._handleRollback(data.historyId);
+		} else if (data.type === 'browsePlatforms') {
+			await this._handleBrowsePlatforms();
+		} else if (data.type === 'indexWorkspace') {
+			await this._handleIndexWorkspace();
+		} else if (data.type === 'showEngineOutput') {
+			showEngineOutput();
+		} else if (data.type === 'executeRequest') {
+			await this._handleExecuteRequest(data.request, data.model);
+		} else if (data.type === 'runAgent') {
+			await this._handleRunAgent(data.request, data.model);
+		} else if (data.type === 'stopGeneration') {
+			this._abortInFlightReply();
+		} else if (data.type === 'confirmSaveTemplate') {
+			await this._handleConfirmSaveTemplate(data);
+		} else if (data.type === 'cancelSaveTemplate') {
+			return;
+		} else if (data.type === 'acceptSuggestion') {
+			await this._handleAcceptSuggestion(data.id);
+		} else if (data.type === 'dismissSuggestion') {
+			await this._handleDismissSuggestion(data.id, data.permanent);
+		} else if (data.type === 'requestSuggestions') {
+			void this._pushSuggestions();
+		} else if (data.type === 'requestModelPicker') {
+			void this._pushModelPicker();
+		} else if (data.type === 'selectModel') {
+			await this._handleSelectModel(data.modelId);
+		}
 	}
 
 	private async _handleNewSession(): Promise<void> {
@@ -575,8 +693,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		this._activeSessionId = id;
 		await this._persistSessions();
 		await this._broadcastSessions();
-		if (this._view) {
-			this._view.webview.postMessage({
+		if (this._hasChatSurface()) {
+			this._postToWebviews({
 				type: 'loadSession',
 				sessionId: id,
 				messages: []
@@ -619,10 +737,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private _paintWorking(): void {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'addMessage',
 			role: 'assistant',
 			content: '',
@@ -637,8 +755,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 		const ok = await getBackendClient().checkHealth();
 		this._backendConnected = ok;
-		if (this._view) {
-			this._view.webview.postMessage({
+		if (this._hasChatSurface()) {
+			this._postToWebviews({
 				type: 'backendStatus',
 				connected: ok
 			});
@@ -658,8 +776,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		const controller = new AbortController();
 		this._replyAbort = controller;
 		void this._syncOperationContext();
-		if (this._view) {
-			this._view.webview.postMessage({ type: 'generationRunning', running: true });
+		if (this._hasChatSurface()) {
+			this._postToWebviews({ type: 'generationRunning', running: true });
 		}
 		return {
 			controller,
@@ -674,8 +792,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 		this._replyAbort = undefined;
 		void this._syncOperationContext();
-		if (this._view) {
-			this._view.webview.postMessage({ type: 'generationRunning', running: false });
+		if (this._hasChatSurface()) {
+			this._postToWebviews({ type: 'generationRunning', running: false });
 		}
 	}
 
@@ -704,19 +822,26 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			this._assertReply(reply);
 			if (ev.type === 'token' && ev.content) {
 				assembled += ev.content;
-				this._view?.webview.postMessage({ type: 'appendToken', content: ev.content });
+				this._postToWebviews({ type: 'appendToken', content: ev.content });
 			} else if (ev.type === 'done') {
 				if (typeof ev.content === 'string' && ev.content.length > 0) {
 					assembled = ev.content;
 				}
-				this._view?.webview.postMessage({ type: 'finishMessage' });
+				this._postToWebviews({ type: 'finishMessage' });
 				finished = true;
+			} else if (ev.type === 'model_unavailable') {
+				const failed = (ev.model || llmModel || 'unknown').trim();
+				throw new ModelUnavailableSignal(failed);
 			} else if (ev.type === 'error') {
+				const unavailable = parseModelUnavailable(ev.message);
+				if (unavailable) {
+					throw new ModelUnavailableSignal(unavailable);
+				}
 				throw new Error(ev.message || 'Chat stream error');
 			}
 		}
 		if (!finished) {
-			this._view?.webview.postMessage({ type: 'finishMessage' });
+			this._postToWebviews({ type: 'finishMessage' });
 		}
 		return assembled;
 	}
@@ -754,8 +879,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				}
 				startedTokens = true;
 				assembled += ev.content;
-				if (this._view) {
-					this._view.webview.postMessage({ type: 'appendToken', content: ev.content });
+				if (this._hasChatSurface()) {
+					this._postToWebviews({ type: 'appendToken', content: ev.content });
 				}
 			} else if (ev.type === 'tool_calls' && Array.isArray(ev.tool_calls) && ev.tool_calls.length > 0) {
 				toolCalls = ev.tool_calls as ToolCall[];
@@ -770,15 +895,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					usagePromptTokens = ev.usage.prompt_tokens || 0;
 					usageCompletionTokens = ev.usage.completion_tokens || 0;
 				}
+			} else if (ev.type === 'model_unavailable') {
+				const failed = (ev.model || model || modelUsed || 'unknown').trim();
+				throw new ModelUnavailableSignal(failed);
 			} else if (ev.type === 'error') {
+				const unavailable = parseModelUnavailable(ev.message);
+				if (unavailable) {
+					throw new ModelUnavailableSignal(unavailable);
+				}
 				throw new Error(ev.message || 'Agent stream error');
 			}
 		}
 
 		// Post per-turn cost estimate when usage data is available
-		if (this._view && (usagePromptTokens > 0 || usageCompletionTokens > 0)) {
+		if (this._hasChatSurface() && (usagePromptTokens > 0 || usageCompletionTokens > 0)) {
 			const costUsd = this._computeCostEstimate(modelUsed, usagePromptTokens, usageCompletionTokens);
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'costUpdate',
 				cost_usd: costUsd,
 				tokens_in: usagePromptTokens,
@@ -790,10 +922,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return { type: 'tool_calls', tool_calls: toolCalls, model_used: modelUsed || 'unknown' };
 		}
 
-		if (startedTokens && this._view) {
-			this._view.webview.postMessage({ type: 'finishMessage' });
-		} else if (this._view) {
-			this._view.webview.postMessage({
+		const unavailableFinal = parseModelUnavailable(assembled);
+		if (unavailableFinal) {
+			throw new ModelUnavailableSignal(unavailableFinal);
+		}
+
+		if (startedTokens && this._hasChatSurface()) {
+			this._postToWebviews({ type: 'finishMessage' });
+		} else if (this._hasChatSurface()) {
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: assembled || 'No response generated.',
@@ -844,8 +981,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			sessionAfter.messages.push(entry);
 			await this._persistSessions();
 		}
-		if (this._view) {
-			this._view.webview.postMessage({
+		if (this._hasChatSurface()) {
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: stopped,
@@ -856,7 +993,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	public showPlanApproval(plan: any): void {
-		if (!this._view || !plan) {
+		if (!this._hasChatSurface() || !plan) {
 			return;
 		}
 		if (plan.plan_id) {
@@ -867,7 +1004,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				wsClient.subscribeToPlan(plan.plan_id);
 			}
 		}
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'showPlanApproval',
 			plan
 		});
@@ -933,11 +1070,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleRequestAtComplete(prefix: string): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 		const items = await this._collectAtCompleteItems(prefix || '');
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'atCompleteResults',
 			items
 		});
@@ -1157,13 +1294,150 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private _pushChatComposerSettings(): void {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'composerSettings',
 			submitWithCtrlEnter: getSubmitWithCtrlEnter()
 		});
+	}
+
+	private async _pushModelPicker(refresh = false): Promise<void> {
+		if (!this._hasChatSurface()) {
+			return;
+		}
+		const settings = getSettingsService(this._context);
+		const selectedModelId = settings.getPreferences().defaultModel || 'auto';
+		try {
+			const catalog = await getBackendClient().getModelCatalog(refresh);
+			const enabledModelIds = await settings.resolveEnabledModelIds(catalog);
+			this._postToWebviews({
+				type: 'modelPickerState',
+				catalog,
+				enabledModelIds,
+				selectedModelId
+			});
+		} catch (error) {
+			console.warn('[Nexora] Failed to push model picker', error);
+			this._postToWebviews({
+				type: 'modelPickerState',
+				catalog: null,
+				enabledModelIds: settings.getEnabledModelIds() ?? [],
+				selectedModelId,
+				error: error instanceof Error ? error.message : 'Catalog unavailable'
+			});
+		}
+	}
+
+	private async _handleSelectModel(modelId: string): Promise<void> {
+		const id = (modelId || '').trim();
+		if (!id) {
+			return;
+		}
+		await getSettingsService(this._context).setPreference('defaultModel', id);
+		if (this._hasChatSurface()) {
+			this._postToWebviews({
+				type: 'modelSelected',
+				modelId: id
+			});
+		}
+	}
+
+	/**
+	 * Ask the user to pick another model after 401/403/429. Saves the pick as the
+	 * composer default so the rest of the run uses it.
+	 */
+	private async _generatePlanRetrying(
+		request: string,
+		model: string | undefined,
+		workspacePath: string | undefined,
+		sessionId: string | undefined,
+		workspaceId: string | undefined
+	) {
+		const client = getBackendClient();
+		let llmModel = this._mapUiModelToLiteLlm(model);
+		for (; ;) {
+			try {
+				return await client.generatePlan(
+					request,
+					'default',
+					workspacePath,
+					llmModel,
+					{ session_id: sessionId, workspace_id: workspaceId }
+				);
+			} catch (error) {
+				const failed = parseModelUnavailable(error instanceof Error ? error.message : String(error));
+				if (!failed) {
+					throw error;
+				}
+				const picked = await this._promptModelToContinue(failed);
+				if (!picked) {
+					throw new Error(`${failed} is rate-limited. Choose another model to continue.`);
+				}
+				llmModel = this._mapUiModelToLiteLlm(picked);
+			}
+		}
+	}
+
+	private async _promptModelToContinue(failedModel: string): Promise<string | undefined> {
+		const label = (failedModel || 'Selected model').trim() || 'Selected model';
+		const placeHolder = `${label} is rate-limited. Choose a model to continue.`;
+		const settings = getSettingsService(this._context);
+		let enabledIds = settings.getEnabledModelIds() ?? [];
+		try {
+			const catalog = await getBackendClient().getModelCatalog(false);
+			enabledIds = await settings.resolveEnabledModelIds(catalog);
+			if (this._hasChatSurface()) {
+				this._postToWebviews({
+					type: 'modelPickerState',
+					catalog,
+					enabledModelIds: enabledIds,
+					selectedModelId: settings.getPreferences().defaultModel || 'auto'
+				});
+			}
+		} catch {
+			// Catalog optional; QuickPick still uses cached enabled ids.
+		}
+
+		const seen = new Set<string>();
+		const items: vscode.QuickPickItem[] = [];
+		const push = (id: string, description?: string) => {
+			const trimmed = (id || '').trim();
+			if (!trimmed || seen.has(trimmed)) {
+				return;
+			}
+			seen.add(trimmed);
+			items.push({ label: trimmed, description });
+		};
+		push('auto', 'Auto');
+		for (const id of enabledIds) {
+			push(id, id === failedModel ? 'rate-limited' : undefined);
+		}
+		if (failedModel && !seen.has(failedModel)) {
+			push(failedModel, 'rate-limited');
+		}
+		if (items.length === 0) {
+			return undefined;
+		}
+
+		const picked = await vscode.window.showQuickPick(items, {
+			placeHolder,
+			title: placeHolder,
+			ignoreFocusOut: true
+		});
+		const next = (picked?.label || '').trim();
+		if (!next) {
+			return undefined;
+		}
+		await settings.setPreference('defaultModel', next);
+		if (this._hasChatSurface()) {
+			this._postToWebviews({
+				type: 'modelSelected',
+				modelId: next
+			});
+		}
+		return next;
 	}
 
 	private _openEditorContextBlocks(mentions: string[]): string[] {
@@ -1237,20 +1511,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _pushSuggestions(): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 		const { workspaceId, workspacePath } = await this._workspaceContext();
 		if (!workspaceId) {
-			this._view.webview.postMessage({ type: 'showSuggestion', suggestion: null });
+			this._postToWebviews({ type: 'showSuggestion', suggestion: null });
 			return;
 		}
 		try {
 			const result = await getBackendClient().getMemorySuggestions(workspaceId, workspacePath, 'default');
 			const first = (result.suggestions || [])[0] || null;
-			this._view.webview.postMessage({ type: 'showSuggestion', suggestion: first });
+			this._postToWebviews({ type: 'showSuggestion', suggestion: first });
 		} catch {
-			this._view.webview.postMessage({ type: 'showSuggestion', suggestion: null });
+			this._postToWebviews({ type: 'showSuggestion', suggestion: null });
 		}
 	}
 
@@ -1272,7 +1546,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 		try {
 			const suggested = await getBackendClient().suggestTemplateFromPlan(planId);
-			this._view?.webview.postMessage({
+			this._postToWebviews({
 				type: 'showSaveTemplate',
 				planId,
 				parameters: suggested.parameters || []
@@ -1357,8 +1631,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		await this._persistSessions();
 		await this._broadcastSessions();
 		const session = this._getActiveSession();
-		if (this._view && session) {
-			this._view.webview.postMessage({
+		if (this._hasChatSurface() && session) {
+			this._postToWebviews({
 				type: 'loadSession',
 				sessionId: session.id,
 				messages: session.messages || []
@@ -1400,8 +1674,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		await this._broadcastSessions();
 
 		const session = this._getActiveSession();
-		if (this._view && session) {
-			this._view.webview.postMessage({
+		if (this._hasChatSurface() && session) {
+			this._postToWebviews({
 				type: 'loadSession',
 				sessionId: session.id,
 				messages: session.messages || []
@@ -1419,14 +1693,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		// Subscribe to WebSocket messages and forward to webview
 		this._wsUnsubscribe = wsClient.onMessage((message: WebSocketMessage) => {
-			if (!this._view) {
+			if (!this._hasChatSurface()) {
 				return;
 			}
 
 			// Forward task updates to webview
 			if (message.type === 'task_running' || message.type === 'task_success' || message.type === 'task_failed' || message.type === 'task_skipped') {
 				const status = message.type.replace('task_', '');
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'taskUpdate',
 					planId: message.plan_id,
 					taskId: message.task_id,
@@ -1440,8 +1714,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				vscode.commands.executeCommand('nexora.updateTaskStatus', message.task_id, status);
 			}
 
+			if (message.type === 'workspace_task') {
+				void this._handleWorkspaceTask(message);
+			}
+
 			if (message.type === 'plan_snapshot') {
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'planSnapshot',
 					planId: message.plan_id,
 					plan: message.result,
@@ -1451,17 +1729,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Forward plan completion to webview
 			if (message.type === 'plan_completed') {
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'planCompleted',
 					planId: message.plan_id,
 					status: message.status,
 					actualCost: message.actual_cost || 0
 				});
+				if (message.plan_id && message.plan_id === this._currentPlanId) {
+					this._currentPlanId = undefined;
+					void this._syncOperationContext();
+				}
+				this._clearChatActivity();
+				void this._offerSaveAsTemplate(message.plan_id || '', message.status || '');
 			}
 
 			// Forward retry notifications to webview
 			if (message.type === 'task_retry') {
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'taskRetry',
 					planId: message.plan_id,
 					taskId: message.task_id,
@@ -1474,7 +1758,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Forward user escalation to webview (Week 10 completion)
 			if (message.type === 'user_escalation') {
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'userEscalation',
 					planId: message.plan_id,
 					taskId: message.task_id,
@@ -1498,8 +1782,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		const isConnected = await client.checkHealth();
 		this._backendConnected = isConnected;
 
-		if (this._view) {
-			this._view.webview.postMessage({
+		if (this._hasChatSurface()) {
+			this._postToWebviews({
 				type: 'backendStatus',
 				connected: isConnected
 			});
@@ -1507,7 +1791,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleUserMessage(message: string, model?: string): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -1527,11 +1811,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			if (!isConnected) {
 				this._clearChatActivity();
 				this._noteBackendDown();
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'backendStatus',
 					connected: false
 				});
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: `Backend is offline. Your message: "${message}"\n\nPlease start the backend server and try again.`,
@@ -1576,7 +1860,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			const errText = `Error: ${errMsg}`;
 			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|Failed to fetch/i.test(errMsg)) {
 				this._noteBackendDown();
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'backendStatus',
 					connected: false
 				});
@@ -1587,7 +1871,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._persistSessions();
 			}
 			this._clearChatActivity();
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: errText,
@@ -1599,7 +1883,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleAskWorkspaceMessage(message: string, model?: string): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -1624,7 +1908,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					s0.messages.push({ role: 'assistant', content: offline });
 					await this._persistSessions();
 				}
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: offline,
@@ -1642,7 +1926,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					s1.messages.push({ role: 'assistant', content: noFolder });
 					await this._persistSessions();
 				}
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: noFolder,
@@ -1693,7 +1977,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._persistSessions();
 			}
 			this._clearChatActivity();
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: errText,
@@ -1818,8 +2102,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 
 		const maxMsg = `Agent reached maximum turns (${turn}/${maxTurns}) without completing. Try breaking the request into smaller steps or continue in a new message.`;
-		if (this._view) {
-			this._view.webview.postMessage({
+		if (this._hasChatSurface()) {
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: maxMsg,
@@ -1869,6 +2153,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return `browser_click: ${args.selector || args.text || ''}`.slice(0, 80);
 			case 'browser_type':
 				return `browser_type: ${args.text || ''}`.slice(0, 80);
+			case 'browser_select':
+				return `browser_select: ${args.option || args.selector || args.text || ''}`.slice(0, 80);
+			case 'browser_press':
+				return `browser_press: ${args.key || ''}`.slice(0, 80);
 			default:
 				return `${toolName}`.slice(0, 60);
 		}
@@ -1969,11 +2257,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleCodeGeneration(prompt: string, connector: string): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'addMessage',
 			role: 'assistant',
 			content: `Generating code with ${connector}...`,
@@ -1985,7 +2273,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			const isConnected = await client.checkHealth();
 
 			if (!isConnected) {
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: 'Backend is offline. Please start the backend server and try again.',
@@ -2016,7 +2304,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				response += '```\n' + result.data.content + '\n```\n\n';
 				response += ` **${usage.input_tokens}** in -> **${usage.output_tokens}** out | ${costStr}`;
 
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: response,
@@ -2031,7 +2319,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				response += `- OpenAI: \`OPENAI_API_KEY\`\n`;
 				response += `- Anthropic: \`ANTHROPIC_API_KEY\``;
 
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: response,
@@ -2039,7 +2327,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				});
 			}
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -2049,14 +2337,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _checkAuthStatus(): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
 		const client = getBackendClient();
 		const status = await client.getAuthStatus();
 
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'authStatus',
 			github: status.github_connected,
 			vercel: status.vercel_connected,
@@ -2074,7 +2362,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			this._backendOffline = !!status.backend_offline;
 			if (status.backend_offline) {
 				this._noteBackendDown();
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: 'Cannot reach the Nexora engine, so connection badges may be inaccurate. Check the "Nexora Engine" output channel.',
@@ -2085,7 +2373,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleGitHubConnect(): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -2095,7 +2383,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		if (result && result.authorization_url) {
 			vscode.env.openExternal(vscode.Uri.parse(result.authorization_url));
 
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: 'Opening GitHub authorization page in your browser. Please authorize Nexora and then come back here.',
@@ -2105,7 +2393,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			// Check status after a delay
 			setTimeout(() => this._checkAuthStatus(), 5000);
 		} else {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: 'Failed to get GitHub authorization URL. Please check backend configuration.',
@@ -2115,7 +2403,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleVercelConnect(): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -2125,7 +2413,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		if (result && result.authorization_url) {
 			vscode.env.openExternal(vscode.Uri.parse(result.authorization_url));
 
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: 'Opening Vercel authorization page in your browser. Please authorize Nexora and then come back here.',
@@ -2135,7 +2423,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			// Check status after a delay
 			setTimeout(() => this._checkAuthStatus(), 5000);
 		} else {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: 'Failed to get Vercel authorization URL. Please check backend configuration.',
@@ -2145,7 +2433,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleSaasToggle(provider: 'supabase' | 'stripe' | 'v0' | 'elevenlabs' | 'tavily'): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -2186,7 +2474,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		await this._checkAuthStatus();
 
 		if (!result) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Failed to update ${label} status. Check that the backend is running.`,
@@ -2195,7 +2483,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'addMessage',
 			role: 'assistant',
 			content: result.connected
@@ -2209,7 +2497,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		// Open Nexora settings panel with optional section hint
 		await vscode.commands.executeCommand('nexora.openSettings', section);
 
-		if (this._view && section) {
+		if (this._hasChatSurface() && section) {
 			// Show a message about which connector needs configuration
 			const connectorNames: Record<string, string> = {
 				'supabase': 'Supabase',
@@ -2220,7 +2508,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			};
 			const name = connectorNames[section] || section;
 
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `**Configure ${name}**\n\nOpen Settings panel and add your ${name} credentials in the API Keys section.`,
@@ -2230,7 +2518,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _pushFirstRunCard(report?: CapabilitiesReport): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 		const caps = report || getCachedCapabilities() || await refreshCapabilities();
@@ -2239,31 +2527,31 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._context.globalState.update(FIRST_RUN_DISMISSED_KEY, false);
 		}
 		const show = allLlmNotConfigured(caps) && !this._context.globalState.get<boolean>(FIRST_RUN_DISMISSED_KEY, false);
-		this._view.webview.postMessage({ type: 'firstRunKeyCard', show });
+		this._postToWebviews({ type: 'firstRunKeyCard', show });
 	}
 
 	private async _dismissFirstRunCard(): Promise<void> {
 		await this._context.globalState.update(FIRST_RUN_DISMISSED_KEY, true);
-		if (this._view) {
-			this._view.webview.postMessage({ type: 'firstRunKeyCard', show: false });
+		if (this._hasChatSurface()) {
+			this._postToWebviews({ type: 'firstRunKeyCard', show: false });
 		}
 	}
 
 	private async _handleSaveFirstRunKey(provider: string, key: string): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 		if (!(FIRST_RUN_PROVIDERS as readonly string[]).includes(provider)) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'firstRunKeyResult',
 				success: false,
-				error: 'Choose OpenAI, Anthropic, or OpenRouter'
+				error: 'Choose OpenAI, Anthropic, Gemini, or OpenRouter'
 			});
 			return;
 		}
 		const trimmed = (key || '').trim();
 		if (!trimmed) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'firstRunKeyResult',
 				success: false,
 				error: 'Paste a key to save'
@@ -2276,7 +2564,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		try {
 			const result = await client.validateApiKey(provider, trimmed);
 			if (!result?.success) {
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'firstRunKeyResult',
 					success: false,
 					error: result?.error || 'Key validation failed - not saved'
@@ -2285,13 +2573,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 			await settings.setApiKey(provider as typeof FIRST_RUN_PROVIDERS[number], trimmed);
 			await refreshCapabilities();
-			this._view.webview.postMessage({ type: 'firstRunKeyResult', success: true });
+			this._postToWebviews({ type: 'firstRunKeyResult', success: true });
 			void getNotificationService().showSuccess(
 				`${provider} key saved - used for Chat, Plan, and Agent`
 			);
 			await this._pushFirstRunCard();
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'firstRunKeyResult',
 				success: false,
 				error: error instanceof Error ? error.message : 'Save failed'
@@ -2300,11 +2588,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleDeployment(prompt: string, repoName: string, projectName: string): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'addMessage',
 			role: 'assistant',
 			content: '**Starting Deployment Pipeline**\n\nStep 1/3: Generating code with LLM...',
@@ -2331,7 +2619,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					errorMsg += '- [x] Vercel connected\n';
 				}
 
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: errorMsg,
@@ -2387,7 +2675,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				response += `Please check the errors above and try again.`;
 			}
 
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: response,
@@ -2411,7 +2699,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				errorMsg += 'Unknown error occurred during deployment.';
 			}
 
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: errorMsg,
@@ -2421,13 +2709,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handlePlanGeneration(request: string, model?: string): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
 		await this._recordUserMessage(request, 'plan');
 
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'addMessage',
 			role: 'assistant',
 			content: 'Generating execution plan...',
@@ -2435,15 +2723,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		});
 
 		try {
-			const client = getBackendClient();
-			const workspaceFolders = vscode.workspace.workspaceFolders;
-			const workspacePath = workspaceFolders && workspaceFolders.length > 0
-				? workspaceFolders[0].uri.fsPath
-				: undefined;
-
-			const llmModel = this._mapUiModelToLiteLlm(model);
+			const ctx = await this._workspaceContext();
+			const session = this._getActiveSession();
 			const atContextRequest = await this._injectAtMentionContext(request);
-			const plan = await client.generatePlan(atContextRequest, 'default', workspacePath, llmModel);
+			const plan = await this._generatePlanRetrying(
+				atContextRequest,
+				model,
+				ctx.workspacePath,
+				session?.id,
+				ctx.workspaceId
+			);
 
 			// Store current plan ID and subscribe to WebSocket updates
 			this._currentPlanId = plan.plan_id;
@@ -2462,7 +2751,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 
 			// Send plan to webview with approval UI
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'showPlanApproval',
 				plan: plan
 			});
@@ -2482,13 +2771,32 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				sessionErr.messages.push({ role: 'assistant', content: errMsg, mode: 'plan', timestamp: Date.now() });
 				await this._persistSessions();
 			}
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: errMsg,
 				isLoading: false
 			});
 		}
+	}
+
+	/**
+	 * Approve may return status "executing" while workspace/platform tasks are still
+	 * pending. Treat only terminal statuses as a finished run; otherwise wait for
+	 * plan_completed on the WebSocket.
+	 */
+	private _isPlanStillRunning(status: string | undefined): boolean {
+		const s = (status || '').toLowerCase();
+		return s === 'executing' || s === 'approved' || s === 'running' || s === 'pending';
+	}
+
+	private _postPlanRunningMessage(): void {
+		this._postToWebviews({
+			type: 'addMessage',
+			role: 'assistant',
+			content: 'Running the plan...',
+			isLoading: true
+		});
 	}
 
 	/**
@@ -2530,7 +2838,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleApprovePlan(planId: string): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -2542,20 +2850,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		wsClient.subscribeToPlan(planId);
 
 		// Notify webview that execution is starting
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'planExecutionStarted',
 			planId: planId
 		});
 
 		try {
 			const client = getBackendClient();
-			// This will trigger execution - WebSocket will send real-time updates
 			const result = await client.approvePlan(planId);
 
 			await this._rememberIndexedWorkspace(result);
 
-			// Final result (WebSocket may have already sent updates, but this is the definitive result)
-			this._view.webview.postMessage({
+			if (this._isPlanStillRunning(result.status)) {
+				this._postPlanRunningMessage();
+				return;
+			}
+
+			this._postToWebviews({
 				type: 'planExecutionComplete',
 				planId: planId,
 				status: result.status,
@@ -2565,7 +2876,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._offerSaveAsTemplate(planId, result.status);
 
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Error executing plan: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -2575,7 +2886,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleCancelPlan(planId: string): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -2588,7 +2899,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 			await this._syncOperationContext();
 
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Plan ${planId} cancelled.`,
@@ -2596,7 +2907,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Error cancelling plan: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -2606,7 +2917,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleModifyPlan(planId: string, modification: any): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -2623,7 +2934,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				response += `  - ${task.task_id}: ${task.name} (${task.platform})\n`;
 			}
 
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'showPlanApproval',
 				plan: result,
 				message: response
@@ -2633,7 +2944,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			vscode.commands.executeCommand('nexora.updateWorkflowPlan', result);
 
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Error modifying plan: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -2643,7 +2954,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleGetHistory(): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -2666,7 +2977,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				}
 			}
 
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: response,
@@ -2674,7 +2985,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Error getting history: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -2684,7 +2995,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleGetRollbackable(): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -2704,7 +3015,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				response += `\nTo rollback, use the rollback command with the ID.`;
 			}
 
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: response,
@@ -2712,7 +3023,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Error getting rollbackable items: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -2722,11 +3033,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleRollback(historyId: number): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'addMessage',
 			role: 'assistant',
 			content: `Rolling back action ${historyId}...`,
@@ -2741,7 +3052,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			if (info.warning) {
 				// Show warning but proceed
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: `**Warning:** ${info.warning}`,
@@ -2753,14 +3064,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			const result = await client.rollback(historyId, 'default');
 
 			if (result.success) {
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: `**Rollback Successful**\n\n${result.message}`,
 					isLoading: false
 				});
 			} else {
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: `**Rollback Failed**\n\n${result.message}`,
@@ -2769,7 +3080,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Error during rollback: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -2779,11 +3090,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleBrowsePlatforms(): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'addMessage',
 			role: 'assistant',
 			content: 'Fetching available platforms...',
@@ -2814,7 +3125,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				response += '\n';
 			}
 
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: response,
@@ -2822,7 +3133,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 
 		} catch (error) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Error fetching platforms: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -2832,7 +3143,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleIndexWorkspace(): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -2840,7 +3151,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		if (!workspaceFolders || workspaceFolders.length === 0) {
 			const noOpen = 'No workspace folder open. Please open a folder first.';
 			await this._appendAssistantToSession(noOpen);
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: noOpen,
@@ -2875,7 +3186,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleExecuteRequest(request: string, model?: string): Promise<void> {
-		if (!this._view) {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
@@ -2883,7 +3194,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		// Check if there's an existing approved plan to execute
 		if (this._currentPlanId) {
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Executing approved plan (${this._currentPlanId})...`,
@@ -2898,13 +3209,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				}
 				wsClient.subscribeToPlan(this._currentPlanId);
 
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'planExecutionStarted',
 					planId: this._currentPlanId
 				});
 
 				const result = await client.approvePlan(this._currentPlanId);
 				await this._rememberIndexedWorkspace(result);
+
+				if (this._isPlanStillRunning(result.status)) {
+					this._postPlanRunningMessage();
+					return;
+				}
 
 				const resultMsg = this._formatExecutionResult(result);
 				const sessionAfter = this._getActiveSession();
@@ -2913,7 +3229,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					await this._persistSessions();
 				}
 
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'planExecutionComplete',
 					planId: this._currentPlanId,
 					status: result.status,
@@ -2932,7 +3248,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					sessionErr.messages.push({ role: 'assistant', content: errMsg, mode: 'execute', timestamp: Date.now() });
 					await this._persistSessions();
 				}
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: errMsg,
@@ -2944,7 +3260,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		// No approved plan - generate and execute immediately
 		// autoApproveModeSwitch: Execute already runs without a Plan/Execute confirm.
-		this._view.webview.postMessage({
+		this._postToWebviews({
 			type: 'addMessage',
 			role: 'assistant',
 			content: 'Generating and executing plan immediately...',
@@ -2953,43 +3269,47 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		try {
 			const client = getBackendClient();
-			const workspaceFolders = vscode.workspace.workspaceFolders;
-			const workspacePath = workspaceFolders && workspaceFolders.length > 0
-				? workspaceFolders[0].uri.fsPath
-				: undefined;
+			const ctx = await this._workspaceContext();
+			const session = this._getActiveSession();
 
-			// Generate plan
-			const llmModel = this._mapUiModelToLiteLlm(model);
 			const atContextRequest = await this._injectAtMentionContext(request);
-			const plan = await client.generatePlan(atContextRequest, 'default', workspacePath, llmModel);
+			const plan = await this._generatePlanRetrying(
+				atContextRequest,
+				model,
+				ctx.workspacePath,
+				session?.id,
+				ctx.workspaceId
+			);
 
-			// Subscribe to WebSocket
+			this._currentPlanId = plan.plan_id;
+			await this._syncOperationContext();
+
 			const wsClient = getOrchestrationWebSocket('default');
 			if (!wsClient.isConnected()) {
 				await wsClient.connect();
 			}
 			wsClient.subscribeToPlan(plan.plan_id);
 
-			// Show plan card
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'showPlanApproval',
 				plan: plan
 			});
 
-			// Update task tree sidebar with plan data
 			vscode.commands.executeCommand('nexora.updateTaskTreeFromPlan', plan);
-
-			// Week 11: Update workflow panel with plan visualization
 			vscode.commands.executeCommand('nexora.updateWorkflowPlan', plan);
 
-			// Immediately approve and execute
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'planExecutionStarted',
 				planId: plan.plan_id
 			});
 
 			const result = await client.approvePlan(plan.plan_id);
 			await this._rememberIndexedWorkspace(result);
+
+			if (this._isPlanStillRunning(result.status)) {
+				this._postPlanRunningMessage();
+				return;
+			}
 
 			const resultMsg = this._formatExecutionResult(result);
 			const sessionAfter = this._getActiveSession();
@@ -2998,7 +3318,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._persistSessions();
 			}
 
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'planExecutionComplete',
 				planId: plan.plan_id,
 				status: result.status,
@@ -3014,7 +3334,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				sessionErr.messages.push({ role: 'assistant', content: errMsg, mode: 'execute', timestamp: Date.now() });
 				await this._persistSessions();
 			}
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: errMsg,
@@ -3023,25 +3343,63 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	private async _handleRunAgent(request: string, model?: string): Promise<void> {
-		if (!this._view) {
+	/** Agent runs an existing plan only when the user asks to execute that plan. */
+	private _wantsExistingPlanRun(text: string): boolean {
+		return /\b(execute|run|approve|start)\b[\s\S]{0,48}\bplan\b/i.test(text.trim());
+	}
+
+	private async _approveCurrentPlan(sessionId: string | undefined, workspaceId: string | undefined): Promise<void> {
+		const planId = this._currentPlanId;
+		if (!planId) {
 			return;
 		}
+		const client = getBackendClient();
+		const wsClient = getOrchestrationWebSocket('default');
+		if (!wsClient.isConnected()) {
+			await wsClient.connect();
+		}
+		wsClient.subscribeToPlan(planId);
+		this._postToWebviews({
+			type: 'planExecutionStarted',
+			planId
+		});
+		const result = await client.approvePlan(planId);
+		await this._rememberIndexedWorkspace(result);
+		if (this._isPlanStillRunning(result.status)) {
+			this._postPlanRunningMessage();
+			return;
+		}
+		const resultMsg = this._formatExecutionResult(result);
+		const sessionDone = this._getActiveSession();
+		if (sessionDone) {
+			sessionDone.messages.push({ role: 'assistant', content: resultMsg, mode: 'agent', timestamp: Date.now() });
+			await this._persistSessions();
+		}
+		if (sessionId && workspaceId) {
+			await this._appendTranscript(sessionId, workspaceId, 'assistant', resultMsg, 'agent');
+		}
+		this._postToWebviews({
+			type: 'planExecutionComplete',
+			planId,
+			status: result.status,
+			tasks: result.tasks,
+			actualCost: result.actual_cost
+		});
+		await this._offerSaveAsTemplate(planId, result.status);
+		this._clearChatActivity();
+	}
 
-		const reply = this._beginReply();
-		if (!reply) {
+	private async _handleRunAgent(request: string, model?: string): Promise<void> {
+		if (!this._hasChatSurface()) {
 			return;
 		}
 
 		try {
-			this._paintWorking();
 			const session = await this._recordUserMessage(request, 'agent');
 			const sessionId = session?.id;
 
 			const isConnected = await this._backendReady();
-			this._assertReply(reply);
 			if (!isConnected) {
-				this._clearChatActivity();
 				this._noteBackendDown();
 				const offline = `Backend is offline. Your request: "${request}"\n\nPlease start the backend server and try again.`;
 				const s0 = this._getActiveSession();
@@ -3049,7 +3407,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					s0.messages.push({ role: 'assistant', content: offline, mode: 'agent', timestamp: Date.now() });
 					await this._persistSessions();
 				}
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: offline,
@@ -3060,14 +3418,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			const workspaceFolders = vscode.workspace.workspaceFolders;
 			if (!workspaceFolders || workspaceFolders.length === 0) {
-				this._clearChatActivity();
 				const noFolder = 'No workspace folder open. Open a folder to use Agent mode.';
 				const s1 = this._getActiveSession();
 				if (s1) {
 					s1.messages.push({ role: 'assistant', content: noFolder, mode: 'agent', timestamp: Date.now() });
 					await this._persistSessions();
 				}
-				this._view.webview.postMessage({
+				this._postToWebviews({
 					type: 'addMessage',
 					role: 'assistant',
 					content: noFolder,
@@ -3079,20 +3436,38 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			const workspacePath = workspaceFolders[0].uri.fsPath;
 			const active = this._getActiveSession();
 			const workspaceId = await this._resolveWorkspaceIdForPath(workspacePath, active);
-			this._assertReply(reply);
+
+			void this._appendTranscript(sessionId, workspaceId, 'user', request, 'agent');
+
+			if (this._wantsExistingPlanRun(request)) {
+				if (!this._currentPlanId) {
+					const none = 'No plan is waiting. Switch to Plan mode, describe the work, then come back and say execute the plan.';
+					const sNone = this._getActiveSession();
+					if (sNone) {
+						sNone.messages.push({ role: 'assistant', content: none, mode: 'agent', timestamp: Date.now() });
+						await this._persistSessions();
+					}
+					this._postToWebviews({
+						type: 'addMessage',
+						role: 'assistant',
+						content: none,
+						isLoading: false
+					});
+					return;
+				}
+				await this._approveCurrentPlan(sessionId, workspaceId);
+				return;
+			}
 
 			const llmModel = this._mapUiModelToLiteLlm(model);
-			void this._appendTranscript(sessionId, workspaceId, 'user', request, 'agent');
 			const atContextRequest = await this._injectAtMentionContext(request);
-			this._assertReply(reply);
 			const finalAnswer = await this._runAgentLoopWithMode(
 				atContextRequest,
 				workspaceId,
 				workspacePath,
 				llmModel,
 				'agent',
-				sessionId,
-				reply
+				sessionId
 			);
 
 			const sessionAfter = this._getActiveSession();
@@ -3100,15 +3475,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				sessionAfter.messages.push({ role: 'assistant', content: finalAnswer, mode: 'agent', timestamp: Date.now() });
 				await this._persistSessions();
 			}
-
 			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'agent');
-
+			this._postToWebviews({
+				type: 'addMessage',
+				role: 'assistant',
+				content: finalAnswer,
+				isLoading: false
+			});
 			this._clearChatActivity();
 		} catch (error) {
-			if (isRequestCancelled(error) || reply.isCancelled()) {
-				await this._finishStopped(reply, 'agent');
-				return;
-			}
 			const errText = `Agent error: ${error instanceof Error ? error.message : 'Unknown error'}`;
 			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|Failed to fetch/i.test(errText)) {
 				this._noteBackendDown();
@@ -3119,14 +3494,105 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._persistSessions();
 			}
 			this._clearChatActivity();
-			this._view.webview.postMessage({
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: errText,
 				isLoading: false
 			});
+		}
+	}
+
+	/**
+	 * Run a single workspace_task from the orchestration DAG via the existing agent tool loop.
+	 * Does not call connectors; posts task-result when the loop finishes.
+	 */
+	private async _handleWorkspaceTask(message: WebSocketMessage): Promise<void> {
+		const planId = message.plan_id;
+		const taskId = message.task_id;
+		if (!planId || !taskId) {
+			return;
+		}
+		if (this._workspaceTaskInFlight.has(taskId)) {
+			return;
+		}
+		this._workspaceTaskInFlight.add(taskId);
+
+		const instruction = (message.instruction || '').trim();
+		const context = (message.context || '').trim();
+		const firstLine = (instruction.split(/\r?\n/).find((l) => l.trim()) || 'Workspace task').trim();
+		const workspacePath =
+			(message.workspace_path || '').trim()
+			|| vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+			|| '';
+
+		const client = getBackendClient();
+		const modifiedFiles = new Set<string>();
+
+		try {
+			if (!workspacePath) {
+				await client.submitTaskResult({
+					plan_id: planId,
+					task_id: taskId,
+					success: false,
+					summary: 'No workspace folder open',
+					files: []
+				});
+				return;
+			}
+
+			this._emitChatActivity([{ id: `ws-task-${taskId}`, label: firstLine, done: false }]);
+
+			const active = this._getActiveSession();
+			const workspaceId = await this._resolveWorkspaceIdForPath(workspacePath, active);
+			const sessionId = active?.id;
+			// Prefer composer default so a mid-run model pick applies to later DAG steps.
+			const preferred = getSettingsService(this._context).getPreferences().defaultModel?.trim();
+			const llmModel = this._mapUiModelToLiteLlm(preferred || message.model);
+			const userMessage = context ? `${context}\n\n${instruction}` : instruction;
+
+			const finalAnswer = await this._runAgentLoopWithMode(
+				userMessage,
+				workspaceId,
+				workspacePath,
+				llmModel,
+				'agent',
+				sessionId,
+				undefined,
+				{ maxTurns: 8, modifiedFilesOut: modifiedFiles }
+			);
+
+			const summaryLine = (finalAnswer.split(/\r?\n/).find((l) => l.trim()) || 'Done').trim().slice(0, 200);
+			await client.submitTaskResult({
+				plan_id: planId,
+				task_id: taskId,
+				success: true,
+				summary: summaryLine,
+				files: Array.from(modifiedFiles)
+			});
+			this._emitChatActivity([{ id: `ws-task-${taskId}`, label: firstLine, done: true }]);
+		} catch (error) {
+			const errText = error instanceof Error ? error.message : 'Workspace task failed';
+			try {
+				await client.submitTaskResult({
+					plan_id: planId,
+					task_id: taskId,
+					success: false,
+					summary: errText.slice(0, 200),
+					files: Array.from(modifiedFiles)
+				});
+			} catch {
+				// Do not crash the chat if task-result itself fails.
+			}
+			this._postToWebviews({
+				type: 'taskUpdate',
+				planId,
+				taskId,
+				status: 'failed',
+				error: errText
+			});
 		} finally {
-			this._endReply(reply);
+			this._workspaceTaskInFlight.delete(taskId);
 		}
 	}
 
@@ -3141,10 +3607,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		model: string | undefined,
 		mode: AgentMode,
 		sessionId?: string,
-		reply?: InFlightReply
+		reply?: InFlightReply,
+		options?: { maxTurns?: number; modifiedFilesOut?: Set<string> }
 	): Promise<string> {
-		const maxTurns = getAgentMaxTurns();
+		const maxTurns = options?.maxTurns ?? getAgentMaxTurns();
 		let turn = 0;
+		let activeModel = model;
 
 		// Build initial messages
 		const messages: AgentMessage[] = [
@@ -3152,7 +3620,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		];
 
 		// Track files modified during this agent loop
-		const modifiedFiles = new Set<string>();
+		const modifiedFiles = options?.modifiedFilesOut ?? new Set<string>();
 
 		// Track activity items for UI
 		const activityItems: ChatActivityItem[] = [
@@ -3170,16 +3638,54 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			this._emitChatActivity(activityItems);
 			this._assertReply(reply);
 
-			const response = await this._nextAgentLoopTurn(
-				messages,
-				workspaceId,
-				workspacePath,
-				model,
-				mode,
-				sessionId,
-				reply
-			);
+			let response: AgentTurnResponse;
+			for (; ;) {
+				try {
+					response = await this._nextAgentLoopTurn(
+						messages,
+						workspaceId,
+						workspacePath,
+						activeModel,
+						mode,
+						sessionId,
+						reply
+					);
+					break;
+				} catch (error) {
+					let signal: ModelUnavailableSignal | undefined;
+					if (error instanceof ModelUnavailableSignal) {
+						signal = error;
+					} else {
+						const fromMsg = parseModelUnavailable(error instanceof Error ? error.message : String(error));
+						if (fromMsg) {
+							signal = new ModelUnavailableSignal(fromMsg);
+						}
+					}
+					if (!signal) {
+						throw error;
+					}
+					const picked = await this._promptModelToContinue(signal.modelId);
+					if (!picked) {
+						throw new Error(`${signal.modelId} is rate-limited. No model selected.`);
+					}
+					activeModel = this._mapUiModelToLiteLlm(picked);
+					this._assertReply(reply);
+				}
+			}
 			this._assertReply(reply);
+
+			const unavailableContent = response.type === 'final'
+				? parseModelUnavailable(response.content)
+				: undefined;
+			if (unavailableContent) {
+				const picked = await this._promptModelToContinue(unavailableContent);
+				if (!picked) {
+					throw new Error(`${unavailableContent} is rate-limited. No model selected.`);
+				}
+				activeModel = this._mapUiModelToLiteLlm(picked);
+				turn--;
+				continue;
+			}
 
 			if (response.type === 'final') {
 				// Agent is done, return the answer
@@ -3267,8 +3773,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 
 		const maxMsg = `Agent reached maximum turns (${turn}/${maxTurns}) without completing. Try breaking the request into smaller steps or continue in a new message.`;
-		if (this._view) {
-			this._view.webview.postMessage({
+		if (this._hasChatSurface()) {
+			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
 				content: maxMsg,
