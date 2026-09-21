@@ -56,6 +56,10 @@ export function getSettingsWebviewHtml(
 				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 1a4 4 0 0 0-1.5 7.71V10H5v2H3v2h5V8.71A4 4 0 0 0 8 1zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></svg></span>
 				<span class="nx-nav-label">LLM Keys</span>
 			</button>
+			<button type="button" class="nx-nav-item" data-section="models" title="Models" aria-label="Models">
+				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M2 3h5v2H2V3zm7 0h5v2H9V3zM2 7h12v2H2V7zm0 4h8v2H2v-2z"/></svg></span>
+				<span class="nx-nav-label">Models</span>
+			</button>
 			<button type="button" class="nx-nav-item" data-section="saas" title="SaaS Connectors" aria-label="SaaS Connectors">
 				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M2 3h5v5H2V3zm7 0h5v5H9V3zM2 10h5v5H2v-5zm7 0h5v5H9v-5z"/></svg></span>
 				<span class="nx-nav-label">SaaS Connectors</span>
@@ -96,6 +100,15 @@ export function getSettingsWebviewHtml(
 				</div>
 				<p class="nx-hint">Test a key, then Save. That key becomes the primary credential for this IDE.</p>
 				<div id="api-keys" class="nx-stack"></div>
+			</section>
+
+			<section class="nx-section" data-section="models" aria-labelledby="models-heading" hidden>
+				<div class="nx-section-head">
+					<h2 id="models-heading">Models</h2>
+					<button type="button" class="nx-btn nx-btn-secondary" id="refresh-models" aria-label="Refresh model catalog">Refresh</button>
+				</div>
+				<p class="nx-hint">Toggle which models appear in the chat picker. Auto is always available.</p>
+				<div id="models-root" class="nx-stack" aria-live="polite"></div>
 			</section>
 
 			<section class="nx-section" data-section="saas" aria-labelledby="saas-keys-heading" hidden>

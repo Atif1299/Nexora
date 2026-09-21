@@ -14,7 +14,7 @@ export type WebviewInboundMessage =
 	| { type: 'toggleSaas'; provider: 'supabase' | 'stripe' | 'v0' | 'elevenlabs' | 'tavily' }
 	| { type: 'openSettings'; section?: string }  // Week 13: SaaS connector settings
 	| { type: 'openUrl'; url: string }
-	| { type: 'saveFirstRunKey'; provider: 'openai' | 'anthropic' | 'openrouter'; key: string }
+	| { type: 'saveFirstRunKey'; provider: 'openai' | 'anthropic' | 'gemini' | 'openrouter'; key: string }
 	| { type: 'dismissFirstRunCard' }
 	| { type: 'deployProject'; prompt: string; repoName: string; projectName: string }
 	| { type: 'checkAuthStatus' }
@@ -40,7 +40,9 @@ export type WebviewInboundMessage =
 	| { type: 'acceptSuggestion'; id: string }
 	| { type: 'dismissSuggestion'; id: string; permanent: boolean }
 	| { type: 'requestSuggestions' }
-	| { type: 'requestAtComplete'; prefix: string };
+	| { type: 'requestAtComplete'; prefix: string }
+	| { type: 'requestModelPicker' }
+	| { type: 'selectModel'; modelId: string };
 
 export type ChatActivityStatus =
 	| 'confirming'
@@ -97,7 +99,29 @@ export type WebviewOutboundMessage =
 		items: Array<{ icon: string; label: string; path: string; kind: 'file' | 'folder' }>;
 	}
 	| { type: 'costUpdate'; cost_usd: number; tokens_in: number; tokens_out: number }
-	| { type: 'composerSettings'; submitWithCtrlEnter: boolean };
+	| { type: 'composerSettings'; submitWithCtrlEnter: boolean }
+	| {
+		type: 'modelPickerState';
+		catalog: {
+			auto: { id: 'auto'; label: string; resolves_to: string };
+			providers: Array<{
+				id: string;
+				label: string;
+				configured: boolean;
+				models: Array<{
+					id: string;
+					label: string;
+					context?: number;
+					tier: 'free' | 'paid';
+					recommended?: boolean;
+				}>;
+			}>;
+		} | null;
+		enabledModelIds: string[];
+		selectedModelId: string;
+		error?: string;
+	}
+	| { type: 'modelSelected'; modelId: string };
 
 export type ChatInitialState = {
 	connected: boolean;
@@ -115,5 +139,6 @@ export type ChatInitialState = {
 	activeSessionId?: string;
 	sessionRailWidth?: number;
 	submitWithCtrlEnter?: boolean;
+	selectedModelId?: string;
 };
 

@@ -13,6 +13,7 @@ import { getBackendClient } from './services/backendClient';
 import { getNotificationService } from './services/notificationService';
 import type { SaasConnector } from './services/backend/auth';
 import { mcpNeedsOAuth, type McpServerRow } from './services/backend/mcp';
+import type { ModelCatalog } from './services/backend/models';
 import {
 	getCachedCapabilities,
 	onDidChangeCapabilities,
@@ -20,7 +21,7 @@ import {
 	type CapabilitiesReport
 } from './services/backend/capabilities';
 
-const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'openrouter'];
+const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'gemini', 'openrouter'];
 const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0', 'elevenlabs', 'tavily'] as const;
 const OAUTH_APP_PROVIDERS = [
 	'github_client_id',
@@ -190,6 +191,12 @@ export class SettingsPanelProvider {
 					case 'a2aDelegate':
 						await this._delegateA2A(msg.agentUrl, msg.request);
 						break;
+					case 'refreshModelCatalog':
+						await this._pushState(true, true, true);
+						break;
+					case 'setModelEnabled':
+						await this._setModelEnabled(msg.modelId, !!msg.enabled);
+						break;
 				}
 			}),
 			panel.onDidChangeViewState(() => {
@@ -239,14 +246,14 @@ export class SettingsPanelProvider {
 		}, 200);
 	}
 
-	private async _pushState(force = false, includeAnalytics = true): Promise<void> {
+	private async _pushState(force = false, includeAnalytics = true, refreshCatalog = false): Promise<void> {
 		if (!this._view || !this._attached) {
 			return;
 		}
 		if (this._pushInflight) {
 			return this._pushInflight;
 		}
-		this._pushInflight = this._loadAndPost(force, includeAnalytics);
+		this._pushInflight = this._loadAndPost(force, includeAnalytics, refreshCatalog);
 		try {
 			await this._pushInflight;
 		} finally {
@@ -254,7 +261,7 @@ export class SettingsPanelProvider {
 		}
 	}
 
-	private async _loadAndPost(force: boolean, includeAnalytics = true): Promise<void> {
+	private async _loadAndPost(force: boolean, includeAnalytics = true, refreshCatalog = false): Promise<void> {
 		if (!this._view || !this._attached) {
 			return;
 		}
@@ -276,6 +283,15 @@ export class SettingsPanelProvider {
 		const analytics = includeAnalytics
 			? await client.getAnalyticsDashboard('default', force)
 			: undefined;
+
+		let modelCatalog: ModelCatalog | null = null;
+		let enabledModelIds: string[] = [];
+		try {
+			modelCatalog = await client.getModelCatalog(refreshCatalog);
+			enabledModelIds = await settings.resolveEnabledModelIds(modelCatalog);
+		} catch (error) {
+			console.warn('[Nexora] Failed to fetch model catalog', error);
+		}
 
 		// Week 13: Check SaaS connector status from auth status endpoint
 		const authStatus = await client.getAuthStatus('default');
@@ -304,6 +320,8 @@ export class SettingsPanelProvider {
 			browserSettings: getBrowserUiSettings(),
 			connections,
 			capabilities: capabilities || null,
+			modelCatalog,
+			enabledModelIds,
 			mcpServers,
 			a2aCardUrl,
 			oauthApps: {
@@ -461,6 +479,17 @@ export class SettingsPanelProvider {
 		await settings.setPreferences(next);
 		await this._pushState();
 		void getNotificationService().showInfo('Preferences saved');
+	}
+
+	private async _setModelEnabled(modelId: unknown, enabled: boolean): Promise<void> {
+		if (typeof modelId !== 'string' || !modelId.trim()) {
+			return;
+		}
+		const settings = getSettingsService(this._context);
+		const enabledModelIds = await settings.setModelEnabled(modelId, enabled);
+		if (this._view) {
+			this._view.postMessage({ type: 'enabledModelsUpdated', enabledModelIds });
+		}
 	}
 
 	private async _connectOAuth(provider: string): Promise<void> {

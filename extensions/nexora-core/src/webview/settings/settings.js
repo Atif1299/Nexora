@@ -9,6 +9,7 @@
 	const PROVIDERS = [
 		{ id: 'openai', label: 'OpenAI' },
 		{ id: 'anthropic', label: 'Anthropic' },
+		{ id: 'gemini', label: 'Gemini' },
 		{ id: 'openrouter', label: 'OpenRouter' }
 	];
 
@@ -21,7 +22,7 @@
 		{ id: 'tavily', label: 'Tavily API Key', placeholder: 'tvly-...' }
 	];
 
-	const NAV_SECTIONS = ['keys', 'saas', 'connections', 'analytics', 'approvals', 'browser', 'preferences', 'about'];
+	const NAV_SECTIONS = ['keys', 'models', 'saas', 'connections', 'analytics', 'approvals', 'browser', 'preferences', 'about'];
 
 	const SECTION_ALIASES = {
 		llm: 'keys',
@@ -32,7 +33,11 @@
 		openai: 'keys',
 		anthropic: 'keys',
 		claude: 'keys',
+		gemini: 'keys',
 		openrouter: 'keys',
+		models: 'models',
+		'model-catalog': 'models',
+		modelcatalog: 'models',
 		'saas-connectors': 'saas',
 		saasconnectors: 'saas',
 		connectors: 'saas',
@@ -73,7 +78,7 @@
 		keyMasks: {},
 		configured: {},
 		preferences: {
-			defaultModel: 'openrouter/openrouter/free',
+			defaultModel: 'auto',
 			autoIndexWorkspace: true,
 			showCostEstimates: true,
 			theme: 'auto'
@@ -94,6 +99,8 @@
 		},
 		connections: null,
 		capabilities: null,
+		modelCatalog: null,
+		enabledModelIds: [],
 		analytics: null,
 		mcpServers: [],
 		a2aCardUrl: '',
@@ -553,23 +560,23 @@
 		root.innerHTML = `
 			${renderOAuthAppCard()}
 			<div class="nx-card">
-				<div class="nx-label" style="margin-bottom:8px">LLM (IDE keys preferred, .env fallback)</div>
+				<div class="nx-label">LLM (IDE keys preferred, .env fallback)</div>
 				${llmRows.join('') || '<p class="nx-hint">None</p>'}
 			</div>
 			<div class="nx-card">
-				<div class="nx-label" style="margin-bottom:8px">Deployment (OAuth / tokens)</div>
+				<div class="nx-label">Deployment (OAuth / tokens)</div>
 				${deployRows.join('') || '<p class="nx-hint">None</p>'}
 			</div>
 			<div class="nx-card">
-				<div class="nx-label" style="margin-bottom:8px">Database</div>
+				<div class="nx-label">Database</div>
 				${dbRows.join('') || '<p class="nx-hint">None</p>'}
 			</div>
 			<div class="nx-card">
-				<div class="nx-label" style="margin-bottom:8px">SaaS (API keys in backend .env)</div>
+				<div class="nx-label">SaaS (API keys in backend .env)</div>
 				${saasRows.join('') || '<p class="nx-hint">None</p>'}
 			</div>
 			${extraRows.length ? `<div class="nx-card">
-				<div class="nx-label" style="margin-bottom:8px">Bundled connectors</div>
+				<div class="nx-label">Bundled connectors</div>
 				${extraRows.join('')}
 			</div>` : ''}
 			${renderMcpCard()}
@@ -640,17 +647,19 @@
 			const prev = document.getElementById(`key-${p.id}`);
 			const prevVal = prev ? prev.value : '';
 			return `
-				<label class="nx-label" for="key-${p.id}">${escapeHtml(p.label)}</label>
-				<input id="key-${p.id}" class="nx-input" type="password" autocomplete="off" spellcheck="false" aria-label="${escapeHtml(p.label)}" placeholder="${configured ? 'Saved. Enter a new value to replace...' : escapeHtml(p.placeholder)}" value="${escapeHtml(prevVal)}" />
-				<div class="nx-actions">
-					<button type="button" class="nx-btn" data-oauth-app="save" data-provider="${p.id}">Save</button>
-					<button type="button" class="nx-btn nx-btn-secondary" data-oauth-app="clear" data-provider="${p.id}" ${configured ? '' : 'disabled'}>Clear</button>
+				<div class="nx-field">
+					<label class="nx-label" for="key-${p.id}">${escapeHtml(p.label)}</label>
+					<input id="key-${p.id}" class="nx-input" type="password" autocomplete="off" spellcheck="false" aria-label="${escapeHtml(p.label)}" placeholder="${configured ? 'Saved. Enter a new value to replace...' : escapeHtml(p.placeholder)}" value="${escapeHtml(prevVal)}" />
+					<div class="nx-actions">
+						<button type="button" class="nx-btn" data-oauth-app="save" data-provider="${p.id}">Save</button>
+						<button type="button" class="nx-btn nx-btn-secondary" data-oauth-app="clear" data-provider="${p.id}" ${configured ? '' : 'disabled'}>Clear</button>
+					</div>
+					<div class="nx-msg" id="msg-${p.id}" role="status"></div>
 				</div>
-				<div class="nx-msg" id="msg-${p.id}" role="status"></div>
 			`;
 		}).join('');
 		return `<div class="nx-card">
-			<div class="nx-label" style="margin-bottom:8px">OAuth app credentials</div>
+			<div class="nx-label">OAuth app credentials</div>
 			<p class="nx-hint">Nexora does not create the GitHub app. GitHub → Settings → Developer settings → OAuth Apps → New. Paste the callback URL below into the GitHub app. Same for Vercel (create an OAuth App, paste its callback).</p>
 			<p class="nx-hint">GitHub callback (exact): <code>${escapeHtml(githubCb)}</code></p>
 			<p class="nx-hint">Vercel callback (exact): <code>${escapeHtml(vercelCb)}</code></p>
@@ -682,7 +691,7 @@
 		const rows = state.mcpServers || [];
 		if (!rows.length) {
 			return `<div class="nx-card">
-				<div class="nx-label" style="margin-bottom:8px">MCP servers</div>
+				<div class="nx-label">MCP servers</div>
 				<p class="nx-hint">No MCP servers listed. Engine may be offline.</p>
 			</div>`;
 		}
@@ -721,7 +730,7 @@
 			`;
 		}).join('');
 		return `<div class="nx-card">
-			<div class="nx-label" style="margin-bottom:8px">MCP servers (8 registered)</div>
+			<div class="nx-label">MCP servers (8 registered)</div>
 			<p class="nx-hint">HTTP sockets use LOCAL_ENDPOINTS. Missing keys or endpoints stay Not configured. Filesystem MCP is stdio (npx), not a browser login.</p>
 			${items}
 		</div>`;
@@ -928,6 +937,16 @@
 		bindConfigToggle('pref-allow-agent-browser', 'browser.allowAgentControl');
 	}
 
+	function switchControl(id, checked, ariaLabel, extraAttrs) {
+		const attrs = extraAttrs ? ' ' + extraAttrs : '';
+		return `
+			<label class="switch">
+				<input type="checkbox" id="${id}" ${checked ? 'checked' : ''} aria-label="${escapeHtml(ariaLabel)}"${attrs} />
+				<span class="switch-slider" aria-hidden="true"></span>
+			</label>
+		`;
+	}
+
 	function execToggle(id, label, hint, checked) {
 		return `
 			<div class="nx-card">
@@ -936,9 +955,7 @@
 						<label class="nx-label" for="${id}">${escapeHtml(label)}</label>
 						<p class="nx-hint">${escapeHtml(hint)}</p>
 					</div>
-					<label class="nx-check">
-						<input type="checkbox" id="${id}" ${checked ? 'checked' : ''} aria-label="${escapeHtml(label)}" />
-					</label>
+					${switchControl(id, checked, label)}
 				</div>
 			</div>
 		`;
@@ -963,26 +980,16 @@
 
 		root.innerHTML = `
 			<div class="nx-card">
-				<label class="nx-label" for="pref-model">Default model</label>
-				<select id="pref-model" class="nx-select" aria-label="Default model">
-					<option value="openrouter/openrouter/free">OpenRouter Free</option>
-					<option value="openrouter/auto">OpenRouter Auto</option>
-					<option value="openai/gpt-4o-mini">GPT-4o Mini (fallback)</option>
-					<option value="openai/gpt-4o">GPT-4o</option>
-					<option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
-				</select>
+				<div class="nx-row">
+					<label class="nx-label" for="pref-auto-index">Auto-index workspace</label>
+					${switchControl('pref-auto-index', !!p.autoIndexWorkspace, 'Auto-index workspace')}
+				</div>
 			</div>
 			<div class="nx-card">
-				<label class="nx-check">
-					<input type="checkbox" id="pref-auto-index" ${p.autoIndexWorkspace ? 'checked' : ''} aria-label="Auto-index workspace" />
-					Auto-index workspace
-				</label>
-			</div>
-			<div class="nx-card">
-				<label class="nx-check">
-					<input type="checkbox" id="pref-costs" ${p.showCostEstimates ? 'checked' : ''} aria-label="Show cost estimates" />
-					Show cost estimates
-				</label>
+				<div class="nx-row">
+					<label class="nx-label" for="pref-costs">Show cost estimates</label>
+					${switchControl('pref-costs', !!p.showCostEstimates, 'Show cost estimates')}
+				</div>
 			</div>
 			<div class="nx-card">
 				<div class="nx-row" style="align-items:flex-start">
@@ -990,20 +997,12 @@
 						<label class="nx-label" for="pref-ctrl-enter">Submit with Ctrl+Enter</label>
 						<p class="nx-hint">Ctrl+Enter sends. Enter inserts a newline.</p>
 					</div>
-					<label class="nx-check">
-						<input type="checkbox" id="pref-ctrl-enter" ${(state.agentSettings && state.agentSettings.submitWithCtrlEnter) ? 'checked' : ''} aria-label="Submit with Ctrl+Enter" />
-					</label>
+					${switchControl('pref-ctrl-enter', !!(state.agentSettings && state.agentSettings.submitWithCtrlEnter), 'Submit with Ctrl+Enter')}
 				</div>
 			</div>
+			<p class="nx-hint">Choose which models appear in chat under Settings → Models.</p>
 		`;
 
-		const model = document.getElementById('pref-model');
-		if (model) {
-			model.value = p.defaultModel;
-			model.addEventListener('change', () => {
-				vscode.postMessage({ type: 'savePreferences', preferences: { defaultModel: model.value } });
-			});
-		}
 		const autoIndex = document.getElementById('pref-auto-index');
 		if (autoIndex) {
 			autoIndex.addEventListener('change', () => {
@@ -1019,6 +1018,116 @@
 		bindConfigToggle('pref-ctrl-enter', 'chat.submitWithCtrlEnter');
 	}
 
+	function formatContext(n) {
+		if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) {
+			return '';
+		}
+		if (n >= 1000000) {
+			return (n / 1000000).toFixed(n % 1000000 === 0 ? 0 : 1) + 'M ctx';
+		}
+		if (n >= 1000) {
+			return Math.round(n / 1000) + 'K ctx';
+		}
+		return n + ' ctx';
+	}
+
+	function renderModels() {
+		const root = document.getElementById('models-root');
+		if (!root) {
+			return;
+		}
+		const catalog = state.modelCatalog;
+		const enabled = new Set(Array.isArray(state.enabledModelIds) ? state.enabledModelIds : []);
+
+		if (!catalog) {
+			root.innerHTML = '<p class="nx-hint">Loading model catalog...</p>';
+			return;
+		}
+
+		const auto = catalog.auto || { id: 'auto', label: 'Auto' };
+		const providers = Array.isArray(catalog.providers) ? catalog.providers : [];
+
+		let html = `
+			<div class="nx-card nx-model-auto">
+				<div class="nx-row">
+					<div>
+						<span class="nx-label">${escapeHtml(auto.label || 'Auto')}</span>
+						<p class="nx-hint">Always available in the chat picker. Resolved by the backend.</p>
+					</div>
+					<span class="nx-status nx-model-always">Always on</span>
+				</div>
+			</div>
+		`;
+
+		if (!providers.length) {
+			html += '<p class="nx-hint">No providers in catalog yet. Click Refresh after the backend is ready.</p>';
+			root.innerHTML = html;
+			return;
+		}
+
+		html += providers.map(provider => {
+			const configured = !!provider.configured;
+			const models = Array.isArray(provider.models) ? provider.models : [];
+			if (!configured) {
+				return `
+					<div class="nx-card" data-provider="${escapeHtml(provider.id)}">
+						<div class="nx-label">${escapeHtml(provider.label || provider.id)}</div>
+						<p class="nx-hint">Add a key in LLM Keys</p>
+					</div>
+				`;
+			}
+			if (!models.length) {
+				return `
+					<div class="nx-card" data-provider="${escapeHtml(provider.id)}">
+						<div class="nx-label">${escapeHtml(provider.label || provider.id)}</div>
+						<p class="nx-hint">No models listed for this provider.</p>
+					</div>
+				`;
+			}
+			const rows = models.map(model => {
+				const on = enabled.has(model.id);
+				const tierLabel = model.tier === 'free' ? 'Free' : 'Your key';
+				const ctx = formatContext(model.context);
+				const meta = [tierLabel, ctx].filter(Boolean).join(' · ');
+				const safeId = escapeHtml(model.id);
+				return `
+					<div class="nx-model-row" data-model-id="${safeId}">
+						<div class="nx-model-meta">
+							<span class="nx-model-name">${escapeHtml(model.label || model.id)}</span>
+							${meta ? `<span class="nx-model-tier">${escapeHtml(meta)}</span>` : ''}
+						</div>
+						<label class="switch nx-model-toggle">
+							<input type="checkbox" data-model-toggle="${safeId}" ${on ? 'checked' : ''} aria-label="Show ${escapeHtml(model.label || model.id)} in chat picker" />
+							<span class="switch-slider" aria-hidden="true"></span>
+						</label>
+					</div>
+				`;
+			}).join('');
+			return `
+				<div class="nx-card" data-provider="${escapeHtml(provider.id)}">
+					<div class="nx-label">${escapeHtml(provider.label || provider.id)}</div>
+					<div class="nx-model-list">${rows}</div>
+				</div>
+			`;
+		}).join('');
+
+		root.innerHTML = html;
+
+		root.querySelectorAll('input[data-model-toggle]').forEach(input => {
+			input.addEventListener('change', () => {
+				const modelId = input.getAttribute('data-model-toggle');
+				if (!modelId) {
+					return;
+				}
+				vscode.postMessage({
+					type: 'setModelEnabled',
+					modelId: modelId,
+					enabled: !!input.checked
+				});
+			});
+		});
+	}
+
 	function bindChrome() {
 		document.querySelectorAll('.nx-nav-item').forEach(btn => {
 			btn.addEventListener('click', () => {
@@ -1029,6 +1138,12 @@
 		if (refresh) {
 			refresh.addEventListener('click', () => {
 				vscode.postMessage({ type: 'refreshStatus' });
+			});
+		}
+		const refreshModels = document.getElementById('refresh-models');
+		if (refreshModels) {
+			refreshModels.addEventListener('click', () => {
+				vscode.postMessage({ type: 'refreshModelCatalog' });
 			});
 		}
 		const refreshAnalytics = document.getElementById('refresh-analytics');
@@ -1063,12 +1178,15 @@
 					browserSettings: msg.browserSettings || state.browserSettings,
 					connections: msg.connections !== undefined ? msg.connections : state.connections,
 					capabilities: msg.capabilities !== undefined ? msg.capabilities : state.capabilities,
+					modelCatalog: msg.modelCatalog !== undefined ? msg.modelCatalog : state.modelCatalog,
+					enabledModelIds: msg.enabledModelIds !== undefined ? msg.enabledModelIds : state.enabledModelIds,
 					analytics: msg.analytics !== undefined ? msg.analytics : state.analytics,
 					mcpServers: msg.mcpServers !== undefined ? msg.mcpServers : state.mcpServers,
 					a2aCardUrl: msg.a2aCardUrl !== undefined ? msg.a2aCardUrl : state.a2aCardUrl,
 					oauthApps: msg.oauthApps !== undefined ? msg.oauthApps : state.oauthApps
 				};
 				renderApiKeys();
+				renderModels();
 				renderSaasKeys();
 				renderConnections();
 				renderRunMode();
@@ -1076,6 +1194,12 @@
 				renderPreferences();
 				renderAnalytics();
 				renderA2A();
+				break;
+			case 'enabledModelsUpdated':
+				if (Array.isArray(msg.enabledModelIds)) {
+					state.enabledModelIds = msg.enabledModelIds;
+					renderModels();
+				}
 				break;
 			case 'validateResult':
 				setMsg(msg.provider, msg.success ? (msg.details || 'Key is valid') : (msg.error || 'Invalid key'), msg.success ? 'ok' : 'err');
@@ -1155,6 +1279,7 @@
 	bindChrome();
 	showSection(readInitialSection());
 	renderApiKeys();
+	renderModels();
 	renderSaasKeys();
 	renderConnections();
 	renderRunMode();

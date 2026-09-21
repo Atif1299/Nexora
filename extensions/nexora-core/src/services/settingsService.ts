@@ -4,8 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
+import type { ModelCatalog } from './backend/models';
 
-export type ApiKeyProvider = 'openai' | 'anthropic' | 'openrouter';
+export type ApiKeyProvider = 'openai' | 'anthropic' | 'gemini' | 'openrouter';
 
 export interface NexoraPreferences {
 	defaultModel: string;
@@ -15,19 +16,22 @@ export interface NexoraPreferences {
 }
 
 const PREFERENCES_KEY = 'nexora.preferences';
+const ENABLED_MODEL_IDS_KEY = 'nexora.enabledModelIds';
 const DEFAULT_PREFERENCES: NexoraPreferences = {
-	defaultModel: 'openrouter/openrouter/free',
+	defaultModel: 'auto',
 	autoIndexWorkspace: true,
 	showCostEstimates: true,
 	theme: 'auto'
 };
 
-const PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'openrouter'];
+const PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'gemini', 'openrouter'];
+const MAX_RECOMMENDED_PER_PROVIDER = 3;
 
 /**
  * Settings storage for Week 12 (product model).
  * - API keys: VS Code SecretStorage (never globalState)
  * - Preferences: globalState
+ * - Enabled chat models: globalState (nexora.enabledModelIds)
  * - Runtime: extension sends keys as X-Nexora-*-Key headers; backend .env is fallback
  */
 export class SettingsService {
@@ -70,6 +74,7 @@ export class SettingsService {
 		const result: Record<ApiKeyProvider, boolean> = {
 			openai: false,
 			anthropic: false,
+			gemini: false,
 			openrouter: false
 		};
 		for (const provider of PROVIDERS) {
@@ -96,6 +101,57 @@ export class SettingsService {
 		const prefs: Partial<NexoraPreferences> = {};
 		prefs[key] = value;
 		return this.setPreferences(prefs);
+	}
+
+	/**
+	 * Enabled model ids for the chat picker.
+	 * Returns undefined when never seeded (first-run defaults apply).
+	 */
+	getEnabledModelIds(): string[] | undefined {
+		return this.context.globalState.get<string[]>(ENABLED_MODEL_IDS_KEY);
+	}
+
+	async setEnabledModelIds(ids: string[]): Promise<string[]> {
+		const unique = Array.from(new Set(ids.map(id => (id || '').trim()).filter(Boolean)));
+		await this.context.globalState.update(ENABLED_MODEL_IDS_KEY, unique);
+		return unique;
+	}
+
+	/**
+	 * Seed recommended models once (max 3 per provider). After a list is stored,
+	 * later catalog fetches do not reset or auto-add newly recommended ids.
+	 */
+	async resolveEnabledModelIds(catalog: ModelCatalog): Promise<string[]> {
+		const existing = this.getEnabledModelIds();
+		if (existing !== undefined) {
+			return existing;
+		}
+		const seeded: string[] = [];
+		for (const provider of catalog.providers) {
+			let count = 0;
+			for (const model of provider.models) {
+				if (model.recommended && count < MAX_RECOMMENDED_PER_PROVIDER) {
+					seeded.push(model.id);
+					count += 1;
+				}
+			}
+		}
+		return this.setEnabledModelIds(seeded);
+	}
+
+	async setModelEnabled(modelId: string, enabled: boolean): Promise<string[]> {
+		const id = (modelId || '').trim();
+		if (!id || id === 'auto') {
+			return this.getEnabledModelIds() ?? [];
+		}
+		const current = this.getEnabledModelIds() ?? [];
+		const set = new Set(current);
+		if (enabled) {
+			set.add(id);
+		} else {
+			set.delete(id);
+		}
+		return this.setEnabledModelIds(Array.from(set));
 	}
 }
 
