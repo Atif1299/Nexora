@@ -21,12 +21,16 @@ import { createAnalyticsApi, type AnalyticsDashboardData, type CostSummary, type
 import { createAgentApi, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './backend/agent';
 import { createStatusApi, type ConnectionsResponse, type TestResult, type ProviderStatus } from './backend/status';
 import { createCapabilitiesApi, type CapabilitiesReport } from './backend/capabilities';
+import { createMcpApi, type McpServerRow } from './backend/mcp';
+import { createA2AApi, type A2ADelegateResult } from './backend/a2a';
 
 export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
 export type { SSEEvent };
 export type { ConnectionsResponse, TestResult, ProviderStatus };
 export type { CapabilitiesReport };
 export type { SaasConnector };
+export type { McpServerRow };
+export type { A2ADelegateResult };
 export type { MemorySuggestion, SuggestionsResponse, TimelineEntry, TimelineResponse, TimelineDiff };
 export type { WorkflowTemplate, TemplateListResponse, SuggestFromPlanResponse, SaveFromPlanRequest, ImportPreview };
 
@@ -410,6 +414,30 @@ export class BackendClient {
 		return response?.connectors || [];
 	}
 
+	async listMcpServers(): Promise<McpServerRow[]> {
+		return createMcpApi(this.transport).listServers();
+	}
+
+	async connectMcpServer(serverId: string, workspacePath?: string): Promise<{ connected: boolean; error?: string }> {
+		return createMcpApi(this.transport).connect(serverId, workspacePath);
+	}
+
+	async disconnectMcpServer(serverId: string): Promise<{ disconnected: boolean; error?: string }> {
+		return createMcpApi(this.transport).disconnect(serverId);
+	}
+
+	async getMcpOAuthUrl(provider: string, userId: string = 'default'): Promise<{ authorization_url: string } | null> {
+		return createMcpApi(this.transport).startOAuth(provider, userId);
+	}
+
+	async delegateA2A(
+		agentUrl: string,
+		taskType: string,
+		taskInput: Record<string, unknown>
+	): Promise<A2ADelegateResult> {
+		return createA2AApi(this.transport).delegate(agentUrl, taskType, taskInput);
+	}
+
 	/**
 	 * Get authentication status for all providers.
 	 * 
@@ -426,7 +454,7 @@ export class BackendClient {
 	 * @param userId User identifier
 	 * @returns Authorization URL to redirect user to
 	 */
-	async getGitHubAuthUrl(userId: string = 'default'): Promise<{ authorization_url: string } | null> {
+	async getGitHubAuthUrl(userId: string = 'default'): Promise<{ authorization_url?: string; error?: string } | null> {
 		return createAuthApi(this.transport).getGitHubAuthUrl(userId);
 	}
 
@@ -436,7 +464,7 @@ export class BackendClient {
 	 * @param userId User identifier
 	 * @returns Authorization URL to redirect user to
 	 */
-	async getVercelAuthUrl(userId: string = 'default'): Promise<{ authorization_url: string } | null> {
+	async getVercelAuthUrl(userId: string = 'default'): Promise<{ authorization_url?: string; error?: string } | null> {
 		return createAuthApi(this.transport).getVercelAuthUrl(userId);
 	}
 

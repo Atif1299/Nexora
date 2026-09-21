@@ -152,9 +152,45 @@ h1
 	padding: 10px 12px;
 }
 
-.nx-platform.is-blocked
+.nx-platform.is-blocked,
+.nx-platform.is-catalogue
 {
 	opacity: 0.55;
+}
+
+.nx-aside
+{
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 6px;
+}
+
+.nx-platform-actions
+{
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 4px;
+}
+
+.nx-platform .nx-btn
+{
+	padding: 2px 8px;
+	font-size: 11px;
+	background: var(--nx-btn-bg);
+	color: var(--nx-btn-fg);
+}
+
+.nx-platform .nx-btn:hover
+{
+	background: var(--nx-btn-hover);
+}
+
+.nx-platform .nx-btn-secondary
+{
+	background: var(--nx-btn2-bg);
+	color: var(--nx-btn2-fg);
 }
 
 .nx-dot

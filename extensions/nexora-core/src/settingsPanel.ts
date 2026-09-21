@@ -8,9 +8,11 @@ import { getSettingsWebviewHtml } from './webview/settings';
 import { acquireEditorPanel, gateEditorPanel } from './services/editorPage';
 import { getSettingsService, type ApiKeyProvider, type NexoraPreferences } from './services/settingsService';
 import { getAgentUiSettings, type AgentRunMode } from './services/agentRunMode';
+import { getBrowserUiSettings } from './services/browser';
 import { getBackendClient } from './services/backendClient';
 import { getNotificationService } from './services/notificationService';
 import type { SaasConnector } from './services/backend/auth';
+import { mcpNeedsOAuth, type McpServerRow } from './services/backend/mcp';
 import {
 	getCachedCapabilities,
 	onDidChangeCapabilities,
@@ -20,7 +22,14 @@ import {
 
 const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'openrouter'];
 const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0', 'elevenlabs', 'tavily'] as const;
+const OAUTH_APP_PROVIDERS = [
+	'github_client_id',
+	'github_client_secret',
+	'vercel_client_id',
+	'vercel_client_secret'
+] as const;
 type SaasProvider = (typeof SAAS_PROVIDERS)[number];
+type OAuthAppProvider = (typeof OAUTH_APP_PROVIDERS)[number];
 
 function isApiKeyProvider(value: string): value is ApiKeyProvider {
 	return (LLM_PROVIDERS as string[]).includes(value);
@@ -28,6 +37,24 @@ function isApiKeyProvider(value: string): value is ApiKeyProvider {
 
 function isSaasProvider(value: string): value is SaasProvider {
 	return (SAAS_PROVIDERS as readonly string[]).includes(value);
+}
+
+function isOAuthAppProvider(value: string): value is OAuthAppProvider {
+	return (OAUTH_APP_PROVIDERS as readonly string[]).includes(value);
+}
+
+function isEnvCredential(value: string): boolean {
+	return isSaasProvider(value) || isOAuthAppProvider(value);
+}
+
+function oauthAuthorizeUrlIsUsable(url: string): boolean {
+	try {
+		const id = new URL(url).searchParams.get('client_id') || '';
+		const trimmed = id.trim();
+		return !!trimmed && trimmed.toLowerCase() !== 'none';
+	} catch {
+		return false;
+	}
 }
 
 export class SettingsPanelProvider {
@@ -40,6 +67,7 @@ export class SettingsPanelProvider {
 	private _disposables: vscode.Disposable[] = [];
 	private _pushTimer: ReturnType<typeof setTimeout> | undefined;
 	private _pushInflight: Promise<void> | undefined;
+	private _mcpBusy?: string;
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
@@ -153,6 +181,15 @@ export class SettingsPanelProvider {
 					case 'clearSaasKey':
 						await this._clearSaasKey(msg.provider);
 						break;
+					case 'connectMcp':
+						await this._connectMcp(msg.serverId);
+						break;
+					case 'disconnectMcp':
+						await this._disconnectMcp(msg.serverId);
+						break;
+					case 'a2aDelegate':
+						await this._delegateA2A(msg.agentUrl, msg.request);
+						break;
 				}
 			}),
 			panel.onDidChangeViewState(() => {
@@ -167,7 +204,7 @@ export class SettingsPanelProvider {
 				this._view.postMessage({ type: 'updateState', capabilities: capabilities || null });
 			}),
 			vscode.workspace.onDidChangeConfiguration((e) => {
-				if ((e.affectsConfiguration('nexora.agent') || e.affectsConfiguration('nexora.chat')) && this._panel?.visible) {
+				if ((e.affectsConfiguration('nexora.agent') || e.affectsConfiguration('nexora.chat') || e.affectsConfiguration('nexora.browser')) && this._panel?.visible) {
 					this._schedulePush(false);
 				}
 			})
@@ -202,14 +239,14 @@ export class SettingsPanelProvider {
 		}, 200);
 	}
 
-	private async _pushState(force = false): Promise<void> {
+	private async _pushState(force = false, includeAnalytics = true): Promise<void> {
 		if (!this._view || !this._attached) {
 			return;
 		}
 		if (this._pushInflight) {
 			return this._pushInflight;
 		}
-		this._pushInflight = this._loadAndPost(force);
+		this._pushInflight = this._loadAndPost(force, includeAnalytics);
 		try {
 			await this._pushInflight;
 		} finally {
@@ -217,7 +254,7 @@ export class SettingsPanelProvider {
 		}
 	}
 
-	private async _loadAndPost(force: boolean): Promise<void> {
+	private async _loadAndPost(force: boolean, includeAnalytics = true): Promise<void> {
 		if (!this._view || !this._attached) {
 			return;
 		}
@@ -236,7 +273,9 @@ export class SettingsPanelProvider {
 		const capabilities: CapabilitiesReport | undefined = force || !getCachedCapabilities()
 			? await refreshCapabilities()
 			: getCachedCapabilities();
-		const analytics = await client.getAnalyticsDashboard('default', force);
+		const analytics = includeAnalytics
+			? await client.getAnalyticsDashboard('default', force)
+			: undefined;
 
 		// Week 13: Check SaaS connector status from auth status endpoint
 		const authStatus = await client.getAuthStatus('default');
@@ -246,19 +285,38 @@ export class SettingsPanelProvider {
 		configured['v0'] = !!authStatus.v0_configured;
 		configured['elevenlabs'] = !!authStatus.elevenlabs_configured;
 		configured['tavily'] = !!authStatus.tavily_configured;
+		configured['github_client_id'] = !!authStatus.github_oauth_configured;
+		configured['github_client_secret'] = !!authStatus.github_oauth_configured;
+		configured['vercel_client_id'] = !!authStatus.vercel_oauth_configured;
+		configured['vercel_client_secret'] = !!authStatus.vercel_oauth_configured;
+
+		const mcpServers: McpServerRow[] = await client.listMcpServers();
+		const a2aCardUrl = `${client.getBaseUrl()}/.well-known/agent-card.json`;
 
 		const agent = getAgentUiSettings();
-		this._view.postMessage({
+		const payload: Record<string, unknown> = {
 			type: 'updateState',
 			keyMasks,
 			configured,
 			preferences: settings.getPreferences(),
 			runMode: agent.runMode,
 			agentSettings: agent,
+			browserSettings: getBrowserUiSettings(),
 			connections,
 			capabilities: capabilities || null,
-			analytics
-		});
+			mcpServers,
+			a2aCardUrl,
+			oauthApps: {
+				githubConfigured: !!authStatus.github_oauth_configured,
+				vercelConfigured: !!authStatus.vercel_oauth_configured,
+				githubCallback: authStatus.github_callback_url || 'http://127.0.0.1:8000/api/auth/github/callback',
+				vercelCallback: authStatus.vercel_callback_url || 'http://127.0.0.1:8000/api/auth/vercel/callback'
+			}
+		};
+		if (includeAnalytics) {
+			payload.analytics = analytics;
+		}
+		this._view.postMessage(payload);
 	}
 
 	private async _validateApiKey(provider: string, key: string): Promise<void> {
@@ -364,6 +422,12 @@ export class SettingsPanelProvider {
 		} else if (
 			typeof key === 'string' &&
 			typeof value === 'boolean' &&
+			(key === 'browser.openLocalLinks' || key === 'browser.allowAgentControl')
+		) {
+			await cfg.update(key, value, vscode.ConfigurationTarget.Global);
+		} else if (
+			typeof key === 'string' &&
+			typeof value === 'boolean' &&
 			(
 				key === 'agent.includeOpenEditors' ||
 				key === 'agent.inlineDiffs' ||
@@ -410,21 +474,29 @@ export class SettingsPanelProvider {
 						? await client.getVercelAuthUrl('default')
 						: null;
 
-			if (!result?.authorization_url) {
-				void notifications.showError(`Could not start ${provider} OAuth - check backend .env OAuth client IDs`);
+			const url = result?.authorization_url || '';
+			if (!url || !oauthAuthorizeUrlIsUsable(url)) {
+				const error = result?.error
+					|| `Save ${provider.toUpperCase()}_CLIENT_ID and ${provider.toUpperCase()}_CLIENT_SECRET first. Create an OAuth app and paste the callback URL shown on this card.`;
+				this._view?.postMessage({ type: 'oauthResult', provider, error });
+				void notifications.showError(error);
 				return;
 			}
 
-			await vscode.env.openExternal(vscode.Uri.parse(result.authorization_url));
+			await vscode.env.openExternal(vscode.Uri.parse(url));
 			void notifications.showInfo(`Complete ${provider} login in the browser, then Refresh status`);
 			this._view?.postMessage({
 				type: 'oauthResult',
+				provider,
 				message: `${provider} OAuth opened in browser`
 			});
+			setTimeout(() => {
+				void this._pushState(true);
+			}, 8000);
 		} catch (error) {
-			void notifications.showError(
-				`OAuth failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-			);
+			const message = error instanceof Error ? error.message : 'Unknown error';
+			this._view?.postMessage({ type: 'oauthResult', provider, error: message });
+			void notifications.showError(`OAuth failed: ${message}`);
 		}
 	}
 
@@ -438,7 +510,8 @@ export class SettingsPanelProvider {
 				await client.disconnectVercel('default');
 			}
 			void notifications.showSuccess(`${provider} disconnected`);
-			await this._pushState();
+			await refreshCapabilities();
+			await this._pushState(false, false);
 		} catch (error) {
 			void notifications.showError(
 				`Disconnect failed: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -500,7 +573,7 @@ export class SettingsPanelProvider {
 	}
 
 	private async _saveSaasKey(provider: string, value: string): Promise<void> {
-		if (!this._view || !isSaasProvider(provider)) {
+		if (!this._view || !isEnvCredential(provider)) {
 			return;
 		}
 
@@ -519,6 +592,7 @@ export class SettingsPanelProvider {
 					success: true
 				});
 				void notifications.showSuccess(`${provider} saved to backend`);
+				await refreshCapabilities();
 				await this._pushState();
 			} else {
 				this._view.postMessage({
@@ -539,7 +613,7 @@ export class SettingsPanelProvider {
 	}
 
 	private async _clearSaasKey(provider: string): Promise<void> {
-		if (!this._view || !isSaasProvider(provider)) {
+		if (!this._view || !isEnvCredential(provider)) {
 			return;
 		}
 
@@ -548,14 +622,15 @@ export class SettingsPanelProvider {
 			const envKey = this._getEnvKeyName(provider);
 			await client.setSaasCredential(envKey, '');
 
-			// Clearing the credential must also drop the connection server-side,
-			// otherwise the badge keeps reporting the provider as connected.
-			const connector = provider === 'supabase_url' || provider === 'supabase_key'
-				? 'supabase'
-				: provider;
-			await client.disconnectSaasConnector(connector as SaasConnector, 'default');
+			if (isSaasProvider(provider)) {
+				const connector = provider === 'supabase_url' || provider === 'supabase_key'
+					? 'supabase'
+					: provider;
+				await client.disconnectSaasConnector(connector as SaasConnector, 'default');
+			}
 
 			this._view.postMessage({ type: 'saasClearResult', provider, success: true });
+			await refreshCapabilities();
 			await this._pushState();
 		} catch (error) {
 			this._view.postMessage({
@@ -574,8 +649,115 @@ export class SettingsPanelProvider {
 			'stripe': 'STRIPE_SECRET_KEY',
 			'v0': 'V0_API_KEY',
 			'elevenlabs': 'ELEVENLABS_API_KEY',
-			'tavily': 'TAVILY_API_KEY'
+			'tavily': 'TAVILY_API_KEY',
+			'github_client_id': 'GITHUB_CLIENT_ID',
+			'github_client_secret': 'GITHUB_CLIENT_SECRET',
+			'vercel_client_id': 'VERCEL_CLIENT_ID',
+			'vercel_client_secret': 'VERCEL_CLIENT_SECRET'
 		};
 		return envKeyMap[provider] || provider.toUpperCase();
+	}
+
+	private _workspacePath(): string | undefined {
+		return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+	}
+
+	private _postMcpResult(serverId: string, error?: string): void {
+		this._view?.postMessage({
+			type: 'mcpResult',
+			serverId,
+			error: error || ''
+		});
+	}
+
+	private async _connectMcp(serverId: unknown): Promise<void> {
+		if (typeof serverId !== 'string' || !serverId) {
+			return;
+		}
+		if (this._mcpBusy) {
+			return;
+		}
+		this._mcpBusy = serverId;
+		this._view?.postMessage({ type: 'mcpProgress', serverId, busy: true });
+		const client = getBackendClient();
+		const notifications = getNotificationService();
+		try {
+			const rows = await client.listMcpServers();
+			const row = rows.find(item => item.id === serverId);
+			if (!row) {
+				this._postMcpResult(serverId, `Unknown MCP server: ${serverId}`);
+				void notifications.showError(`Unknown MCP server: ${serverId}`);
+				return;
+			}
+			if (row.transport === 'http' && !(row.endpoint || '').trim()) {
+				const error = `${row.name} has no local MCP endpoint`;
+				this._postMcpResult(serverId, error);
+				void notifications.showWarning(error);
+				await this._pushState(false, false);
+				return;
+			}
+			const missing = row.missing_requires || [];
+			if (missing.length > 0) {
+				if (mcpNeedsOAuth(row)) {
+					const oauth = await client.getMcpOAuthUrl(serverId, 'default');
+					if (oauth?.authorization_url) {
+						await vscode.env.openExternal(vscode.Uri.parse(oauth.authorization_url));
+						this._postMcpResult(serverId, `Complete ${serverId} MCP login in the browser, then Connect again`);
+						void notifications.showInfo(`Complete ${serverId} MCP login in the browser, then Connect again`);
+						return;
+					}
+				}
+				const error = `Save ${missing.join(', ')} in SaaS Connectors first`;
+				this._postMcpResult(serverId, error);
+				void notifications.showWarning(error);
+				return;
+			}
+			const result = await client.connectMcpServer(serverId, this._workspacePath());
+			if (!result.connected) {
+				const error = result.error || `Failed to connect ${serverId}`;
+				this._postMcpResult(serverId, error);
+				void notifications.showError(error);
+				await this._pushState(false, false);
+				return;
+			}
+			this._postMcpResult(serverId);
+			void notifications.showSuccess(`${row.name} MCP connected`);
+			await refreshCapabilities();
+			await this._pushState(false, false);
+		} finally {
+			this._mcpBusy = undefined;
+			this._view?.postMessage({ type: 'mcpProgress', serverId, busy: false });
+		}
+	}
+
+	private async _disconnectMcp(serverId: unknown): Promise<void> {
+		if (typeof serverId !== 'string' || !serverId) {
+			return;
+		}
+		const result = await getBackendClient().disconnectMcpServer(serverId);
+		if (!result.disconnected) {
+			this._postMcpResult(serverId, result.error || `Failed to disconnect ${serverId}`);
+			void getNotificationService().showError(result.error || `Failed to disconnect ${serverId}`);
+			return;
+		}
+		this._postMcpResult(serverId);
+		void getNotificationService().showSuccess(`${serverId} MCP disconnected`);
+		await refreshCapabilities();
+		await this._pushState(false, false);
+	}
+
+	private async _delegateA2A(agentUrl: unknown, request: unknown): Promise<void> {
+		if (typeof agentUrl !== 'string' || !agentUrl.trim()) {
+			this._view?.postMessage({ type: 'a2aResult', success: false, error: 'Enter an external agent URL' });
+			return;
+		}
+		const task = typeof request === 'string' && request.trim() ? request.trim() : 'Hello from Nexora';
+		const result = await getBackendClient().delegateA2A(agentUrl.trim(), 'orchestrate_workflow', { request: task });
+		this._view?.postMessage({
+			type: 'a2aResult',
+			success: !!result.success,
+			details: result.success ? `Task ${result.task_id || ''} ${result.status || 'accepted'}` : undefined,
+			error: result.error
+		});
 	}
 }

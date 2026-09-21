@@ -24,6 +24,9 @@
 	}
 
 	function statusLabel(platform) {
+		if (!platform.live) {
+			return 'Catalogue';
+		}
 		const status = platform.capabilityStatus;
 		if (status === 'not_configured') {
 			return 'Not configured';
@@ -34,19 +37,31 @@
 		if (status === 'failed') {
 			return 'Failed';
 		}
-		if (status === 'ready' && platform.has_active_connector) {
-			return 'Ready';
-		}
-		if (platform.has_active_connector) {
-			return 'Connected';
-		}
-		if (platform.is_enabled === false) {
-			return 'Disabled';
-		}
 		if (status === 'ready') {
 			return 'Ready';
 		}
-		return 'Available';
+		return 'Not configured';
+	}
+
+	function actionButtons(platform) {
+		if (!platform.live) {
+			return '';
+		}
+		const status = platform.capabilityStatus || 'not_configured';
+		const id = escapeHtml(platform.id || '');
+		if (status === 'unavailable') {
+			return '';
+		}
+		const buttons = [];
+		if (status === 'ready') {
+			if (platform.id === 'github' || platform.id === 'vercel' || platform.id === 'supabase' || platform.id === 'stripe' || platform.id === 'v0-dev' || platform.id === 'elevenlabs' || platform.id === 'tavily') {
+				buttons.push(`<button type="button" class="nx-btn nx-btn-secondary" data-action="disconnect" data-id="${id}">Disconnect</button>`);
+			}
+			buttons.push(`<button type="button" class="nx-btn nx-btn-secondary" data-action="configure" data-id="${id}">Configure</button>`);
+		} else {
+			buttons.push(`<button type="button" class="nx-btn" data-action="connect" data-id="${id}">Connect</button>`);
+		}
+		return `<div class="nx-platform-actions">${buttons.join('')}</div>`;
 	}
 
 	function tooltip(platform) {
@@ -68,28 +83,37 @@
 
 	function renderPlatform(platform) {
 		const status = platform.capabilityStatus || '';
-		const blocked = isBlocked(status);
+		const live = !!platform.live;
+		const blocked = live && isBlocked(status);
 		const classes = ['nx-platform'];
+		if (!live) {
+			classes.push('is-catalogue');
+		}
 		if (blocked) {
 			classes.push('is-blocked');
 		}
 		if (status === 'failed') {
 			classes.push('is-failed');
 		}
-		if (!blocked && platform.has_active_connector) {
+		if (live && status === 'ready') {
 			classes.push('is-connected');
 		}
-		const meta = blocked && platform.capabilityReason
-			? platform.capabilityReason
-			: (platform.description || platform.category || '');
+		const meta = !live
+			? (platform.description || 'Discovery only')
+			: (blocked && platform.capabilityReason
+				? platform.capabilityReason
+				: (platform.description || platform.category || ''));
 		return `
-			<article class="${classes.join(' ')}" data-status="${escapeHtml(status || 'ready')}" data-id="${escapeHtml(platform.id || '')}" title="${escapeHtml(tooltip(platform))}">
+			<article class="${classes.join(' ')}" data-status="${escapeHtml(status || (live ? 'not_configured' : 'catalogue'))}" data-id="${escapeHtml(platform.id || '')}" data-live="${live ? '1' : '0'}" title="${escapeHtml(tooltip(platform))}">
 				<span class="nx-dot" aria-hidden="true"></span>
 				<div>
 					<div class="nx-name">${escapeHtml(platform.name || platform.id || '')}</div>
 					<div class="nx-meta">${escapeHtml(meta)}</div>
 				</div>
-				<span class="nx-status">${escapeHtml(statusLabel(platform))}</span>
+				<div class="nx-aside">
+					<span class="nx-status">${escapeHtml(statusLabel(platform))}</span>
+					${actionButtons(platform)}
+				</div>
 			</article>
 		`;
 	}
@@ -165,6 +189,22 @@
 
 	document.getElementById('refreshBtn')?.addEventListener('click', () => {
 		vscode.postMessage({ type: 'refresh' });
+	});
+
+	document.getElementById('platform-list')?.addEventListener('click', (event) => {
+		const target = event.target;
+		if (!target || typeof target.closest !== 'function') {
+			return;
+		}
+		const btn = target.closest('button[data-action]');
+		if (!btn) {
+			return;
+		}
+		const action = btn.getAttribute('data-action');
+		const id = btn.getAttribute('data-id');
+		if (action && id) {
+			vscode.postMessage({ type: action, id });
+		}
 	});
 
 	window.addEventListener('message', (event) => {

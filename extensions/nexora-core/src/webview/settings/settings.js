@@ -21,7 +21,7 @@
 		{ id: 'tavily', label: 'Tavily API Key', placeholder: 'tvly-...' }
 	];
 
-	const NAV_SECTIONS = ['keys', 'saas', 'connections', 'analytics', 'approvals', 'preferences', 'about'];
+	const NAV_SECTIONS = ['keys', 'saas', 'connections', 'analytics', 'approvals', 'browser', 'preferences', 'about'];
 
 	const SECTION_ALIASES = {
 		llm: 'keys',
@@ -31,6 +31,7 @@
 		apikeys: 'keys',
 		openai: 'keys',
 		anthropic: 'keys',
+		claude: 'keys',
 		openrouter: 'keys',
 		'saas-connectors': 'saas',
 		saasconnectors: 'saas',
@@ -45,6 +46,9 @@
 		github: 'connections',
 		vercel: 'connections',
 		oauth: 'connections',
+		mcp: 'connections',
+		a2a: 'about',
+		'agent-card': 'about',
 		analytics: 'analytics',
 		cost: 'analytics',
 		costs: 'analytics',
@@ -57,7 +61,10 @@
 		execution: 'approvals',
 		'run-mode': 'approvals',
 		runmode: 'approvals',
-		agent: 'approvals'
+		agent: 'approvals',
+		browser: 'browser',
+		'browser-protection': 'browser',
+		localhost: 'browser'
 	};
 
 	let currentSection = 'keys';
@@ -81,9 +88,24 @@
 			autoCloseTerminal: true,
 			submitWithCtrlEnter: false
 		},
+		browserSettings: {
+			openLocalLinks: true,
+			allowAgentControl: true
+		},
 		connections: null,
 		capabilities: null,
-		analytics: null
+		analytics: null,
+		mcpServers: [],
+		a2aCardUrl: '',
+		mcpError: {},
+		mcpBusy: '',
+		oauthError: {},
+		oauthApps: {
+			githubConfigured: false,
+			vercelConfigured: false,
+			githubCallback: 'http://127.0.0.1:8000/api/auth/github/callback',
+			vercelCallback: 'http://127.0.0.1:8000/api/auth/vercel/callback'
+		}
 	};
 
 	function resolveSection(raw) {
@@ -529,6 +551,7 @@
 		const extraRows = extraConnectors.map(id => providerRow(id, { status: connectorCapability(id) }, 'connector'));
 
 		root.innerHTML = `
+			${renderOAuthAppCard()}
 			<div class="nx-card">
 				<div class="nx-label" style="margin-bottom:8px">LLM (IDE keys preferred, .env fallback)</div>
 				${llmRows.join('') || '<p class="nx-hint">None</p>'}
@@ -549,6 +572,7 @@
 				<div class="nx-label" style="margin-bottom:8px">Bundled connectors</div>
 				${extraRows.join('')}
 			</div>` : ''}
+			${renderMcpCard()}
 		`;
 
 		root.querySelectorAll('button[data-oauth]').forEach(btn => {
@@ -560,6 +584,25 @@
 			});
 		});
 
+		root.querySelectorAll('button[data-oauth-app]').forEach(btn => {
+			btn.addEventListener('click', () => {
+				const action = btn.getAttribute('data-oauth-app');
+				const provider = btn.getAttribute('data-provider');
+				const input = document.getElementById(`key-${provider}`);
+				const value = input ? input.value.trim() : '';
+				if (action === 'save') {
+					if (!value) {
+						setMsg(provider, 'Enter a value to save', 'err');
+						return;
+					}
+					setMsg(provider, 'Saving...', '');
+					vscode.postMessage({ type: 'saveSaasKey', provider, value });
+				} else if (action === 'clear') {
+					vscode.postMessage({ type: 'clearSaasKey', provider });
+				}
+			});
+		});
+
 		root.querySelectorAll('button[data-test-env]').forEach(btn => {
 			btn.addEventListener('click', () => {
 				vscode.postMessage({
@@ -568,19 +611,182 @@
 				});
 			});
 		});
+
+		root.querySelectorAll('button[data-mcp]').forEach(btn => {
+			btn.addEventListener('click', () => {
+				if (btn.disabled) {
+					return;
+				}
+				vscode.postMessage({
+					type: btn.getAttribute('data-mcp'),
+					serverId: btn.getAttribute('data-server')
+				});
+			});
+		});
+	}
+
+	function renderOAuthAppCard() {
+		const apps = state.oauthApps || {};
+		const githubCb = apps.githubCallback || 'http://127.0.0.1:8000/api/auth/github/callback';
+		const vercelCb = apps.vercelCallback || 'http://127.0.0.1:8000/api/auth/vercel/callback';
+		const fields = [
+			{ id: 'github_client_id', label: 'GitHub Client ID', placeholder: 'Ov...' },
+			{ id: 'github_client_secret', label: 'GitHub Client Secret', placeholder: 'Client secret' },
+			{ id: 'vercel_client_id', label: 'Vercel Client ID', placeholder: 'Client ID' },
+			{ id: 'vercel_client_secret', label: 'Vercel Client Secret', placeholder: 'Client secret' }
+		];
+		const inputs = fields.map(p => {
+			const configured = !!state.configured[p.id];
+			const prev = document.getElementById(`key-${p.id}`);
+			const prevVal = prev ? prev.value : '';
+			return `
+				<label class="nx-label" for="key-${p.id}">${escapeHtml(p.label)}</label>
+				<input id="key-${p.id}" class="nx-input" type="password" autocomplete="off" spellcheck="false" aria-label="${escapeHtml(p.label)}" placeholder="${configured ? 'Saved. Enter a new value to replace...' : escapeHtml(p.placeholder)}" value="${escapeHtml(prevVal)}" />
+				<div class="nx-actions">
+					<button type="button" class="nx-btn" data-oauth-app="save" data-provider="${p.id}">Save</button>
+					<button type="button" class="nx-btn nx-btn-secondary" data-oauth-app="clear" data-provider="${p.id}" ${configured ? '' : 'disabled'}>Clear</button>
+				</div>
+				<div class="nx-msg" id="msg-${p.id}" role="status"></div>
+			`;
+		}).join('');
+		return `<div class="nx-card">
+			<div class="nx-label" style="margin-bottom:8px">OAuth app credentials</div>
+			<p class="nx-hint">Nexora does not create the GitHub app. GitHub → Settings → Developer settings → OAuth Apps → New. Paste the callback URL below into the GitHub app. Same for Vercel (create an OAuth App, paste its callback).</p>
+			<p class="nx-hint">GitHub callback (exact): <code>${escapeHtml(githubCb)}</code></p>
+			<p class="nx-hint">Vercel callback (exact): <code>${escapeHtml(vercelCb)}</code></p>
+			${inputs}
+		</div>`;
+	}
+
+	function mcpStatus(row) {
+		if (row.connected) {
+			return 'ready';
+		}
+		if ((row.missing_requires || []).length || (row.transport === 'http' && !row.endpoint)) {
+			return 'not_configured';
+		}
+		return 'not_configured';
+	}
+
+	function mcpBlockedReason(row) {
+		if ((row.missing_requires || []).length) {
+			return 'Save ' + row.missing_requires.join(', ') + ' in SaaS Connectors first';
+		}
+		if (row.transport === 'http' && !row.endpoint) {
+			return 'No local MCP endpoint';
+		}
+		return '';
+	}
+
+	function renderMcpCard() {
+		const rows = state.mcpServers || [];
+		if (!rows.length) {
+			return `<div class="nx-card">
+				<div class="nx-label" style="margin-bottom:8px">MCP servers</div>
+				<p class="nx-hint">No MCP servers listed. Engine may be offline.</p>
+			</div>`;
+		}
+		const items = rows.map(row => {
+			const status = mcpStatus(row);
+			const id = escapeHtml(row.id || '');
+			const blockedReason = mcpBlockedReason(row);
+			const busy = state.mcpBusy === row.id;
+			const err = state.mcpError && state.mcpError[row.id];
+			const detail = row.connected
+				? `${row.transport} | ${row.tools_count || 0} tools`
+				: ((row.missing_requires || []).length
+					? `Missing ${row.missing_requires.join(', ')}`
+					: (!row.endpoint && row.transport === 'http'
+						? 'No local MCP endpoint'
+						: (row.description || row.transport || '')));
+			let action;
+			if (row.connected) {
+				action = `<button type="button" class="nx-btn nx-btn-secondary" data-mcp="disconnectMcp" data-server="${id}">Disconnect</button>`;
+			} else {
+				const disabled = blockedReason || busy ? 'disabled' : '';
+				const label = busy ? 'Connecting...' : 'Connect';
+				const title = escapeHtml(blockedReason || (busy ? 'Connecting...' : 'Connect'));
+				action = `<button type="button" class="nx-btn" data-mcp="connectMcp" data-server="${id}" ${disabled} title="${title}">${label}</button>`;
+			}
+			const errLine = err ? `<div class="nx-msg err">${escapeHtml(err)}</div>` : '';
+			return `
+				<div class="nx-row">
+					<div>
+						<div class="nx-label">${escapeHtml(row.name || row.id)}</div>
+						<div class="nx-status">${statusDot(status)} ${escapeHtml(detail)}</div>
+						${errLine}
+					</div>
+					<div class="nx-actions" style="margin:0">${action}</div>
+				</div>
+			`;
+		}).join('');
+		return `<div class="nx-card">
+			<div class="nx-label" style="margin-bottom:8px">MCP servers (8 registered)</div>
+			<p class="nx-hint">HTTP sockets use LOCAL_ENDPOINTS. Missing keys or endpoints stay Not configured. Filesystem MCP is stdio (npx), not a browser login.</p>
+			${items}
+		</div>`;
+	}
+
+	function renderA2A() {
+		const root = document.getElementById('a2a-root');
+		if (!root) {
+			return;
+		}
+		const cardUrl = state.a2aCardUrl || '';
+		const prevUrl = document.getElementById('a2a-url') ? document.getElementById('a2a-url').value : '';
+		const prevTask = document.getElementById('a2a-task') ? document.getElementById('a2a-task').value : '';
+		root.innerHTML = `
+			<div class="nx-card">
+				<div class="nx-label">A2A agent card</div>
+				<p class="nx-hint">${cardUrl ? escapeHtml(cardUrl) : 'Engine URL unavailable'}</p>
+				<label class="nx-label" for="a2a-url">External agent URL</label>
+				<input id="a2a-url" class="nx-input" type="url" placeholder="https://agent.example/.well-known/agent-card.json" aria-label="External A2A agent URL" />
+				<label class="nx-label" for="a2a-task" style="margin-top:8px">Task</label>
+				<input id="a2a-task" class="nx-input" type="text" placeholder="Short request to delegate" aria-label="A2A task request" />
+				<div class="nx-actions">
+					<button type="button" class="nx-btn" id="a2a-delegate">Delegate</button>
+				</div>
+				<div class="nx-msg" id="msg-a2a" role="status"></div>
+			</div>
+		`;
+		const urlEl = document.getElementById('a2a-url');
+		const taskEl = document.getElementById('a2a-task');
+		if (urlEl) {
+			urlEl.value = prevUrl;
+		}
+		if (taskEl) {
+			taskEl.value = prevTask;
+		}
+		document.getElementById('a2a-delegate')?.addEventListener('click', () => {
+			const agentUrl = urlEl ? urlEl.value.trim() : '';
+			const request = taskEl ? taskEl.value.trim() : '';
+			if (!agentUrl) {
+				setMsg('a2a', 'Enter an external agent URL', 'err');
+				return;
+			}
+			setMsg('a2a', 'Delegating...', '');
+			vscode.postMessage({ type: 'a2aDelegate', agentUrl, request });
+		});
 	}
 
 	function overlayLlm(id, info) {
+		if (info?.status === 'error') {
+			return Object.assign({}, info || {}, { status: 'failed' });
+		}
+		if (info?.status === 'connected') {
+			return Object.assign({}, info || {}, { status: 'ready' });
+		}
 		const status = llmCapability(id);
 		return Object.assign({}, info || {}, { status });
 	}
 
 	function overlayConnector(id, info) {
-		if (id !== 'github' && id !== 'vercel' && id !== 'crewai' && id !== 'gpt_researcher') {
-			const status = info?.status === 'connected' ? 'ready' : (info?.status === 'error' ? 'failed' : (info?.status || 'not_configured'));
-			return Object.assign({}, info || {}, { status });
+		if (id === 'crewai' || id === 'gpt_researcher') {
+			return Object.assign({}, info || {}, { status: connectorCapability(id) });
 		}
-		return Object.assign({}, info || {}, { status: connectorCapability(id) });
+		const raw = info?.status;
+		const status = raw === 'connected' ? 'ready' : (raw === 'error' ? 'failed' : (raw || 'not_configured'));
+		return Object.assign({}, info || {}, { status });
 	}
 
 	function providerRow(id, info, category) {
@@ -607,6 +813,8 @@
 			detailParts.push(info.error);
 		}
 		const detail = detailParts.join(' · ') || capabilityLabel(status);
+		const oauthErr = (id === 'github' || id === 'vercel') && state.oauthError && state.oauthError[id];
+		const errLine = oauthErr ? `<div class="nx-msg err">${escapeHtml(oauthErr)}</div>` : '';
 
 		let actions = '';
 		if (category === 'deployment' && (id === 'github' || id === 'vercel')) {
@@ -624,6 +832,7 @@
 				<div>
 					<div class="nx-label">${escapeHtml(id)}</div>
 					<div class="nx-status">${statusDot(status)} ${escapeHtml(detail)}</div>
+					${errLine}
 				</div>
 				<div class="nx-actions" style="margin:0">${actions}</div>
 			</div>
@@ -703,6 +912,20 @@
 		bindConfigToggle('pref-auto-format', 'agent.autoFormat');
 		bindConfigToggle('pref-auto-approve', 'agent.autoApproveModeSwitch');
 		bindConfigToggle('pref-auto-close-term', 'agent.autoCloseTerminal');
+	}
+
+	function renderBrowser() {
+		const root = document.getElementById('browser-settings');
+		if (!root) {
+			return;
+		}
+		const b = state.browserSettings || {};
+		root.innerHTML = `
+			${execToggle('pref-open-local-links', 'Open local links in Nexora Browser', 'Localhost URLs from chat open in the in-IDE browser instead of system Chrome.', b.openLocalLinks !== false)}
+			${execToggle('pref-allow-agent-browser', 'Allow agent browser control', 'The agent may open, read, click, and type in the browser. Off denies all browser tools (Browser Protection).', b.allowAgentControl !== false)}
+		`;
+		bindConfigToggle('pref-open-local-links', 'browser.openLocalLinks');
+		bindConfigToggle('pref-allow-agent-browser', 'browser.allowAgentControl');
 	}
 
 	function execToggle(id, label, hint, checked) {
@@ -837,16 +1060,22 @@
 					preferences: msg.preferences || state.preferences,
 					runMode: msg.runMode || state.runMode,
 					agentSettings: msg.agentSettings || state.agentSettings,
+					browserSettings: msg.browserSettings || state.browserSettings,
 					connections: msg.connections !== undefined ? msg.connections : state.connections,
 					capabilities: msg.capabilities !== undefined ? msg.capabilities : state.capabilities,
-					analytics: msg.analytics !== undefined ? msg.analytics : state.analytics
+					analytics: msg.analytics !== undefined ? msg.analytics : state.analytics,
+					mcpServers: msg.mcpServers !== undefined ? msg.mcpServers : state.mcpServers,
+					a2aCardUrl: msg.a2aCardUrl !== undefined ? msg.a2aCardUrl : state.a2aCardUrl,
+					oauthApps: msg.oauthApps !== undefined ? msg.oauthApps : state.oauthApps
 				};
 				renderApiKeys();
 				renderSaasKeys();
 				renderConnections();
 				renderRunMode();
+				renderBrowser();
 				renderPreferences();
 				renderAnalytics();
+				renderA2A();
 				break;
 			case 'validateResult':
 				setMsg(msg.provider, msg.success ? (msg.details || 'Key is valid') : (msg.error || 'Invalid key'), msg.success ? 'ok' : 'err');
@@ -864,7 +1093,37 @@
 				setMsg(msg.provider, msg.success ? 'Cleared from SecretStorage' : (msg.error || 'Clear failed'), msg.success ? 'ok' : 'err');
 				break;
 			case 'oauthResult':
-				announce(msg.message || 'OAuth update');
+				if (!state.oauthError) {
+					state.oauthError = {};
+				}
+				if (msg.provider) {
+					if (msg.error) {
+						state.oauthError[msg.provider] = msg.error;
+					} else {
+						delete state.oauthError[msg.provider];
+					}
+				}
+				announce(msg.error || msg.message || 'OAuth update');
+				renderConnections();
+				break;
+			case 'mcpProgress':
+				state.mcpBusy = msg.busy ? msg.serverId : '';
+				renderConnections();
+				break;
+			case 'mcpResult':
+				if (!state.mcpError) {
+					state.mcpError = {};
+				}
+				if (msg.error) {
+					state.mcpError[msg.serverId] = msg.error;
+				} else if (msg.serverId) {
+					delete state.mcpError[msg.serverId];
+				}
+				state.mcpBusy = '';
+				renderConnections();
+				break;
+			case 'a2aResult':
+				setMsg('a2a', msg.success ? (msg.details || 'Delegated') : (msg.error || 'Delegate failed'), msg.success ? 'ok' : 'err');
 				break;
 			// Week 13: SaaS connector key handling
 			case 'saasTestResult':
@@ -879,6 +1138,7 @@
 					}
 					state.configured[msg.provider] = true;
 					renderSaasKeys();
+					renderConnections();
 				}
 				break;
 			case 'saasClearResult':
@@ -886,6 +1146,7 @@
 				if (msg.success) {
 					state.configured[msg.provider] = false;
 					renderSaasKeys();
+					renderConnections();
 				}
 				break;
 		}
@@ -897,7 +1158,9 @@
 	renderSaasKeys();
 	renderConnections();
 	renderRunMode();
+	renderBrowser();
 	renderPreferences();
 	renderAnalytics();
+	renderA2A();
 	vscode.postMessage({ type: 'ready' });
 })();

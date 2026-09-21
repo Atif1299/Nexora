@@ -10,12 +10,15 @@ import { getEngineState, onDidChangeEngineState } from './services/engineProcess
 import {
 	capabilityReason,
 	getCachedCapabilities,
+	isLivePlatform,
 	onDidChangeCapabilities,
 	platformCapabilityStatus,
 	refreshCapabilities,
 	type CapabilitiesReport,
 	type CapabilityStatus
 } from './services/backend/capabilities';
+import { getNotificationService } from './services/notificationService';
+import type { SaasConnector } from './services/backend/auth';
 
 interface Platform {
 	id: string;
@@ -29,6 +32,7 @@ interface Platform {
 	is_enabled?: boolean;
 	capabilityStatus?: CapabilityStatus;
 	capabilityReason?: string;
+	live?: boolean;
 }
 
 interface PlatformApiRow {
@@ -164,7 +168,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		view.webview.html = getPlatformsWebviewHtml(view.webview, this._extensionUri);
 
 		this._disposables = [
-			view.webview.onDidReceiveMessage(async (msg: { type?: string }) => {
+			view.webview.onDidReceiveMessage(async (msg: { type?: string; id?: string }) => {
 				if (msg?.type === 'refresh') {
 					await this.refresh();
 					return;
@@ -175,6 +179,18 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 					} else {
 						this._pushState();
 					}
+					return;
+				}
+				if (msg?.type === 'connect' && msg.id) {
+					await this._handleConnect(msg.id);
+					return;
+				}
+				if (msg?.type === 'disconnect' && msg.id) {
+					await this._handleDisconnect(msg.id);
+					return;
+				}
+				if (msg?.type === 'configure' && msg.id) {
+					await this._handleConfigure(msg.id);
 				}
 			}),
 			view.onDidChangeVisibility(() => {
@@ -215,8 +231,9 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 
 	private _mapPlatform(p: PlatformApiRow, report: CapabilitiesReport | undefined): Platform {
 		const id = String(p.id || '');
-		const status = platformCapabilityStatus(id, report);
-		const blocked = isBlockedStatus(status);
+		const live = isLivePlatform(id);
+		const status = live ? platformCapabilityStatus(id, report) : undefined;
+		const blocked = live && isBlockedStatus(status);
 		return {
 			id,
 			name: p.name || id,
@@ -225,26 +242,154 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			capabilities: p.capabilities,
 			api_type: p.api_type,
 			auth_type: p.auth_type,
-			has_active_connector: blocked ? false : p.has_active_connector,
+			has_active_connector: live && status === 'ready',
 			is_enabled: blocked ? false : p.is_enabled !== false,
 			capabilityStatus: status,
-			capabilityReason: status ? capabilityReason(status) : undefined
+			capabilityReason: status ? capabilityReason(status) : undefined,
+			live
 		};
 	}
 
 	private _applyCapabilities(report: CapabilitiesReport | undefined): void {
 		this.embeddingInProgress = !!report?.vectors.embedding_in_progress;
 		this.platforms = this.platforms.map(p => {
-			const status = platformCapabilityStatus(p.id, report);
-			const blocked = isBlockedStatus(status);
+			const live = isLivePlatform(p.id);
+			const status = live ? platformCapabilityStatus(p.id, report) : undefined;
+			const blocked = live && isBlockedStatus(status);
 			return {
 				...p,
+				live,
 				capabilityStatus: status,
 				capabilityReason: status ? capabilityReason(status) : undefined,
-				has_active_connector: blocked ? false : p.has_active_connector,
+				has_active_connector: live && status === 'ready',
 				is_enabled: blocked ? false : p.is_enabled !== false
 			};
 		});
+	}
+
+	private _saasId(platformId: string): SaasConnector | undefined {
+		const map: Record<string, SaasConnector> = {
+			supabase: 'supabase',
+			stripe: 'stripe',
+			'v0-dev': 'v0',
+			elevenlabs: 'elevenlabs',
+			tavily: 'tavily'
+		};
+		return map[platformId];
+	}
+
+	private async _openSettings(section: string): Promise<void> {
+		await vscode.commands.executeCommand('nexora.openSettings', section);
+	}
+
+	private async _afterChange(): Promise<void> {
+		await refreshCapabilities();
+		await this.loadPlatforms();
+	}
+
+	private async _handleConfigure(platformId: string): Promise<void> {
+		if (!isLivePlatform(platformId)) {
+			return;
+		}
+		if (platformId === 'openai' || platformId === 'claude') {
+			await this._openSettings(platformId === 'claude' ? 'anthropic' : 'openai');
+			return;
+		}
+		if (platformId === 'github' || platformId === 'vercel') {
+			await this._openSettings(platformId);
+			return;
+		}
+		const saas = this._saasId(platformId);
+		if (saas) {
+			await this._openSettings(saas);
+			return;
+		}
+		await this._openSettings('keys');
+	}
+
+	private async _handleConnect(platformId: string): Promise<void> {
+		if (!isLivePlatform(platformId)) {
+			return;
+		}
+		const notifications = getNotificationService();
+		const status = platformCapabilityStatus(platformId, getCachedCapabilities());
+		if (status === 'unavailable') {
+			void notifications.showWarning(`${platformId} is unavailable in this build`);
+			return;
+		}
+		if (platformId === 'openai' || platformId === 'claude' || platformId === 'crewai' || platformId === 'gpt-researcher') {
+			await this._handleConfigure(platformId);
+			return;
+		}
+		if (platformId === 'github' || platformId === 'vercel') {
+			await this._connectOAuth(platformId);
+			return;
+		}
+		const saas = this._saasId(platformId);
+		if (saas) {
+			if (status === 'not_configured' || status === 'failed') {
+				await this._openSettings(saas);
+				return;
+			}
+			const result = await getBackendClient().toggleSaasConnector(saas, true, 'default');
+			if (!result) {
+				void notifications.showError(`Could not enable ${saas}`);
+				return;
+			}
+			void notifications.showSuccess(`${saas} enabled for orchestration`);
+			await this._afterChange();
+		}
+	}
+
+	private async _handleDisconnect(platformId: string): Promise<void> {
+		if (!isLivePlatform(platformId)) {
+			return;
+		}
+		const notifications = getNotificationService();
+		const client = getBackendClient();
+		try {
+			if (platformId === 'github') {
+				await client.disconnectGitHub('default');
+			} else if (platformId === 'vercel') {
+				await client.disconnectVercel('default');
+			} else {
+				const saas = this._saasId(platformId);
+				if (!saas) {
+					await this._handleConfigure(platformId);
+					return;
+				}
+				await client.disconnectSaasConnector(saas, 'default');
+			}
+			void notifications.showSuccess(`${platformId} disconnected`);
+			await this._afterChange();
+		} catch (error) {
+			void notifications.showError(
+				`Disconnect failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
+		}
+	}
+
+	private async _connectOAuth(provider: 'github' | 'vercel'): Promise<void> {
+		const client = getBackendClient();
+		const notifications = getNotificationService();
+		try {
+			const result = provider === 'github'
+				? await client.getGitHubAuthUrl('default')
+				: await client.getVercelAuthUrl('default');
+			if (!result?.authorization_url) {
+				void notifications.showError(`Could not start ${provider} OAuth. Check backend .env client IDs.`);
+				return;
+			}
+			await vscode.env.openExternal(vscode.Uri.parse(result.authorization_url));
+			void notifications.showInfo(`Complete ${provider} login in the browser, then Refresh`);
+			setTimeout(() => {
+				void this._afterChange();
+			}, 8000);
+		} catch (error) {
+			void notifications.showError(
+				`OAuth failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+			);
+		}
 	}
 
 	private _groupByCategory(): Record<string, Platform[]> {
