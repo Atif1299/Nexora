@@ -13,6 +13,7 @@ import { getChatWebviewHtml } from './webview/chat';
 import type { ChatActivityItem, ChatInitialState, WebviewInboundMessage } from './webview/chat/types';
 import { getOrchestrationWebSocket, type WebSocketMessage } from './services/websocketClient';
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
+import { openUrlFromChat } from './services/browser';
 import type { TerminalCommandProgress } from './services/tools/terminalCommand';
 import { getSettingsService } from './services/settingsService';
 import { getAgentFlag, getAgentMaxTurns, getSubmitWithCtrlEnter } from './services/agentRunMode';
@@ -55,6 +56,7 @@ type ChatSessionMessage = {
 	content: string;
 	mode?: ChatMode;
 	timestamp?: number;
+	activity?: ChatActivityItem[];
 };
 
 type ChatSessionRecord = {
@@ -87,6 +89,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	private _cachedWorkspaceId?: string;
 	private _cachedWorkspacePath?: string;
 	private _replyAbort?: AbortController;
+	private _lastActivityItems: ChatActivityItem[] = [];
 
 	constructor(private readonly _extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
 		this._context = context;
@@ -287,7 +290,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		});
 	}
 
+	private _cloneActivityItems(items: ChatActivityItem[]): ChatActivityItem[] {
+		return items.map((it) => ({ ...it }));
+	}
+
 	private _emitChatActivity(items: ChatActivityItem[]): void {
+		this._lastActivityItems = this._cloneActivityItems(items);
 		if (!this._view) {
 			return;
 		}
@@ -296,6 +304,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			items,
 			caption: this._activityCaption(items)
 		});
+	}
+
+	private _attachActivityToLastUser(items: ChatActivityItem[]): void {
+		if (!items.length) {
+			return;
+		}
+		const session = this._getActiveSession();
+		if (!session) {
+			return;
+		}
+		for (let i = session.messages.length - 1; i >= 0; i--) {
+			if (session.messages[i].role === 'user') {
+				session.messages[i].activity = this._cloneActivityItems(items);
+				void this._persistSessions();
+				return;
+			}
+		}
 	}
 
 	private _activityCaption(items: ChatActivityItem[]): string {
@@ -368,10 +393,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private _clearChatActivity(): void {
-		if (!this._view) {
-			return;
+		const items = this._lastActivityItems;
+		this._attachActivityToLastUser(items);
+		if (this._view) {
+			this._view.webview.postMessage({
+				type: 'chatActivityFold',
+				items
+			});
 		}
-		this._view.webview.postMessage({ type: 'chatActivityClear' });
+		this._lastActivityItems = [];
 	}
 
 	private async _appendAssistantToSession(content: string): Promise<void> {
@@ -478,6 +508,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._handleSaasToggle(data.provider);
 			} else if (data.type === 'openSettings') {
 				await this._handleOpenSettings(data.section);
+			} else if (data.type === 'openUrl') {
+				await openUrlFromChat(data.url);
 			} else if (data.type === 'saveFirstRunKey') {
 				await this._handleSaveFirstRunKey(data.provider, data.key);
 			} else if (data.type === 'dismissFirstRunCard') {
@@ -1829,6 +1861,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return `insert_lines: ${args.path || ''}:${args.line_number || ''}`.slice(0, 60);
 			case 'run_terminal_command':
 				return `$ ${args.command || ''}`.slice(0, 80);
+			case 'open_browser':
+				return `open_browser: ${args.url || ''}`.slice(0, 80);
+			case 'browser_snapshot':
+				return 'browser_snapshot';
+			case 'browser_click':
+				return `browser_click: ${args.selector || args.text || ''}`.slice(0, 80);
+			case 'browser_type':
+				return `browser_type: ${args.text || ''}`.slice(0, 80);
 			default:
 				return `${toolName}`.slice(0, 60);
 		}

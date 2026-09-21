@@ -840,8 +840,38 @@ body
 
 .nx-msg.nx-user .nx-msgBody
 {
-	color: color-mix(in srgb, var(--nx-fg) 74%, transparent);
+	color: color-mix(in srgb, var(--nx-fg) 88%, transparent);
 	line-height: 1.5;
+	padding: 8px 12px;
+	border: 1.5px solid color-mix(in srgb, var(--nx-fg) 34%, transparent);
+	border-radius: var(--nx-radius-2);
+	background: color-mix(in srgb, var(--nx-fg) 7%, transparent);
+}
+
+.nexora-activity-fold
+{
+	margin: 4px 4px 8px 4px;
+	color: var(--nx-muted);
+	font-size: 11px;
+	line-height: 1.4;
+}
+
+.nexora-activity-fold summary
+{
+	cursor: pointer;
+	color: var(--nx-muted);
+	font-size: 12px;
+	padding: 2px 0;
+}
+
+.nexora-activity-fold[open]
+{
+	padding-bottom: 4px;
+}
+
+.nexora-activity-fold[open] summary
+{
+	margin-bottom: 4px;
 }
 
 .nx-msg.nx-assistant .nx-msgBody
@@ -964,6 +994,14 @@ body
 	color: var(--nx-inputFg);
 	font-size: 13px;
 	line-height: 1.45;
+	height: auto;
+	min-height: 1.45em;
+	max-height: 14.5em;
+	overflow-y: auto;
+	resize: none;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+	word-break: break-word;
 }
 
 .nx-input:focus

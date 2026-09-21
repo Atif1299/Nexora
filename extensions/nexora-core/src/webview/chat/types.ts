@@ -13,6 +13,7 @@ export type WebviewInboundMessage =
 	| { type: 'connectVercel' }
 	| { type: 'toggleSaas'; provider: 'supabase' | 'stripe' | 'v0' | 'elevenlabs' | 'tavily' }
 	| { type: 'openSettings'; section?: string }  // Week 13: SaaS connector settings
+	| { type: 'openUrl'; url: string }
 	| { type: 'saveFirstRunKey'; provider: 'openai' | 'anthropic' | 'openrouter'; key: string }
 	| { type: 'dismissFirstRunCard' }
 	| { type: 'deployProject'; prompt: string; repoName: string; projectName: string }
@@ -63,6 +64,12 @@ export type ChatActivityItem = {
 	exitCode?: number;
 };
 
+export type ChatViewMessage = {
+	role: 'user' | 'assistant';
+	content: string;
+	activity?: ChatActivityItem[];
+};
+
 export type WebviewOutboundMessage =
 	| { type: 'addMessage'; role: 'user' | 'assistant'; content: string; isLoading: boolean; stopped?: boolean }
 	| { type: 'appendToken'; content: string }
@@ -70,10 +77,11 @@ export type WebviewOutboundMessage =
 	| { type: 'generationRunning'; running: boolean }
 	| { type: 'chatActivity'; items: ChatActivityItem[]; caption?: string }
 	| { type: 'chatActivityClear' }
+	| { type: 'chatActivityFold'; items: ChatActivityItem[] }
 	| { type: 'backendStatus'; connected: boolean }
 	| { type: 'authStatus'; github: boolean; vercel: boolean; supabase?: boolean; stripe?: boolean; v0?: boolean; elevenlabs?: boolean; tavily?: boolean }
 	| { type: 'showPlanApproval'; plan: any }
-	| { type: 'loadSession'; sessionId: string; messages: Array<{ role: 'user' | 'assistant'; content: string }> }
+	| { type: 'loadSession'; sessionId: string; messages: ChatViewMessage[] }
 	| { type: 'updateSessions'; sessions: Array<{ id: string; name: string }>; activeSessionId: string }
 	| { type: 'taskUpdate'; planId: string; taskId: string; taskName?: string; status: string; result?: any; error?: string; cost?: number }
 	| { type: 'taskRetry'; planId: string; taskId: string; taskName?: string; attempt: number; maxAttempts: number; platform: string }
@@ -102,7 +110,7 @@ export type ChatInitialState = {
 		elevenlabs?: boolean;
 		tavily?: boolean;
 	};
-	messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+	messages?: ChatViewMessage[];
 	sessions?: Array<{ id: string; name: string }>;
 	activeSessionId?: string;
 	sessionRailWidth?: number;

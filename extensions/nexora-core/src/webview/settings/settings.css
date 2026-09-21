@@ -61,6 +61,8 @@ body
 	min-height: 100vh;
 	padding: 0;
 	gap: 0;
+	container-type: inline-size;
+	container-name: nx-settings;
 }
 
 .nx-settings-nav
@@ -74,6 +76,7 @@ body
 	border-right: 1px solid var(--nx-border);
 	background: var(--vscode-sideBar-background, var(--nx-bg));
 	overflow-y: auto;
+	overflow-x: hidden;
 }
 
 .nx-settings-nav-title
@@ -84,11 +87,14 @@ body
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
 	color: var(--nx-muted);
+	white-space: nowrap;
 }
 
 .nx-nav-item
 {
-	display: block;
+	display: flex;
+	align-items: center;
+	gap: 10px;
 	width: 100%;
 	text-align: left;
 	border: none;
@@ -99,6 +105,56 @@ body
 	font-family: inherit;
 	font-size: 13px;
 	cursor: pointer;
+	white-space: nowrap;
+}
+
+.nx-nav-icon
+{
+	display: flex;
+	flex-shrink: 0;
+	width: 16px;
+	height: 16px;
+	align-items: center;
+	justify-content: center;
+}
+
+.nx-nav-icon svg
+{
+	display: block;
+}
+
+.nx-nav-icon-browser
+{
+	border: 1.5px solid currentColor;
+	border-radius: 50%;
+	box-sizing: border-box;
+	position: relative;
+}
+
+.nx-nav-icon-browser::before
+{
+	content: "";
+	position: absolute;
+	inset: 0 4px;
+	border: 1.5px solid currentColor;
+	border-radius: 50%;
+	box-sizing: border-box;
+}
+
+.nx-nav-icon-browser::after
+{
+	content: "";
+	position: absolute;
+	left: 1px;
+	right: 1px;
+	top: 50%;
+	border-top: 1.5px solid currentColor;
+}
+
+.nx-nav-label
+{
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .nx-nav-item:hover
@@ -126,6 +182,68 @@ body
 	min-width: 0;
 	overflow: auto;
 	padding: 28px 36px 48px;
+}
+
+@container nx-settings (max-width: 720px)
+{
+	.nx-settings-nav
+	{
+		width: 48px;
+		padding: 12px 6px;
+		align-items: center;
+	}
+
+	.nx-settings-nav-title
+	{
+		display: none;
+	}
+
+	.nx-nav-item
+	{
+		width: 36px;
+		height: 36px;
+		padding: 0;
+		justify-content: center;
+		gap: 0;
+	}
+
+	.nx-nav-label
+	{
+		display: none;
+	}
+
+	.nx-settings-detail
+	{
+		padding: 16px 16px 32px;
+	}
+
+	.nx-section,
+	.nx-section-analytics
+	{
+		max-width: none;
+	}
+
+	.nx-card .nx-row
+	{
+		flex-wrap: wrap;
+		align-items: flex-start;
+	}
+
+	.nx-select-inline
+	{
+		width: 100%;
+		min-width: 0;
+	}
+
+	.nx-analytics-cards
+	{
+		grid-template-columns: 1fr;
+	}
+
+	.nx-analytics-recentRow
+	{
+		grid-template-columns: 1fr 1fr;
+	}
 }
 
 .nx-section

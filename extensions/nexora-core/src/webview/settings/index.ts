@@ -52,13 +52,38 @@ export function getSettingsWebviewHtml(
 	<div id="settings-root" role="main" aria-label="Nexora Settings">
 		<nav class="nx-settings-nav" aria-label="Settings sections">
 			<div class="nx-settings-nav-title">Settings</div>
-			<button type="button" class="nx-nav-item selected" data-section="keys" aria-current="page">LLM Keys</button>
-			<button type="button" class="nx-nav-item" data-section="saas">SaaS Connectors</button>
-			<button type="button" class="nx-nav-item" data-section="connections">Connections</button>
-			<button type="button" class="nx-nav-item" data-section="analytics">Cost &amp; Analytics</button>
-			<button type="button" class="nx-nav-item" data-section="approvals">Execution</button>
-			<button type="button" class="nx-nav-item" data-section="preferences">Preferences</button>
-			<button type="button" class="nx-nav-item" data-section="about">About</button>
+			<button type="button" class="nx-nav-item selected" data-section="keys" aria-current="page" title="LLM Keys" aria-label="LLM Keys">
+				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 1a4 4 0 0 0-1.5 7.71V10H5v2H3v2h5V8.71A4 4 0 0 0 8 1zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></svg></span>
+				<span class="nx-nav-label">LLM Keys</span>
+			</button>
+			<button type="button" class="nx-nav-item" data-section="saas" title="SaaS Connectors" aria-label="SaaS Connectors">
+				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M2 3h5v5H2V3zm7 0h5v5H9V3zM2 10h5v5H2v-5zm7 0h5v5H9v-5z"/></svg></span>
+				<span class="nx-nav-label">SaaS Connectors</span>
+			</button>
+			<button type="button" class="nx-nav-item" data-section="connections" title="Connections" aria-label="Connections">
+				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M6.5 9.5a3.5 3.5 0 0 1 0-5l1.2 1.2a1.8 1.8 0 0 0 0 2.6L6.5 9.5zm3 0 1.2-1.2a1.8 1.8 0 0 0 0-2.6L12 4.5a3.5 3.5 0 0 1 0 5L10.8 10.7 9.5 9.5zm-4.2.8L3.5 12a3.5 3.5 0 0 0 5 0l1.2-1.2-1.2-1.2-1.2 1.2a1.8 1.8 0 0 1-2.6 0z"/></svg></span>
+				<span class="nx-nav-label">Connections</span>
+			</button>
+			<button type="button" class="nx-nav-item" data-section="analytics" title="Cost &amp; Analytics" aria-label="Cost and Analytics">
+				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M2 14V2h1.5v10.5H14V14H2zm3.5-2V8H7v4H5.5zm3 0V5H10v7H8.5zm3 0V3H13v9h-1.5z"/></svg></span>
+				<span class="nx-nav-label">Cost &amp; Analytics</span>
+			</button>
+			<button type="button" class="nx-nav-item" data-section="approvals" title="Execution" aria-label="Execution">
+				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M3 2.5v11l10-5.5L3 2.5z"/></svg></span>
+				<span class="nx-nav-label">Execution</span>
+			</button>
+			<button type="button" class="nx-nav-item" data-section="browser" title="Browser" aria-label="Browser">
+				<span class="nx-nav-icon nx-nav-icon-browser" aria-hidden="true"></span>
+				<span class="nx-nav-label">Browser</span>
+			</button>
+			<button type="button" class="nx-nav-item" data-section="preferences" title="Preferences" aria-label="Preferences">
+				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 5.5A2.5 2.5 0 1 0 8 10.5 2.5 2.5 0 0 0 8 5.5zM1 7.5h2.1a5 5 0 0 1 .6-1.5L2.3 4.6l1.4-1.4 1.4 1.4A5 5 0 0 1 6.5 4V2h2v2a5 5 0 0 1 1.4.6l1.4-1.4 1.4 1.4-1.4 1.4a5 5 0 0 1 .6 1.5H15v2h-2.1a5 5 0 0 1-.6 1.5l1.4 1.4-1.4 1.4-1.4-1.4a5 5 0 0 1-1.4.6v2h-2v-2a5 5 0 0 1-1.5-.6L4.6 13.7 3.2 12.3l1.4-1.4A5 5 0 0 1 4 9.5H1v-2z"/></svg></span>
+				<span class="nx-nav-label">Preferences</span>
+			</button>
+			<button type="button" class="nx-nav-item" data-section="about" title="About" aria-label="About">
+				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 3a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm-.8 3h1.5v5H7.2V7z"/></svg></span>
+				<span class="nx-nav-label">About</span>
+			</button>
 		</nav>
 
 		<div class="nx-settings-detail">
@@ -128,6 +153,12 @@ export function getSettingsWebviewHtml(
 				<div id="run-mode" class="nx-stack"></div>
 			</section>
 
+			<section class="nx-section" data-section="browser" aria-labelledby="browser-heading" hidden>
+				<h2 id="browser-heading">Browser</h2>
+				<p class="nx-hint">In-IDE Simple Browser tab. GitHub and Vercel OAuth still open in the system browser.</p>
+				<div id="browser-settings" class="nx-stack"></div>
+			</section>
+
 			<section class="nx-section" data-section="preferences" aria-labelledby="prefs-heading" hidden>
 				<h2 id="prefs-heading">Preferences</h2>
 				<div id="preferences" class="nx-stack"></div>
@@ -135,8 +166,9 @@ export function getSettingsWebviewHtml(
 
 			<section class="nx-section" data-section="about" aria-labelledby="about-heading" hidden>
 				<h2 id="about-heading">About</h2>
-				<p class="nx-hint">Nexora Core · Week 12 Settings</p>
+				<p class="nx-hint">Nexora Core · live connectors, MCP sockets, and A2A.</p>
 				<button type="button" class="nx-btn nx-btn-secondary" id="show-shortcuts" aria-label="Show keyboard shortcuts">Keyboard Shortcuts</button>
+				<div id="a2a-root" class="nx-stack" style="margin-top:16px"></div>
 			</section>
 		</div>
 	</div>

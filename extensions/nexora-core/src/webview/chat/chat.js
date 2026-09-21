@@ -9,7 +9,26 @@
 	const initial = (window.__NEXORA_INITIAL_STATE__ || { connected: false, auth: { github: false, vercel: false } });
 
 	const messages = document.getElementById('messages');
-	const input = document.getElementById('input');
+	let input = document.getElementById('input');
+	if (input && input.tagName !== 'TEXTAREA') {
+		const ta = document.createElement('textarea');
+		ta.id = input.id;
+		ta.className = input.className;
+		ta.placeholder = input.placeholder || '';
+		ta.value = input.value || '';
+		ta.rows = 1;
+		ta.setAttribute('wrap', 'soft');
+		ta.setAttribute('spellcheck', 'true');
+		ta.style.resize = 'none';
+		ta.style.overflowY = 'hidden';
+		ta.style.whiteSpace = 'pre-wrap';
+		ta.style.overflowWrap = 'break-word';
+		ta.style.wordBreak = 'break-word';
+		if (input.parentNode) {
+			input.parentNode.replaceChild(ta, input);
+		}
+		input = ta;
+	}
 	const sendBtn = document.getElementById('sendBtn');
 	const sendBtnText = document.getElementById('sendBtnText');
 	const modeSelect = document.getElementById('modeSelect');
@@ -587,6 +606,7 @@
 		ensureAtChipRow();
 		ensureAtCompleteMenu();
 		input.addEventListener('input', onAtComposerInput);
+		input.addEventListener('input', resizeComposer);
 		input.addEventListener('click', onAtComposerInput);
 		input.addEventListener('keyup', function (e) {
 			if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
@@ -860,6 +880,7 @@
 		hideAtCompleteMenu();
 		syncAtMentionChips();
 		syncAtMentionHighlight();
+		resizeComposer();
 		input.focus();
 	}
 
@@ -904,6 +925,82 @@
 		totalTokensOut = 0;
 	}
 
+	function activityStepCount(items) {
+		const list = Array.isArray(items) ? items : [];
+		const tools = list.filter(function (it) { return it.id !== 'agent'; });
+		return tools.length;
+	}
+
+	function activityFoldSummary(items) {
+		const n = activityStepCount(items);
+		if (n === 1) {
+			return 'Worked · 1 step';
+		}
+		if (n > 1) {
+			return 'Worked · ' + n + ' steps';
+		}
+		return 'Activity';
+	}
+
+	function lastUserMessageEl() {
+		if (!messages) {
+			return null;
+		}
+		const nodes = messages.querySelectorAll('.nx-msg.nx-user');
+		return nodes.length ? nodes[nodes.length - 1] : null;
+	}
+
+	function attachActivityFold(userEl, items) {
+		if (!userEl || !userEl.parentNode) {
+			return;
+		}
+		const list = Array.isArray(items) ? items : [];
+		if (!list.length) {
+			return;
+		}
+		const next = userEl.nextElementSibling;
+		if (next && next.classList && next.classList.contains('nexora-activity-fold')) {
+			next.remove();
+		}
+		const fold = document.createElement('details');
+		fold.className = 'nexora-activity-fold';
+		const summary = document.createElement('summary');
+		summary.textContent = activityFoldSummary(list);
+		fold.appendChild(summary);
+		const body = document.createElement('div');
+		body.className = 'nx-activityCardBody';
+		fillActivityBody(body, list, false);
+		fold.appendChild(body);
+		userEl.parentNode.insertBefore(fold, userEl.nextSibling);
+	}
+
+	function foldLiveActivity(items) {
+		const list = (Array.isArray(items) && items.length) ? items : lastActivityItems;
+		const userEl = lastUserMessageEl();
+		if (userEl && list && list.length) {
+			attachActivityFold(userEl, list);
+		}
+		clearChatActivityCard();
+	}
+
+	function resizeComposer() {
+		if (!input) {
+			return;
+		}
+		input.style.height = 'auto';
+		const cs = window.getComputedStyle(input);
+		let line = parseFloat(cs.lineHeight);
+		if (!line || !isFinite(line)) {
+			const fs = parseFloat(cs.fontSize);
+			line = (fs && isFinite(fs) ? fs : 14) * 1.4;
+		}
+		const min = Math.ceil(line);
+		const max = Math.ceil(line * 8);
+		const next = Math.max(min, Math.min(input.scrollHeight, max));
+		input.style.height = next + 'px';
+		input.style.overflowY = input.scrollHeight > max ? 'auto' : 'hidden';
+	}
+
 	function formatElapsedMs(ms) {
 		const totalSec = Math.max(0, Math.floor((ms || 0) / 1000));
 		const m = Math.floor(totalSec / 60);
@@ -946,7 +1043,8 @@
 		return formatElapsedMs(it.elapsedMs);
 	}
 
-	function renderTerminalActivityRow(it) {
+	function renderTerminalActivityRow(it, live) {
+		const isLive = live !== false;
 		const status = it.status || (it.done ? 'succeeded' : 'running');
 		const row = document.createElement('div');
 		row.className = 'nx-activityRow nx-activityTermRow';
@@ -960,13 +1058,13 @@
 		if (status === 'cancelled') {
 			row.classList.add('nx-activityRowCancelled');
 		}
-		if (status === 'running' || status === 'confirming') {
+		if (isLive && (status === 'running' || status === 'confirming')) {
 			row.classList.add('nx-activityRowLive');
 		}
 
 		const mark = document.createElement('span');
 		mark.className = 'nx-activityMark';
-		if (status === 'running' || status === 'confirming') {
+		if (isLive && (status === 'running' || status === 'confirming')) {
 			const spinner = document.createElement('span');
 			spinner.className = 'nx-activitySpinner';
 			spinner.setAttribute('aria-hidden', 'true');
@@ -1001,7 +1099,7 @@
 		const lines = String(it.preview || '').split('\n').filter(function (line, idx, arr) {
 			return line.length > 0 || idx < arr.length - 1;
 		});
-		const expanded = !!activityLogExpanded[it.id];
+		const expanded = isLive ? !!activityLogExpanded[it.id] : lines.length > 6;
 		const visible = expanded ? lines.slice(-12) : lines.slice(-6);
 		const log = document.createElement('pre');
 		log.className = 'nx-activityTermLog' + (expanded ? ' nx-activityTermLogExpanded' : '');
@@ -1018,7 +1116,7 @@
 			body.appendChild(log);
 		}
 
-		if (lines.length > 6) {
+		if (isLive && lines.length > 6) {
 			const toggle = document.createElement('button');
 			toggle.type = 'button';
 			toggle.className = 'nx-activityTermToggle';
@@ -1036,6 +1134,40 @@
 		row.appendChild(glyph);
 		row.appendChild(body);
 		return row;
+	}
+
+	function fillActivityBody(bodyEl, list, live) {
+		const isLive = live !== false;
+		bodyEl.innerHTML = '';
+		list.forEach(function (it) {
+			if (it.kind === 'terminal') {
+				bodyEl.appendChild(renderTerminalActivityRow(it, isLive));
+				return;
+			}
+			const row = document.createElement('div');
+			row.className = 'nx-activityRow' + (it.done ? ' nx-activityRowDone' : '');
+			row.setAttribute('data-activity-id', it.id);
+			const mark = document.createElement('span');
+			mark.className = 'nx-activityMark';
+			if (it.done || !isLive) {
+				mark.textContent = '+';
+			} else {
+				const spinner = document.createElement('span');
+				spinner.className = 'nx-activitySpinner';
+				spinner.setAttribute('aria-hidden', 'true');
+				mark.appendChild(spinner);
+			}
+			const fileIcon = _makeActivityFileIcon(it.label || '');
+			const lab = document.createElement('span');
+			lab.className = 'nx-activityLabel';
+			lab.textContent = it.label || '';
+			row.appendChild(mark);
+			if (fileIcon) {
+				row.appendChild(fileIcon);
+			}
+			row.appendChild(lab);
+			bodyEl.appendChild(row);
+		});
 	}
 
 	function renderChatActivity(items, caption) {
@@ -1094,36 +1226,7 @@
 		if (!bodyEl) {
 			return;
 		}
-		bodyEl.innerHTML = '';
-		list.forEach(function (it) {
-			if (it.kind === 'terminal') {
-				bodyEl.appendChild(renderTerminalActivityRow(it));
-				return;
-			}
-			const row = document.createElement('div');
-			row.className = 'nx-activityRow' + (it.done ? ' nx-activityRowDone' : '');
-			row.setAttribute('data-activity-id', it.id);
-			const mark = document.createElement('span');
-			mark.className = 'nx-activityMark';
-			if (it.done) {
-				mark.textContent = '+';
-			} else {
-				const spinner = document.createElement('span');
-				spinner.className = 'nx-activitySpinner';
-				spinner.setAttribute('aria-hidden', 'true');
-				mark.appendChild(spinner);
-			}
-			const fileIcon = _makeActivityFileIcon(it.label || '');
-			const lab = document.createElement('span');
-			lab.className = 'nx-activityLabel';
-			lab.textContent = it.label || '';
-			row.appendChild(mark);
-			if (fileIcon) {
-				row.appendChild(fileIcon);
-			}
-			row.appendChild(lab);
-			bodyEl.appendChild(row);
-		});
+		fillActivityBody(bodyEl, list, true);
 		if (lastLoadingMessage && lastLoadingMessage.parentNode === messages) {
 			messages.insertBefore(chatActivityCard, lastLoadingMessage);
 		} else if (!chatActivityCard.parentNode) {
@@ -1142,6 +1245,9 @@
 		} else if (lower.startsWith('read_file:')) {
 			iconClass = 'nx-activityFileIcon nx-activityFileIconRead';
 			iconText = 'R';
+		} else if (lower.startsWith('open_browser:') || lower.startsWith('browser_snapshot') || lower.startsWith('browser_click:') || lower.startsWith('browser_type:')) {
+			iconClass = 'nx-activityFileIcon nx-activityFileIconSearch';
+			iconText = 'B';
 		} else if (lower.startsWith('search_codebase:') || lower.startsWith('grep:') || lower.startsWith('search_chat_history:')) {
 			iconClass = 'nx-activityFileIcon nx-activityFileIconSearch';
 			iconText = 'S';
@@ -1181,7 +1287,7 @@
 		}
 	}
 
-	function addMessage(role, content, isLoading, stopped) {
+	function addMessage(role, content, isLoading, stopped, activity) {
 		if (welcome) {
 			welcome.style.display = 'none';
 		}
@@ -1207,6 +1313,9 @@
 		div.appendChild(body);
 
 		messages.appendChild(div);
+		if (role === 'user' && !isLoading && activity && activity.length) {
+			attachActivityFold(div, activity);
+		}
 		messages.scrollTop = messages.scrollHeight;
 
 		if (isLoading) {
@@ -1338,7 +1447,9 @@
 		if (welcome) {
 			welcome.style.display = arr.length === 0 ? 'flex' : 'none';
 		}
-		arr.forEach(m => addMessage(m.role, m.content, false));
+		arr.forEach(function (m) {
+			addMessage(m.role, m.content, false, false, m.activity);
+		});
 	}
 
 	function createPlanApprovalCard(plan) {
@@ -1732,6 +1843,7 @@
 		input.value = '';
 		syncAtMentionChips();
 		syncAtMentionHighlight();
+		resizeComposer();
 	}
 
 	// Event listeners
@@ -1865,6 +1977,22 @@
 		const start = typeof fromHost === 'number' ? fromHost : (typeof fromWeb === 'number' ? fromWeb : RAIL_DEFAULT);
 		applyRailWidth(start, false);
 	})();
+
+	window.addEventListener('click', (e) => {
+		const node = e.target;
+		if (!node || !node.closest) {
+			return;
+		}
+		const anchor = node.closest('a[href]');
+		if (!anchor) {
+			return;
+		}
+		const href = anchor.getAttribute('href') || '';
+		if (/^https?:\/\//i.test(href)) {
+			e.preventDefault();
+			vscode.postMessage({ type: 'openUrl', url: href });
+		}
+	}, true);
 
 	// Quick action buttons
 	document.querySelectorAll('.nx-quickBtn').forEach(btn => {
@@ -2072,8 +2200,12 @@
 				renderChatActivity(data.items, data.caption);
 				break;
 
+			case 'chatActivityFold':
+				foldLiveActivity(data.items);
+				break;
+
 			case 'chatActivityClear':
-				clearChatActivityCard();
+				foldLiveActivity(lastActivityItems);
 				break;
 
 			case 'backendStatus':
@@ -2174,4 +2306,5 @@
 	vscode.postMessage({ type: 'checkBackend' });
 	vscode.postMessage({ type: 'checkAuthStatus' });
 	vscode.postMessage({ type: 'chatWebviewReady' });
+	resizeComposer();
 }());
