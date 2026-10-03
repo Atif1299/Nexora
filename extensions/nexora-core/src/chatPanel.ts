@@ -562,6 +562,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				vscode.commands.executeCommand('nexora.updateTaskStatus', message.task_id, status);
 			}
 
+			if (message.type === 'plan_snapshot') {
+				this._view.webview.postMessage({
+					type: 'planSnapshot',
+					planId: message.plan_id,
+					plan: message.result,
+					status: message.status
+				});
+			}
+
 			// Forward plan completion to webview
 			if (message.type === 'plan_completed') {
 				this._view.webview.postMessage({
@@ -648,6 +657,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			if (!isConnected) {
 				this._clearChatActivity();
 				this._view.webview.postMessage({
+					type: 'backendStatus',
+					connected: false
+				});
+				this._view.webview.postMessage({
 					type: 'addMessage',
 					role: 'assistant',
 					content: `Backend is offline. Your message: "${message}"\n\nPlease start the backend server and try again.`,
@@ -661,16 +674,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				{ id: 'model', label: 'Calling chat model...', done: false }
 			]);
 
-			// Get workspace path for context
-			const workspaceFolders = vscode.workspace.workspaceFolders;
-			const workspacePath = workspaceFolders && workspaceFolders.length > 0
-				? workspaceFolders[0].uri.fsPath
-				: undefined;
-
+			const ctx = await this._workspaceContext();
 			const llmModel = this._mapUiModelToLiteLlm(model);
+			const sessionAfterCheck = this._getActiveSession();
 
 			// Simple chat - no task decomposition
-			const chatResponse = await client.chat(message, workspacePath, llmModel);
+			const chatResponse = await client.chat(message, ctx.workspacePath, llmModel, {
+				session_id: sessionAfterCheck?.id,
+				workspace_id: ctx.workspaceId
+			});
 
 			const sessionAfter = this._getActiveSession();
 			if (sessionAfter) {
@@ -687,7 +699,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 
 		} catch (error) {
-			const errText = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+			const errMsg = error instanceof Error ? error.message : 'Unknown error';
+			const errText = `Error: ${errMsg}`;
+			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|Failed to fetch/i.test(errMsg)) {
+				this._view.webview.postMessage({
+					type: 'backendStatus',
+					connected: false
+				});
+			}
 			const sessionAfter = this._getActiveSession();
 			if (sessionAfter) {
 				sessionAfter.messages.push({ role: 'assistant', content: errText });

@@ -154,12 +154,24 @@ export class BackendClient {
 	 * @param model Optional model to use (e.g., "anthropic/claude-3-haiku-20240307")
 	 * @returns Chat response with response text and model used
 	 */
-	async chat(message: string, workspacePath?: string, model?: string): Promise<{ response: string; model_used: string }> {
-		return this.transport.post('/api/cognitive/chat', {
+	async chat(
+		message: string,
+		workspacePath?: string,
+		model?: string,
+		options?: { session_id?: string; workspace_id?: string }
+	): Promise<{ response: string; model_used: string }> {
+		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string } = {
 			message,
 			workspace_path: workspacePath,
 			model
-		});
+		};
+		if (options?.session_id) {
+			body.session_id = options.session_id;
+		}
+		if (options?.workspace_id) {
+			body.workspace_id = options.workspace_id;
+		}
+		return this.transport.post('/api/cognitive/chat', body);
 	}
 
 	/**

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import WebSocket from 'ws';
+import { getBackendClient } from './backendClient';
 
 export interface WebSocketMessage {
 	type: string;
@@ -29,12 +30,16 @@ export interface WebSocketMessage {
 
 export type MessageCallback = (message: WebSocketMessage) => void;
 
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 30000;
+
 export class OrchestrationWebSocket {
 	private ws: WebSocket | null = null;
 	private userId: string;
 	private baseUrl: string;
 	private reconnectAttempts = 0;
-	private maxReconnectAttempts = 3;
+	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private intentionalDisconnect = false;
 	private callbacks: MessageCallback[] = [];
 	private subscribedPlans: Set<string> = new Set();
 
@@ -44,7 +49,39 @@ export class OrchestrationWebSocket {
 	}
 
 	connect(): Promise<boolean> {
+		this.intentionalDisconnect = false;
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+		if (this.isConnected()) {
+			return Promise.resolve(true);
+		}
+		if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+			return new Promise((resolve) => {
+				const existing = this.ws;
+				if (!existing) {
+					resolve(false);
+					return;
+				}
+				const onOpen = () => resolve(true);
+				const onFail = () => resolve(false);
+				existing.once('open', onOpen);
+				existing.once('close', onFail);
+				existing.once('error', onFail);
+			});
+		}
+
 		return new Promise((resolve) => {
+			let settled = false;
+			const finish = (ok: boolean) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				resolve(ok);
+			};
+
 			try {
 				const url = `${this.baseUrl}/api/orchestrate/ws/${this.userId}`;
 				this.ws = new WebSocket(url);
@@ -57,8 +94,9 @@ export class OrchestrationWebSocket {
 					this.subscribedPlans.forEach(planId => {
 						this.subscribeToPlan(planId);
 					});
+					void this.resyncSubscribedPlans();
 
-					resolve(true);
+					finish(true);
 				});
 
 				this.ws.on('message', (data: WebSocket.Data) => {
@@ -77,29 +115,33 @@ export class OrchestrationWebSocket {
 				this.ws.on('close', () => {
 					console.log('[Nexora WS] Disconnected');
 					this.ws = null;
-
-					// Attempt reconnect
-					if (this.reconnectAttempts < this.maxReconnectAttempts) {
-						this.reconnectAttempts++;
-						setTimeout(() => this.connect(), 2000 * this.reconnectAttempts);
+					if (!this.intentionalDisconnect) {
+						this.scheduleReconnect();
 					}
 				});
 
-				// Timeout for connection
 				setTimeout(() => {
 					if (this.ws?.readyState !== WebSocket.OPEN) {
-						resolve(false);
+						finish(false);
 					}
 				}, 5000);
 
 			} catch (e) {
 				console.error('[Nexora WS] Connection failed:', e);
-				resolve(false);
+				finish(false);
+				if (!this.intentionalDisconnect) {
+					this.scheduleReconnect();
+				}
 			}
 		});
 	}
 
 	disconnect(): void {
+		this.intentionalDisconnect = true;
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
 		if (this.ws) {
 			this.ws.close();
 			this.ws = null;
@@ -130,13 +172,51 @@ export class OrchestrationWebSocket {
 	onMessage(callback: MessageCallback): () => void {
 		this.callbacks.push(callback);
 
-		// Return unsubscribe function
 		return () => {
 			const index = this.callbacks.indexOf(callback);
 			if (index > -1) {
 				this.callbacks.splice(index, 1);
 			}
 		};
+	}
+
+	private scheduleReconnect(): void {
+		if (this.intentionalDisconnect || this.reconnectTimer) {
+			return;
+		}
+		const delay = Math.min(
+			RECONNECT_BASE_MS * Math.pow(2, this.reconnectAttempts),
+			RECONNECT_MAX_MS
+		);
+		this.reconnectAttempts += 1;
+		this.reconnectTimer = setTimeout(() => {
+			this.reconnectTimer = null;
+			void this.connect();
+		}, delay);
+	}
+
+	private async resyncSubscribedPlans(): Promise<void> {
+		const planIds = Array.from(this.subscribedPlans);
+		if (planIds.length === 0) {
+			return;
+		}
+		const client = getBackendClient();
+		await Promise.all(planIds.map(async (planId) => {
+			try {
+				const plan = await client.getPlan(planId);
+				if (!plan || plan.plan_id !== planId) {
+					return;
+				}
+				this.notifyCallbacks({
+					type: 'plan_snapshot',
+					plan_id: planId,
+					status: typeof plan.status === 'string' ? plan.status : undefined,
+					result: plan
+				});
+			} catch (e) {
+				console.error('[Nexora WS] Plan resync failed:', planId, e);
+			}
+		}));
 	}
 
 	private notifyCallbacks(message: WebSocketMessage): void {

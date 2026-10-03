@@ -58,9 +58,8 @@
 		}
 
 		root.innerHTML = PROVIDERS.map(p => {
-			const mask = state.keyMasks[p.id];
 			const configured = !!state.configured[p.id];
-			const statusText = configured ? `Saved locally (${escapeHtml(mask || '••••')})` : 'Not saved in IDE';
+			const statusText = configured ? 'Saved locally (••••••••)' : 'Not saved in IDE';
 			return `
 				<div class="nx-card" data-provider="${p.id}">
 					<div class="nx-row">
@@ -80,6 +79,7 @@
 					<div class="nx-actions">
 						<button type="button" class="nx-btn nx-btn-secondary" data-action="test" data-provider="${p.id}" aria-label="Test ${escapeHtml(p.label)} key">Test</button>
 						<button type="button" class="nx-btn" data-action="save" data-provider="${p.id}" aria-label="Save ${escapeHtml(p.label)} key">Save</button>
+						<button type="button" class="nx-btn nx-btn-secondary" data-action="replace" data-provider="${p.id}" aria-label="Replace ${escapeHtml(p.label)} key" ${configured ? '' : 'disabled'}>Replace</button>
 						<button type="button" class="nx-btn nx-btn-danger" data-action="clear" data-provider="${p.id}" aria-label="Clear ${escapeHtml(p.label)} key" ${configured ? '' : 'disabled'}>Clear</button>
 					</div>
 					<div class="nx-msg" id="msg-${p.id}" role="status"></div>
@@ -93,6 +93,14 @@
 				const provider = btn.getAttribute('data-provider');
 				const input = document.getElementById(`key-${provider}`);
 				const key = input ? input.value.trim() : '';
+
+				if (action === 'replace') {
+					if (input) {
+						input.value = '';
+						input.focus();
+					}
+					return;
+				}
 
 				if (action === 'test') {
 					if (!key) {
@@ -122,9 +130,8 @@
 		}
 
 		root.innerHTML = SAAS_PROVIDERS.map(p => {
-			const mask = state.keyMasks[p.id];
 			const configured = !!state.configured[p.id];
-			const statusText = configured ? `Saved (${escapeHtml(mask || '••••')})` : 'Not configured';
+			const statusText = configured ? 'Saved (••••••••)' : 'Not configured';
 			return `
 				<div class="nx-card" data-provider="${p.id}">
 					<div class="nx-row">
@@ -144,6 +151,7 @@
 					<div class="nx-actions">
 						<button type="button" class="nx-btn nx-btn-secondary" data-saas-action="test" data-provider="${p.id}" aria-label="Test ${escapeHtml(p.label)}">Test</button>
 						<button type="button" class="nx-btn" data-saas-action="save" data-provider="${p.id}" aria-label="Save ${escapeHtml(p.label)}">Save</button>
+						<button type="button" class="nx-btn nx-btn-secondary" data-saas-action="replace" data-provider="${p.id}" aria-label="Replace ${escapeHtml(p.label)}" ${configured ? '' : 'disabled'}>Replace</button>
 						<button type="button" class="nx-btn nx-btn-danger" data-saas-action="clear" data-provider="${p.id}" aria-label="Clear ${escapeHtml(p.label)}" ${configured ? '' : 'disabled'}>Clear</button>
 					</div>
 					<div class="nx-msg" id="msg-${p.id}" role="status"></div>
@@ -157,6 +165,14 @@
 				const provider = btn.getAttribute('data-provider');
 				const input = document.getElementById(`key-${provider}`);
 				const value = input ? input.value.trim() : '';
+
+				if (action === 'replace') {
+					if (input) {
+						input.value = '';
+						input.focus();
+					}
+					return;
+				}
 
 				if (action === 'test') {
 					if (!value) {
