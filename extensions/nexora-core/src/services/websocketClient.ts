@@ -26,6 +26,11 @@ export interface WebSocketMessage {
 	started_at?: string;
 	completed_at?: string;
 	duration_ms?: number;
+	user_id?: string;
+	instruction?: string;
+	model?: string;
+	workspace_path?: string;
+	context?: string;
 }
 
 export type MessageCallback = (message: WebSocketMessage) => void;

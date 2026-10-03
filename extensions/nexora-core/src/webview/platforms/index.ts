@@ -45,7 +45,7 @@ export function getPlatformsWebviewHtml(
 			<h1>Nexora Platforms</h1>
 			<button type="button" class="nx-btn nx-btn-secondary" id="refreshBtn" aria-label="Refresh platforms">Refresh</button>
 		</div>
-		<p class="nx-hint">Catalog of connected and available platforms. Greyed rows need a key, are unavailable, or failed.</p>
+		<p class="nx-hint">Live connectors can Connect or Disconnect. Grey catalogue rows are discovery only.</p>
 
 		<div id="offline-banner" class="nx-banner" role="alert" hidden></div>
 		<div id="embedding-banner" class="nx-banner nx-banner-info" role="status" hidden></div>

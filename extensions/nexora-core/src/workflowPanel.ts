@@ -61,43 +61,40 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
 					vscode.commands.executeCommand('nexora.showTaskOutput', data.taskId);
 					break;
 				case 'ready':
-					if (this._currentPlan) {
-						this.updatePlan(this._currentPlan);
-					}
+					this._postCurrentPlan();
 					break;
 			}
 		});
 
 		webviewView.onDidChangeVisibility(() => {
 			if (webviewView.visible && this._currentPlan) {
-				this.updatePlan(this._currentPlan);
+				this._postCurrentPlan();
 			}
+		});
+
+		// If the webview was already shown and a plan arrived earlier, push it once
+		// the view handle exists (ready handler will also repost when the script loads).
+		if (this._currentPlan) {
+			this._postCurrentPlan();
+		}
+	}
+
+	private _postCurrentPlan(): void {
+		if (!this._view || !this._currentPlan) {
+			return;
+		}
+		this._view.webview.postMessage({
+			type: 'updatePlan',
+			plan: this._currentPlan
 		});
 	}
 
 	public updatePlan(plan: WorkflowPlan): void {
 		this._currentPlan = plan;
-		if (this._view) {
-			this._view.webview.postMessage({
-				type: 'updatePlan',
-				plan
-			});
-		}
+		this._postCurrentPlan();
 	}
 
 	public updateTaskStatus(taskId: string, status: string, result?: unknown, error?: string, cost?: number): void {
-		if (this._view) {
-			this._view.webview.postMessage({
-				type: 'updateTaskStatus',
-				taskId,
-				status,
-				result,
-				error,
-				cost
-			});
-		}
-
-		// Also update in-memory plan
 		if (this._currentPlan) {
 			const task = this._currentPlan.tasks.find(t => t.task_id === taskId);
 			if (task) {
@@ -112,6 +109,17 @@ export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
 					task.actual_cost = cost;
 				}
 			}
+		}
+
+		if (this._view) {
+			this._view.webview.postMessage({
+				type: 'updateTaskStatus',
+				taskId,
+				status,
+				result,
+				error,
+				cost
+			});
 		}
 	}
 

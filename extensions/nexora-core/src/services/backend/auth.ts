@@ -7,6 +7,8 @@ import type { Transport } from './transport';
 
 export type SaasConnector = 'supabase' | 'stripe' | 'v0' | 'elevenlabs' | 'tavily';
 
+export type OAuthStartResult = { authorization_url?: string; error?: string };
+
 export interface AuthStatus {
 	github_connected: boolean;
 	vercel_connected: boolean;
@@ -25,6 +27,10 @@ export interface AuthStatus {
 	v0_enabled?: boolean;
 	elevenlabs_enabled?: boolean;
 	tavily_enabled?: boolean;
+	github_oauth_configured?: boolean;
+	vercel_oauth_configured?: boolean;
+	github_callback_url?: string;
+	vercel_callback_url?: string;
 	/** True when the backend could not be reached, as opposed to genuinely disconnected. */
 	backend_offline?: boolean;
 }
@@ -53,19 +59,19 @@ export function createAuthApi(transport: Transport) {
 			}
 		},
 
-		getGitHubAuthUrl: async (userId: string = 'default'): Promise<{ authorization_url: string } | null> => {
+		getGitHubAuthUrl: async (userId: string = 'default'): Promise<OAuthStartResult | null> => {
 			try {
 				return await transport.get(`/api/auth/github/connect?user_id=${userId}`);
-			} catch {
-				return null;
+			} catch (error) {
+				return { error: error instanceof Error ? error.message : 'GitHub OAuth is not configured' };
 			}
 		},
 
-		getVercelAuthUrl: async (userId: string = 'default'): Promise<{ authorization_url: string } | null> => {
+		getVercelAuthUrl: async (userId: string = 'default'): Promise<OAuthStartResult | null> => {
 			try {
 				return await transport.get(`/api/auth/vercel/connect?user_id=${userId}`);
-			} catch {
-				return null;
+			} catch (error) {
+				return { error: error instanceof Error ? error.message : 'Vercel OAuth is not configured' };
 			}
 		},
 

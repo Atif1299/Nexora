@@ -85,6 +85,7 @@ export function getChatWebviewHtml(
 						<option value="openrouter">OpenRouter</option>
 						<option value="openai">OpenAI</option>
 						<option value="anthropic">Anthropic</option>
+						<option value="gemini">Gemini</option>
 					</select>
 					<input class="nx-firstRunInput" type="password" id="firstRunKey" autocomplete="off" spellcheck="false" placeholder="Paste API key…" aria-label="API key" />
 				</div>
@@ -141,26 +142,28 @@ export function getChatWebviewHtml(
 								<span class="nx-ddChevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 3.5 5 6 7.5 3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
 							</button>
 							<div class="nx-ddMenu" id="modeDdMenu" role="listbox" aria-labelledby="modeDdTrigger" hidden>
-								<button type="button" class="nx-ddItem" role="option" data-value="chat">Chat</button>
-								<button type="button" class="nx-ddItem" role="option" data-value="ask">Ask (workspace)</button>
-								<button type="button" class="nx-ddItem" role="option" data-value="plan">Plan</button>
-								<button type="button" class="nx-ddItem" role="option" data-value="execute">Execute</button>
-								<button type="button" class="nx-ddItem" role="option" data-value="agent">Agent</button>
+								<button type="button" class="nx-ddItem" role="option" data-value="chat" data-label="Chat"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Chat</span></button>
+								<button type="button" class="nx-ddItem" role="option" data-value="ask" data-label="Ask"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Ask</span></button>
+								<button type="button" class="nx-ddItem" role="option" data-value="plan" data-label="Plan"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Plan</span></button>
+								<button type="button" class="nx-ddItem" role="option" data-value="execute" data-label="Execute"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Execute</span></button>
+								<button type="button" class="nx-ddItem" role="option" data-value="agent" data-label="Agent"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Agent</span></button>
 							</div>
 							<input type="hidden" id="modeSelect" value="chat" />
 						</div>
-						<div class="nx-dd" id="modelDd" data-dd-kind="model">
+						<div class="nx-dd nx-ddModel" id="modelDd" data-dd-kind="model">
 							<button type="button" class="nx-ddTrigger" id="modelDdTrigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="modelDdMenu" title="Select AI model">
-								<span class="nx-ddTriggerText" id="modelDdText">GPT-4o Mini</span>
+								<span class="nx-ddTriggerText" id="modelDdText">Auto</span>
 								<span class="nx-ddChevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 3.5 5 6 7.5 3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
 							</button>
-							<div class="nx-ddMenu" id="modelDdMenu" role="listbox" aria-labelledby="modelDdTrigger" hidden>
-								<button type="button" class="nx-ddItem" role="option" data-value="gpt-4o-mini">GPT-4o Mini</button>
-								<button type="button" class="nx-ddItem" role="option" data-value="gpt-4o">GPT-4o</button>
-								<button type="button" class="nx-ddItem" role="option" data-value="claude-haiku">Claude 3 Haiku</button>
-								<button type="button" class="nx-ddItem" role="option" data-value="claude-sonnet">Claude 3 Sonnet</button>
+							<div class="nx-ddMenu nx-ddMenuModel" id="modelDdMenu" role="listbox" aria-labelledby="modelDdTrigger" hidden>
+								<div class="nx-ddSearchWrap" id="modelDdSearchWrap" hidden>
+									<input type="search" class="nx-ddSearch" id="modelDdSearch" placeholder="Search models" aria-label="Search models" autocomplete="off" />
+								</div>
+								<div class="nx-ddMenuBody" id="modelDdList">
+									<button type="button" class="nx-ddItem" role="option" data-value="auto" data-label="Auto"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Auto</span></button>
+								</div>
 							</div>
-							<input type="hidden" id="modelSelect" value="gpt-4o-mini" />
+							<input type="hidden" id="modelSelect" value="auto" />
 						</div>
 					</div>
 					<div class="nx-sendActions">

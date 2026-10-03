@@ -5,6 +5,9 @@
 
 import type { Transport } from './transport';
 
+/** Plan generation runs two LLM calls plus best-effort memory; default 30s is too short. */
+const PLAN_TIMEOUT_MS = 120_000;
+
 export interface ExecutionTask {
 	task_id: string;
 	name: string;
@@ -76,14 +79,39 @@ export function createOrchestrateApi(transport: Transport) {
 			request: string,
 			userId: string = 'default',
 			workspacePath?: string,
-			model?: string
+			model?: string,
+			options?: { session_id?: string; workspace_id?: string }
 		): Promise<PlanResponse> => {
-			return await transport.post('/api/orchestrate/plan', {
+			const body: {
+				request: string;
+				user_id: string;
+				workspace_path?: string;
+				model?: string;
+				session_id?: string;
+				workspace_id?: string;
+			} = {
 				request,
 				user_id: userId,
 				workspace_path: workspacePath,
 				model
-			});
+			};
+			if (options?.session_id) {
+				body.session_id = options.session_id;
+			}
+			if (options?.workspace_id) {
+				body.workspace_id = options.workspace_id;
+			}
+			return await transport.post('/api/orchestrate/plan', body, PLAN_TIMEOUT_MS);
+		},
+
+		submitTaskResult: async (payload: {
+			plan_id: string;
+			task_id: string;
+			success: boolean;
+			summary: string;
+			files: string[];
+		}): Promise<{ ok?: boolean }> => {
+			return await transport.post('/api/orchestrate/task-result', payload);
 		},
 
 		getPlan: async (planId: string): Promise<any> => {
@@ -130,7 +158,7 @@ export function createOrchestrateApi(transport: Transport) {
 				user_id: userId,
 				workspace_path: workspacePath,
 				model
-			});
+			}, PLAN_TIMEOUT_MS);
 		},
 
 		listPlans: async (userId?: string): Promise<{

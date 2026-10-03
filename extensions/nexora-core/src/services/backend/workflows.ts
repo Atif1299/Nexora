@@ -6,6 +6,9 @@
 import type { Transport } from './transport';
 import type { PlanResponse } from './orchestrate';
 
+/** Match plan generation budget; instantiate is usually fast but must not abort at 30s. */
+const TEMPLATE_TIMEOUT_MS = 120_000;
+
 export interface TemplateParameter {
 	name: string;
 	type: string;
@@ -116,7 +119,8 @@ export function createWorkflowsApi(transport: Transport) {
 					...params,
 					user_id: userId,
 					workspace_path: workspacePath
-				}
+				},
+				TEMPLATE_TIMEOUT_MS
 			);
 		},
 

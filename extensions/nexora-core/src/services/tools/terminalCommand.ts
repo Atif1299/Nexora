@@ -23,6 +23,10 @@ const MAX_TIMEOUT_MS = 600_000;
 const AGENT_TERMINAL_NAME = 'Nexora Agent';
 const PROGRESS_INTERVAL_MS = 400;
 const PREVIEW_LINE_COUNT = 12;
+const SI_WAIT_NEW_MS = 4000;
+const SI_WAIT_REUSE_MS = 500;
+const SHORT_FALLBACK_MS = 8000;
+const STOP_GRACE_MS = 1500;
 
 /**
  * Commands that are unconditionally blocked regardless of user confirmation.
@@ -57,6 +61,38 @@ export type TerminalCommandProgress = {
 export type RunTerminalCommandOptions = {
 	cancellationToken?: vscode.CancellationToken;
 	onProgress?: (progress: TerminalCommandProgress) => void;
+};
+
+type ShellIntegration = {
+	cwd?: vscode.Uri;
+	executeCommand(commandLine: string): ShellExecution;
+};
+
+type ShellExecution = {
+	read(): AsyncIterable<string>;
+};
+
+type ShellWindow = typeof vscode.window & {
+	onDidChangeTerminalShellIntegration?: vscode.Event<{ terminal: vscode.Terminal; shellIntegration: ShellIntegration }>;
+	onDidStartTerminalShellExecution?: vscode.Event<{ terminal: vscode.Terminal; execution: ShellExecution }>;
+	onDidEndTerminalShellExecution?: vscode.Event<{ terminal: vscode.Terminal; execution: ShellExecution; exitCode?: number }>;
+};
+
+type AgentTerminalSession = {
+	terminal: vscode.Terminal;
+	cwd: string;
+	busy: boolean;
+	fresh: boolean;
+	userTookOver: boolean;
+};
+
+type CommandRunResult = {
+	output: string;
+	exitCode: number;
+	timedOut: boolean;
+	cancelled: boolean;
+	captured: boolean;
+	killedShell: boolean;
 };
 
 function isLongRunningCommand(command: string): boolean {
@@ -95,80 +131,55 @@ function lastLines(text: string, count: number): string {
 	return lines.slice(-count).join('\n');
 }
 
-function toTerminalText(text: string): string {
-	return text.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+function shellWindow(): ShellWindow {
+	return vscode.window as ShellWindow;
 }
 
-function formatElapsed(ms: number): string {
-	const totalSec = Math.max(0, Math.floor(ms / 1000));
-	const m = Math.floor(totalSec / 60);
-	const s = totalSec % 60;
-	return `${m}:${s.toString().padStart(2, '0')}`;
+function terminalShellIntegration(terminal: vscode.Terminal): ShellIntegration | undefined {
+	return (terminal as vscode.Terminal & { shellIntegration?: ShellIntegration }).shellIntegration;
 }
 
-function killProcessTree(child: cp.ChildProcess): void {
-	if (!child.pid) {
-		child.kill();
-		return;
+function terminalShellName(terminal: vscode.Terminal): string | undefined {
+	return (terminal as vscode.Terminal & { state?: { shell?: string } }).state?.shell;
+}
+
+function withWorkingDirectory(
+	command: string,
+	cwd: string,
+	currentCwd: string,
+	shell: string | undefined
+): string {
+	if (currentCwd && path.resolve(currentCwd) === path.resolve(cwd)) {
+		return command;
+	}
+	if (process.platform === 'win32' && shell === 'cmd') {
+		return `cd /d "${cwd.replace(/"/g, '""')}" && ${command}`;
 	}
 	if (process.platform === 'win32') {
-		cp.execFile('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true }, () => undefined);
-		return;
+		return `Set-Location -LiteralPath ${JSON.stringify(cwd)}; ${command}`;
 	}
-	child.kill('SIGTERM');
-	setTimeout(() => {
-		if (child.exitCode === null && child.signalCode === null) {
-			child.kill('SIGKILL');
-		}
-	}, 1500);
+	return `cd ${JSON.stringify(cwd)} && ${command}`;
 }
 
-class AgentPty implements vscode.Pseudoterminal {
-	private readonly writeEmitter = new vscode.EventEmitter<string>();
-	private readonly closeEmitter = new vscode.EventEmitter<number | void>();
-	readonly onDidWrite = this.writeEmitter.event;
-	readonly onDidClose = this.closeEmitter.event;
-	disposed = false;
-	private opened = false;
-	private readonly pending: string[] = [];
-	onUserInterrupt?: () => void;
-
-	open(): void {
-		this.opened = true;
-		this.writeEmitter.fire(toTerminalText(`\x1b[90m${AGENT_TERMINAL_NAME}\x1b[0m\n`));
-		for (const text of this.pending.splice(0)) {
-			this.writeEmitter.fire(toTerminalText(text));
+async function killTerminalTree(terminal: vscode.Terminal): Promise<void> {
+	const pid = await terminal.processId;
+	if (pid && process.platform === 'win32') {
+		await new Promise<void>((resolve) => {
+			cp.execFile('taskkill', ['/pid', String(pid), '/t', '/f'], { windowsHide: true }, () => resolve());
+		});
+	} else if (pid) {
+		try {
+			process.kill(pid, 'SIGTERM');
+		} catch {
+			// ignore
 		}
 	}
-
-	close(): void {
-		this.disposed = true;
-		this.onUserInterrupt?.();
-	}
-
-	handleInput(data: string): void {
-		if (data === '\x03') {
-			this.onUserInterrupt?.();
-		}
-	}
-
-	write(text: string): void {
-		if (this.disposed) {
-			return;
-		}
-		if (!this.opened) {
-			this.pending.push(text);
-			return;
-		}
-		this.writeEmitter.fire(toTerminalText(text));
-	}
+	terminal.dispose();
 }
 
-type AgentTerminalSession = {
-	terminal: vscode.Terminal;
-	pty: AgentPty;
-	busy: boolean;
-};
+function sendCtrlC(terminal: vscode.Terminal): void {
+	terminal.sendText('\u0003', false);
+}
 
 let agentSession: AgentTerminalSession | undefined;
 let closeListener: vscode.Disposable | undefined;
@@ -180,57 +191,76 @@ function ensureCloseListener(): void {
 	}
 	closeListener = vscode.window.onDidCloseTerminal((closed) => {
 		if (agentSession && closed === agentSession.terminal) {
-			agentSession.pty.disposed = true;
 			agentSession = undefined;
 		}
 	});
 }
 
-function disposeAgentSession(session: AgentTerminalSession): void {
-	if (pendingClose) {
-		clearTimeout(pendingClose);
-		pendingClose = undefined;
-	}
-	session.pty.onUserInterrupt = undefined;
-	session.pty.disposed = true;
-	if (agentSession === session) {
-		agentSession = undefined;
-	}
-	session.terminal.dispose();
-}
-
 function scheduleAgentSessionClose(session: AgentTerminalSession): void {
-	if (!getAgentFlag('autoCloseTerminal')) {
+	if (!getAgentFlag('autoCloseTerminal') || session.userTookOver) {
 		return;
 	}
 	if (pendingClose) {
 		clearTimeout(pendingClose);
 	}
+	const w = shellWindow();
+	const takeover = w.onDidStartTerminalShellExecution?.((e) => {
+		if (e.terminal === session.terminal) {
+			session.userTookOver = true;
+		}
+	});
 	pendingClose = setTimeout(() => {
 		pendingClose = undefined;
+		takeover?.dispose();
+		if (session.userTookOver) {
+			return;
+		}
 		if (agentSession === session && !session.busy) {
-			disposeAgentSession(session);
+			session.terminal.dispose();
+			if (agentSession === session) {
+				agentSession = undefined;
+			}
 		}
 	}, 800);
 }
 
-function getOrCreateAgentTerminal(): AgentTerminalSession {
+function windowsAgentShell(): { shellPath: string; shellArgs: string[] } {
+	const detected = vscode.env.shell;
+	const shellPath = /(?:^|[\\/])pwsh(?:\.exe)?$/i.test(detected)
+		? detected
+		: 'powershell.exe';
+	return { shellPath, shellArgs: ['-NoLogo'] };
+}
+
+function isAgentTerminal(t: vscode.Terminal): boolean {
+	return t.exitStatus === undefined
+		&& (t.name === AGENT_TERMINAL_NAME || t.name.startsWith(`${AGENT_TERMINAL_NAME} -`));
+}
+
+function getOrCreateAgentTerminal(workspaceRoot: string): AgentTerminalSession {
 	ensureCloseListener();
 	if (pendingClose) {
 		clearTimeout(pendingClose);
 		pendingClose = undefined;
 	}
-	if (agentSession && !agentSession.pty.disposed) {
+	if (agentSession && agentSession.terminal.exitStatus === undefined) {
 		return agentSession;
 	}
-	const pty = new AgentPty();
+	const existing = vscode.window.terminals.find(isAgentTerminal);
+	if (existing) {
+		agentSession = { terminal: existing, cwd: '', busy: false, fresh: false, userTookOver: false };
+		return agentSession;
+	}
+	const winShell = process.platform === 'win32' ? windowsAgentShell() : undefined;
 	const terminal = vscode.window.createTerminal({
 		name: AGENT_TERMINAL_NAME,
-		pty,
+		cwd: workspaceRoot,
+		shellPath: winShell?.shellPath,
+		shellArgs: winShell?.shellArgs,
 		iconPath: new vscode.ThemeIcon('terminal'),
 		isTransient: true
 	});
-	agentSession = { terminal, pty, busy: false };
+	agentSession = { terminal, cwd: workspaceRoot, busy: false, fresh: true, userTookOver: false };
 	return agentSession;
 }
 
@@ -264,49 +294,97 @@ async function confirmCommand(
 	});
 }
 
-function spawnAndMirror(
-	command: string,
-	cwd: string,
+function waitForShellIntegration(
+	terminal: vscode.Terminal,
+	timeoutMs: number
+): Promise<ShellIntegration | undefined> {
+	const existing = terminalShellIntegration(terminal);
+	if (existing) {
+		return Promise.resolve(existing);
+	}
+	const onChange = shellWindow().onDidChangeTerminalShellIntegration;
+	if (!onChange || timeoutMs <= 0) {
+		return Promise.resolve(terminalShellIntegration(terminal));
+	}
+	return new Promise((resolve) => {
+		const timer = setTimeout(() => {
+			sub.dispose();
+			resolve(terminalShellIntegration(terminal));
+		}, timeoutMs);
+		const sub = onChange((e) => {
+			if (e.terminal === terminal) {
+				clearTimeout(timer);
+				sub.dispose();
+				resolve(e.shellIntegration);
+			}
+		});
+	});
+}
+
+function attachExecutionReader(
+	execution: ShellExecution,
+	onChunk: (combined: string) => void
+): { output: () => string; done: Promise<void> } {
+	let output = '';
+	const done = (async () => {
+		try {
+			for await (const chunk of execution.read()) {
+				output = appendCapped(output, chunk);
+				onChunk(output);
+			}
+		} catch {
+			// Stream closed with the command.
+		}
+	})();
+	return { output: () => output, done };
+}
+
+function waitForExecutionEnd(
+	execution: ShellExecution
+): { promise: Promise<number | undefined>; dispose: () => void } {
+	const onEnd = shellWindow().onDidEndTerminalShellExecution;
+	if (!onEnd) {
+		return { promise: Promise.resolve(undefined), dispose: () => undefined };
+	}
+	let disposeFn = () => undefined;
+	const promise = new Promise<number | undefined>((resolve) => {
+		const sub = onEnd((e) => {
+			if (e.execution === execution) {
+				sub.dispose();
+				resolve(e.exitCode);
+			}
+		});
+		disposeFn = () => sub.dispose();
+	});
+	return { promise, dispose: () => disposeFn() };
+}
+
+async function collectExecution(
+	terminal: vscode.Terminal,
+	execution: ShellExecution,
 	timeoutMs: number,
-	session: AgentTerminalSession,
 	token: vscode.CancellationToken | undefined,
 	onOutput: (combined: string) => void
-): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean; cancelled: boolean }> {
-	const isWindows = process.platform === 'win32';
-	const file = isWindows ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh';
-	const args = isWindows ? ['/d', '/s', '/c', command] : ['-c', command];
+): Promise<CommandRunResult> {
+	const reader = attachExecutionReader(execution, onOutput);
+	const endWait = waitForExecutionEnd(execution);
+	let timedOut = false;
+	let cancelled = false;
+	let killedShell = false;
 
-	return new Promise((resolve) => {
-		let stdout = '';
-		let stderr = '';
-		let combined = '';
+	const interrupt = (killTree: boolean) => {
+		sendCtrlC(terminal);
+		if (killTree) {
+			killedShell = true;
+			void killTerminalTree(terminal);
+			if (agentSession?.terminal === terminal) {
+				agentSession = undefined;
+			}
+		}
+	};
+
+	return await new Promise<CommandRunResult>((resolve) => {
 		let settled = false;
-		let timedOut = false;
-		let cancelled = false;
-
-		const child = cp.spawn(file, args, {
-			cwd,
-			env: {
-				...process.env,
-				FORCE_COLOR: '0',
-				NO_COLOR: '1',
-				CI: '1',
-				npm_config_progress: 'false',
-				npm_config_loglevel: 'info',
-				npm_config_fund: 'false',
-				PYTHONUNBUFFERED: '1'
-			},
-			windowsHide: true,
-			windowsVerbatimArguments: isWindows,
-			stdio: ['pipe', 'pipe', 'pipe']
-		});
-		child.stdin?.on('error', () => undefined);
-		child.stdin?.end();
-
-		const startLine = child.pid ? `started pid=${child.pid}\n` : 'started\n';
-		session.pty.write(startLine);
-		onOutput(startLine);
-
 		const finish = (exitCode: number) => {
 			if (settled) {
 				return;
@@ -314,70 +392,116 @@ function spawnAndMirror(
 			settled = true;
 			clearTimeout(timeoutHandle);
 			cancelSub?.dispose();
-			session.pty.onUserInterrupt = undefined;
-			resolve({ stdout, stderr, exitCode, timedOut, cancelled });
+			endWait.dispose();
+			resolve({
+				output: reader.output(),
+				exitCode,
+				timedOut,
+				cancelled,
+				captured: true,
+				killedShell
+			});
 		};
 
-		const interrupt = () => {
-			cancelled = true;
-			session.pty.write('^C\n');
-			killProcessTree(child);
-		};
-
-		session.pty.onUserInterrupt = interrupt;
-		const cancelSub = token?.onCancellationRequested(() => {
-			cancelled = true;
-			interrupt();
+		void endWait.promise.then((code) => {
+			finish(typeof code === 'number' ? code : (cancelled || timedOut ? -1 : 0));
+		});
+		void reader.done.then(() => {
+			setTimeout(() => finish(cancelled || timedOut ? -1 : 0), 200);
 		});
 
 		const timeoutHandle = setTimeout(() => {
 			timedOut = true;
-			killProcessTree(child);
+			sendCtrlC(terminal);
+			setTimeout(() => {
+				if (!settled) {
+					interrupt(true);
+					finish(-1);
+				}
+			}, STOP_GRACE_MS);
 		}, timeoutMs);
 
+		const cancelSub = token?.onCancellationRequested(() => {
+			cancelled = true;
+			sendCtrlC(terminal);
+			setTimeout(() => {
+				if (!settled) {
+					interrupt(true);
+					finish(-1);
+				}
+			}, STOP_GRACE_MS);
+		});
+
 		if (token?.isCancellationRequested) {
-			interrupt();
+			cancelled = true;
+			sendCtrlC(terminal);
+			setTimeout(() => {
+				if (!settled) {
+					interrupt(true);
+					finish(-1);
+				}
+			}, STOP_GRACE_MS);
 		}
+	});
+}
 
-		const onChunk = (chunk: Buffer | string, stream: 'stdout' | 'stderr') => {
-			const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-			if (stream === 'stdout') {
-				stdout = appendCapped(stdout, text);
-			} else {
-				stderr = appendCapped(stderr, text);
+async function runViaShellIntegration(
+	terminal: vscode.Terminal,
+	si: ShellIntegration,
+	command: string,
+	timeoutMs: number,
+	token: vscode.CancellationToken | undefined,
+	onOutput: (combined: string) => void
+): Promise<CommandRunResult> {
+	const execution = si.executeCommand(command);
+	return collectExecution(terminal, execution, timeoutMs, token, onOutput);
+}
+
+function uncapturedResult(onOutput: (combined: string) => void, cancelled: boolean): CommandRunResult {
+	const note = 'Command sent to the Nexora Agent terminal. Shell integration was unavailable, so output was not captured.\n';
+	onOutput(note);
+	return {
+		output: note,
+		exitCode: 0,
+		timedOut: false,
+		cancelled,
+		captured: false,
+		killedShell: false
+	};
+}
+
+async function runViaSendText(
+	terminal: vscode.Terminal,
+	command: string,
+	timeoutMs: number,
+	token: vscode.CancellationToken | undefined,
+	onOutput: (combined: string) => void
+): Promise<CommandRunResult> {
+	const onStart = shellWindow().onDidStartTerminalShellExecution;
+	if (!onStart) {
+		terminal.sendText(command, true);
+		return uncapturedResult(onOutput, !!token?.isCancellationRequested);
+	}
+
+	return await new Promise<CommandRunResult>((resolve) => {
+		let started = false;
+		const timer = setTimeout(() => {
+			if (started) {
+				return;
 			}
-			combined = appendCapped(combined, text);
-			session.pty.write(text);
-			onOutput(combined);
-		};
-
-		if (child.stdout) {
-			child.stdout.on('data', (chunk) => onChunk(chunk, 'stdout'));
-		}
-		if (child.stderr) {
-			child.stderr.on('data', (chunk) => onChunk(chunk, 'stderr'));
-		}
-		if (!child.stdout && !child.stderr) {
-			const message = 'spawn failed: no stdio pipes (command did not start)\n';
-			stderr = message;
-			combined = message;
-			session.pty.write(message);
-			onOutput(combined);
-			finish(-1);
-			return;
-		}
-
-		child.on('error', (err) => {
-			const message = err instanceof Error ? err.message : String(err);
-			stderr = appendCapped(stderr, message + '\n');
-			combined = appendCapped(combined, message + '\n');
-			session.pty.write(message + '\n');
-			onOutput(combined);
-			finish(-1);
+			sub.dispose();
+			resolve(uncapturedResult(onOutput, !!token?.isCancellationRequested));
+		}, SHORT_FALLBACK_MS);
+		const sub = onStart((e) => {
+			if (e.terminal !== terminal || started) {
+				return;
+			}
+			started = true;
+			clearTimeout(timer);
+			sub.dispose();
+			void collectExecution(terminal, e.execution, timeoutMs, token, onOutput).then(resolve);
 		});
-		child.on('close', (code) => {
-			finish(typeof code === 'number' ? code : (cancelled || timedOut ? -1 : 0));
-		});
+		terminal.sendText(command, true);
 	});
 }
 
@@ -387,8 +511,7 @@ function spawnAndMirror(
  * Security guarantees:
  * - Checks command against a denylist before showing the confirmation dialog.
  * - Validates that cwd resolves inside the workspace root.
- * - Spawns an explicit shell binary (not exec) to avoid PATH injection
- *   through the file argument.
+ * - Runs in a real VS Code terminal (user can type). Capture uses shell integration.
  * - Truncates stdout and stderr to 16 KB (tail) before returning to the LLM.
  * - Enforces a timeout (default 10 min, max 10 min).
  */
@@ -450,11 +573,11 @@ export async function runTerminalCommandTool(
 		};
 	}
 
-	const session = getOrCreateAgentTerminal();
+	const session = getOrCreateAgentTerminal(workspaceRoot);
 	session.terminal.show(true);
 	session.busy = true;
-	session.pty.write(`\n\x1b[90m# cwd ${effectiveCwd}\x1b[0m\n\x1b[1m$ ${command}\x1b[0m\n`);
-	emit('running', 'starting…');
+	session.userTookOver = false;
+	emit('running', 'starting...');
 
 	let lastPreview = '';
 	let lastEmitAt = 0;
@@ -471,30 +594,89 @@ export async function runTerminalCommandTool(
 	const ticker = setInterval(() => emit('running', lastPreview), PROGRESS_INTERVAL_MS);
 
 	try {
-		const result = await spawnAndMirror(
+		void session.terminal.processId.then((pid) => {
+			if (pid && !lastPreview) {
+				pushProgress(`started pid=${pid}\n`, true);
+			} else if (pid) {
+				pushProgress(`started pid=${pid}\n${lastPreview}`, true);
+			}
+		});
+
+		const si = await waitForShellIntegration(
+			session.terminal,
+			session.fresh ? SI_WAIT_NEW_MS : SI_WAIT_REUSE_MS
+		);
+		session.fresh = false;
+		if (si?.cwd?.fsPath) {
+			session.cwd = si.cwd.fsPath;
+		}
+		if (token?.isCancellationRequested) {
+			clearInterval(ticker);
+			emit('cancelled', lastPreview);
+			return {
+				success: false,
+				error: 'Command cancelled.'
+			};
+		}
+
+		const commandToRun = withWorkingDirectory(
 			command,
 			effectiveCwd,
-			effectiveTimeout,
-			session,
-			token,
-			(combined) => pushProgress(combined, false)
+			session.cwd,
+			terminalShellName(session.terminal)
 		);
+
+		let result: CommandRunResult;
+		if (si) {
+			try {
+				result = await runViaShellIntegration(
+					session.terminal,
+					si,
+					commandToRun,
+					effectiveTimeout,
+					token,
+					(combined) => pushProgress(combined, false)
+				);
+			} catch {
+				result = await runViaSendText(
+					session.terminal,
+					commandToRun,
+					effectiveTimeout,
+					token,
+					(combined) => pushProgress(combined, false)
+				);
+			}
+		} else {
+			result = await runViaSendText(
+				session.terminal,
+				commandToRun,
+				effectiveTimeout,
+				token,
+				(combined) => pushProgress(combined, false)
+			);
+		}
+
+		if (!result.killedShell) {
+			session.cwd = effectiveCwd;
+		}
+
+		if (!result.captured) {
+			session.userTookOver = true;
+		}
+
 		clearInterval(ticker);
 
-		const stdoutResult = truncateTail(stripAnsi(result.stdout));
-		const stderrResult = truncateTail(stripAnsi(result.stderr));
-		const isTruncated = stdoutResult.truncated || stderrResult.truncated;
-		const elapsed = formatElapsed(Date.now() - startedAt);
+		const stdoutResult = truncateTail(stripAnsi(result.output));
+		const isTruncated = stdoutResult.truncated;
 
 		if (result.cancelled || token?.isCancellationRequested) {
-			session.pty.write(`\n\x1b[33m[cancelled · ${elapsed}]\x1b[0m\n`);
 			emit('cancelled', lastPreview, result.exitCode);
 			return {
 				success: false,
 				error: 'Command cancelled.',
 				data: {
 					stdout: stdoutResult.text,
-					stderr: stderrResult.text,
+					stderr: '',
 					exitCode: result.exitCode
 				},
 				truncated: isTruncated
@@ -502,26 +684,35 @@ export async function runTerminalCommandTool(
 		}
 
 		if (result.timedOut) {
-			session.pty.write(`\n\x1b[33m[timed out after ${effectiveTimeout} ms · ${elapsed}]\x1b[0m\n`);
 			emit('timeout', lastPreview, -1);
 			return {
 				success: false,
 				error: `Command timed out after ${effectiveTimeout} ms`,
 				data: {
 					stdout: stdoutResult.text,
-					stderr: stderrResult.text,
+					stderr: '',
 					exitCode: -1
 				},
 				truncated: isTruncated
 			};
 		}
 
+		if (!result.captured) {
+			emit('succeeded', lastPreview, result.exitCode);
+			return {
+				success: true,
+				data: {
+					stdout: stdoutResult.text,
+					stderr: '',
+					exitCode: result.exitCode
+				},
+				truncated: isTruncated
+			};
+		}
+
 		const ok = result.exitCode === 0;
-		session.pty.write(
-			`\n\x1b[${ok ? '32' : '31'}m[exit ${result.exitCode} · ${elapsed}]\x1b[0m\n`
-		);
 		emit(ok ? 'succeeded' : 'failed', lastPreview, result.exitCode);
-		const empty = !stdoutResult.text.trim() && !stderrResult.text.trim();
+		const empty = !stdoutResult.text.trim();
 		return {
 			success: ok,
 			error: ok ? undefined : (
@@ -531,14 +722,18 @@ export async function runTerminalCommandTool(
 			),
 			data: {
 				stdout: stdoutResult.text,
-				stderr: stderrResult.text,
+				stderr: '',
 				exitCode: result.exitCode
 			},
 			truncated: isTruncated
 		};
 	} finally {
 		clearInterval(ticker);
-		session.busy = false;
-		scheduleAgentSessionClose(session);
+		if (agentSession === session) {
+			session.busy = false;
+			if (!session.terminal.exitStatus) {
+				scheduleAgentSessionClose(session);
+			}
+		}
 	}
 }

@@ -39,6 +39,75 @@ export class TemplatesPanelProvider implements vscode.WebviewViewProvider {
 		await this._pushState();
 	}
 
+	public async useTemplate(): Promise<void> {
+		const notifications = getNotificationService();
+		try {
+			const listed = await getBackendClient().listTemplates();
+			if (!listed.templates.length) {
+				void notifications.showWarning('No templates available.');
+				return;
+			}
+			const picked = await vscode.window.showQuickPick(
+				listed.templates.map(template => ({
+					label: template.name,
+					description: template.description,
+					template
+				})),
+				{ placeHolder: 'Select a workflow template', matchOnDescription: true }
+			);
+			if (!picked) {
+				return;
+			}
+			const params = await this._promptParameters(picked.template);
+			if (params === undefined) {
+				return;
+			}
+			await this._instantiate(picked.template.id, params);
+		} catch (error) {
+			void notifications.showError(
+				`Failed to load templates: ${error instanceof Error ? error.message : String(error)}`
+			);
+		}
+	}
+
+	private async _promptParameters(
+		template: WorkflowTemplate
+	): Promise<Record<string, unknown> | undefined> {
+		const params: Record<string, unknown> = {};
+		for (const param of template.parameters || []) {
+			if (param.choices && param.choices.length) {
+				const choice = await vscode.window.showQuickPick(
+					param.choices.map(c => ({ label: String(c) })),
+					{
+						title: param.name,
+						placeHolder: param.description || param.name
+					}
+				);
+				if (!choice) {
+					return undefined;
+				}
+				params[param.name] = choice.label;
+				continue;
+			}
+			const value = await vscode.window.showInputBox({
+				title: param.name,
+				prompt: param.description || param.name,
+				value: param.default === null || param.default === undefined ? '' : String(param.default),
+				validateInput: (v) =>
+					param.required && !v.trim() ? `${param.name} is required` : undefined
+			});
+			if (value === undefined) {
+				return undefined;
+			}
+			if (value !== '') {
+				params[param.name] = value;
+			} else if (param.default !== undefined && param.default !== null) {
+				params[param.name] = param.default;
+			}
+		}
+		return params;
+	}
+
 	private _attach(view: vscode.WebviewView): void {
 		if (this._attached && this._view === view) {
 			void this._pushState();
