@@ -130,6 +130,9 @@ const emptyDashboard = (error: string): AnalyticsDashboardData => ({
 	error
 });
 
+const DASHBOARD_TTL_MS = 30_000;
+let dashboardCache: { userId: string; at: number; data: AnalyticsDashboardData } | undefined;
+
 export function createAnalyticsApi(transport: Transport) {
 	const api = {
 		getCostSummary: async (userId: string = 'default'): Promise<CostSummary> => {
@@ -174,10 +177,15 @@ export function createAnalyticsApi(transport: Transport) {
 			return response?.data || [];
 		},
 
-		getDashboard: async (userId: string = 'default'): Promise<AnalyticsDashboardData> => {
-			// One rejected request marks the whole dashboard unavailable rather than
-			// leaving some panels populated and others silently zeroed, which would read
-			// as "you spent nothing" instead of "we could not ask".
+		getDashboard: async (userId: string = 'default', force = false): Promise<AnalyticsDashboardData> => {
+			if (
+				!force
+				&& dashboardCache
+				&& dashboardCache.userId === userId
+				&& Date.now() - dashboardCache.at < DASHBOARD_TTL_MS
+			) {
+				return dashboardCache.data;
+			}
 			try {
 				const [summary, daily, byPlatform, stats, memory, recent] = await Promise.all([
 					api.getCostSummary(userId),
@@ -187,7 +195,11 @@ export function createAnalyticsApi(transport: Transport) {
 					api.getMemoryInsights(userId),
 					api.getRecentExecutions(10, userId)
 				]);
-				return { summary, daily, byPlatform, stats, memory, recent, available: true };
+				const data: AnalyticsDashboardData = {
+					summary, daily, byPlatform, stats, memory, recent, available: true
+				};
+				dashboardCache = { userId, at: Date.now(), data };
+				return data;
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
 				return emptyDashboard(message);

@@ -5,36 +5,23 @@
 
 import type { Transport } from './transport';
 
-export function createPlatformsApi(transport: Transport, getMockPlatforms: () => any[]) {
+export function createPlatformsApi(transport: Transport) {
 	return {
 		getPlatforms: async (): Promise<any[]> => {
-			try {
-				const response = await transport.get('/api/platforms');
-				return response?.platforms || [];
-			} catch {
-				return getMockPlatforms();
-			}
+			const response = await transport.get('/api/platforms');
+			return response?.platforms || [];
 		},
 
 		searchPlatforms: async (query: string): Promise<any[]> => {
-			try {
-				const response = await transport.get(`/api/platforms/search?q=${encodeURIComponent(query)}`);
-				return response?.results || [];
-			} catch {
-				return [];
-			}
+			const response = await transport.get(`/api/platforms/search?q=${encodeURIComponent(query)}`);
+			return response?.results || [];
 		},
 
 		semanticSearchPlatforms: async (query: string, limit: number = 5): Promise<any[]> => {
-			try {
-				const response = await transport.get(
-					`/api/platforms/semantic-search?q=${encodeURIComponent(query)}&limit=${limit}`
-				);
-				return response?.results || [];
-			} catch {
-				return [];
-			}
+			const response = await transport.get(
+				`/api/platforms/semantic-search?q=${encodeURIComponent(query)}&limit=${limit}`
+			);
+			return response?.results || [];
 		}
 	};
 }
-

@@ -13,12 +13,15 @@ export type WebviewInboundMessage =
 	| { type: 'connectVercel' }
 	| { type: 'toggleSaas'; provider: 'supabase' | 'stripe' | 'v0' | 'elevenlabs' | 'tavily' }
 	| { type: 'openSettings'; section?: string }  // Week 13: SaaS connector settings
+	| { type: 'saveFirstRunKey'; provider: 'openai' | 'anthropic' | 'openrouter'; key: string }
+	| { type: 'dismissFirstRunCard' }
 	| { type: 'deployProject'; prompt: string; repoName: string; projectName: string }
 	| { type: 'checkAuthStatus' }
 	| { type: 'generatePlan'; request: string; model?: string }
 	| { type: 'newSession' }
 	| { type: 'switchSession'; sessionId: string }
 	| { type: 'deleteSession'; sessionId: string }
+	| { type: 'persistSessionRailWidth'; width: number }
 	| { type: 'approvePlan'; planId: string }
 	| { type: 'cancelPlan'; planId: string }
 	| { type: 'modifyPlan'; planId: string; modification: any }
@@ -27,19 +30,45 @@ export type WebviewInboundMessage =
 	| { type: 'rollback'; historyId: number }
 	| { type: 'browsePlatforms' }
 	| { type: 'indexWorkspace' }
+	| { type: 'showEngineOutput' }
 	| { type: 'executeRequest'; request: string; model?: string }
 	| { type: 'runAgent'; request: string; model?: string }
+	| { type: 'stopGeneration' }
 	| { type: 'confirmSaveTemplate'; planId: string; name: string; description: string; category: string; parameters: Array<{ name: string; source_value: string; type?: string; required?: boolean; description?: string }> }
 	| { type: 'cancelSaveTemplate' }
 	| { type: 'acceptSuggestion'; id: string }
 	| { type: 'dismissSuggestion'; id: string; permanent: boolean }
-	| { type: 'requestSuggestions' };
+	| { type: 'requestSuggestions' }
+	| { type: 'requestAtComplete'; prefix: string };
 
-export type ChatActivityItem = { id: string; label: string; done?: boolean };
+export type ChatActivityStatus =
+	| 'confirming'
+	| 'running'
+	| 'succeeded'
+	| 'failed'
+	| 'cancelled'
+	| 'timeout';
+
+export type ChatActivityItem = {
+	id: string;
+	label: string;
+	done?: boolean;
+	turn?: number;
+	totalTurns?: number;
+	kind?: 'step' | 'terminal';
+	command?: string;
+	elapsedMs?: number;
+	preview?: string;
+	status?: ChatActivityStatus;
+	exitCode?: number;
+};
 
 export type WebviewOutboundMessage =
-	| { type: 'addMessage'; role: 'user' | 'assistant'; content: string; isLoading: boolean }
-	| { type: 'chatActivity'; items: ChatActivityItem[] }
+	| { type: 'addMessage'; role: 'user' | 'assistant'; content: string; isLoading: boolean; stopped?: boolean }
+	| { type: 'appendToken'; content: string }
+	| { type: 'finishMessage' }
+	| { type: 'generationRunning'; running: boolean }
+	| { type: 'chatActivity'; items: ChatActivityItem[]; caption?: string }
 	| { type: 'chatActivityClear' }
 	| { type: 'backendStatus'; connected: boolean }
 	| { type: 'authStatus'; github: boolean; vercel: boolean; supabase?: boolean; stripe?: boolean; v0?: boolean; elevenlabs?: boolean; tavily?: boolean }
@@ -52,7 +81,15 @@ export type WebviewOutboundMessage =
 	| { type: 'planExecutionStarted'; planId: string }
 	| { type: 'planExecutionComplete'; planId: string; status: string; tasks: any[]; actualCost: number }
 	| { type: 'showSaveTemplate'; planId: string; parameters: any[] }
-	| { type: 'showSuggestion'; suggestion: any | null };
+	| { type: 'showSuggestion'; suggestion: any | null }
+	| { type: 'firstRunKeyCard'; show: boolean }
+	| { type: 'firstRunKeyResult'; success: boolean; error?: string }
+	| {
+		type: 'atCompleteResults';
+		items: Array<{ icon: string; label: string; path: string; kind: 'file' | 'folder' }>;
+	}
+	| { type: 'costUpdate'; cost_usd: number; tokens_in: number; tokens_out: number }
+	| { type: 'composerSettings'; submitWithCtrlEnter: boolean };
 
 export type ChatInitialState = {
 	connected: boolean;
@@ -68,5 +105,7 @@ export type ChatInitialState = {
 	messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 	sessions?: Array<{ id: string; name: string }>;
 	activeSessionId?: string;
+	sessionRailWidth?: number;
+	submitWithCtrlEnter?: boolean;
 };
 

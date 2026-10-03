@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root {
+:root
+{
 	--nx-bg: var(--vscode-editor-background);
 	--nx-fg: var(--vscode-editor-foreground);
 	--nx-muted: var(--vscode-descriptionForeground);
@@ -15,9 +16,21 @@
 	--nx-ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
 }
 
-* { box-sizing: border-box; }
+*
+{
+	box-sizing: border-box;
+	scrollbar-width: none;
+}
 
-body {
+*::-webkit-scrollbar
+{
+	width: 0;
+	height: 0;
+	display: none;
+}
+
+body
+{
 	margin: 0;
 	padding: 0;
 	font-family: var(--vscode-font-family);
@@ -26,40 +39,47 @@ body {
 	background: var(--nx-bg);
 }
 
-#timeline-root {
+#timeline-root
+{
 	padding: 12px;
 	display: flex;
 	flex-direction: column;
-	gap: 16px;
+	gap: 12px;
+	max-width: none;
 }
 
-h1 {
+h1
+{
 	margin: 0;
 	font-size: 14px;
 	font-weight: 600;
 }
 
-.nx-section h2 {
+.nx-section h2
+{
 	margin: 0 0 8px 0;
 	font-size: 13px;
 	font-weight: 600;
 }
 
-.nx-section-head {
+.nx-section-head
+{
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
 }
 
-.nx-hint {
+.nx-hint
+{
 	margin: 0;
 	font-size: 11px;
 	color: var(--nx-muted);
 	line-height: 1.4;
 }
 
-.nx-btn {
+.nx-btn
+{
 	border: none;
 	border-radius: 4px;
 	padding: 4px 10px;
@@ -67,25 +87,29 @@ h1 {
 	font-size: 12px;
 }
 
-.nx-btn-secondary {
+.nx-btn-secondary
+{
 	background: var(--nx-btn2-bg);
 	color: var(--nx-btn2-fg);
 }
 
-.nx-layout {
+.nx-layout
+{
 	display: grid;
 	grid-template-columns: minmax(220px, 1fr) minmax(240px, 1.2fr);
 	gap: 16px;
 }
 
-.nx-rail {
+.nx-rail
+{
 	position: relative;
 	padding-left: 18px;
 	border-left: 2px solid var(--nx-border);
 	min-height: 40px;
 }
 
-.nx-node {
+.nx-node
+{
 	position: relative;
 	margin: 0 0 12px 0;
 	padding: 8px 10px;
@@ -99,7 +123,8 @@ h1 {
 	font: inherit;
 }
 
-.nx-node::before {
+.nx-node::before
+{
 	content: '';
 	position: absolute;
 	left: -24px;
@@ -111,29 +136,34 @@ h1 {
 	border: 2px solid var(--nx-bg);
 }
 
-.nx-node[data-selected="true"] {
+.nx-node[data-selected="true"]
+{
 	outline: 1px solid var(--vscode-focusBorder);
 }
 
-.nx-nodeTitle {
+.nx-nodeTitle
+{
 	font-size: 12px;
 	font-weight: 600;
 }
 
-.nx-nodeMeta {
+.nx-nodeMeta
+{
 	font-size: 11px;
 	color: var(--nx-muted);
 	margin-top: 2px;
 }
 
-.nx-newest {
+.nx-newest
+{
 	color: var(--nx-ok);
 	font-size: 10px;
 	text-transform: uppercase;
 	letter-spacing: 0.04em;
 }
 
-.nx-detail {
+.nx-detail
+{
 	border: 1px solid var(--nx-border);
 	border-radius: 6px;
 	background: var(--nx-surface);
@@ -142,28 +172,39 @@ h1 {
 	min-height: 80px;
 }
 
-.nx-detail h3 {
+.nx-detail h3
+{
 	margin: 0 0 6px 0;
 	font-size: 13px;
 }
 
-.nx-fileList {
+.nx-fileList
+{
 	margin: 6px 0 0 0;
 	padding-left: 16px;
 	max-height: 140px;
 	overflow: auto;
 }
 
-.nx-diffBlock {
+.nx-diffBlock
+{
 	margin-top: 10px;
 	padding-top: 8px;
 	border-top: 1px solid var(--nx-border);
 }
 
-.nx-added { color: var(--nx-ok); }
-.nx-removed { color: var(--vscode-errorForeground, #f14c4c); }
+.nx-added
+{
+	color: var(--nx-ok);
+}
 
-.nx-banner {
+.nx-removed
+{
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.nx-banner
+{
 	margin: 0;
 	padding: 8px 10px;
 	border-radius: 4px;
@@ -173,17 +214,20 @@ h1 {
 	color: var(--vscode-foreground);
 }
 
-.nx-empty {
+.nx-empty
+{
 	font-size: 12px;
 	color: var(--nx-muted);
 	padding: 8px 0;
 }
 
-.nx-muted {
+.nx-muted
+{
 	color: var(--nx-muted);
 }
 
-.sr-only {
+.sr-only
+{
 	position: absolute;
 	width: 1px;
 	height: 1px;
@@ -195,8 +239,10 @@ h1 {
 	border: 0;
 }
 
-@media (max-width: 640px) {
-	.nx-layout {
+@media (max-width: 640px)
+{
+	.nx-layout
+	{
 		grid-template-columns: 1fr;
 	}
 }

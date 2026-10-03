@@ -25,6 +25,12 @@ export function getChatWebviewHtml(
 	const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'chat', 'chat.css'));
 	const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'chat', 'chat.js'));
 
+	let sessionRailWidthPx = 196;
+	const rawRailWidth = initialState.sessionRailWidth;
+	if (typeof rawRailWidth === 'number' && Number.isFinite(rawRailWidth)) {
+		sessionRailWidthPx = Math.max(140, Math.min(360, Math.round(rawRailWidth)));
+	}
+
 	const csp = [
 		`default-src 'none'`,
 		`img-src ${webview.cspSource} https: data:`,
@@ -43,45 +49,11 @@ export function getChatWebviewHtml(
 </head>
 <body>
 	<div class="nx-root">
+		<div class="nx-conversation">
 		<header class="nx-header">
 			<div class="nx-status">
 				<span class="nx-dot" id="statusDot" aria-hidden="true"></span>
 				<span class="nx-statusText" id="statusText">Checking backend...</span>
-			</div>
-			<div class="nx-sessions" aria-label="Chat sessions">
-				<select class="nx-sessionSelect" id="sessionSelect" title="Select chat session"></select>
-				<button class="nx-sessionNew" id="newSessionBtn" type="button" title="New chat">+</button>
-				<button class="nx-sessionDelete" id="deleteSessionBtn" type="button" title="Delete chat session">-</button>
-			</div>
-			<div class="nx-auth" aria-label="Authentication status">
-				<button class="nx-badge" id="githubBadge" type="button" title="Click to connect GitHub">
-					<span class="nx-badgeLabel">GH</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="vercelBadge" type="button" title="Click to connect Vercel">
-					<span class="nx-badgeLabel">Vc</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="supabaseBadge" type="button" title="Supabase - click to enable/disable">
-					<span class="nx-badgeLabel">SB</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="stripeBadge" type="button" title="Stripe - click to enable/disable">
-					<span class="nx-badgeLabel">St</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="v0Badge" type="button" title="v0.dev - click to enable/disable">
-					<span class="nx-badgeLabel">v0</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="elevenlabsBadge" type="button" title="ElevenLabs - click to enable/disable">
-					<span class="nx-badgeLabel">EL</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
-				<button class="nx-badge" id="tavilyBadge" type="button" title="Tavily - click to enable/disable">
-					<span class="nx-badgeLabel">Tv</span>
-					<span class="nx-badgeDot" aria-hidden="true"></span>
-				</button>
 			</div>
 		</header>
 
@@ -100,6 +72,28 @@ export function getChatWebviewHtml(
 				<button type="button" class="nx-suggestRun" id="suggestRun">Run</button>
 				<button type="button" class="nx-suggestLater" id="suggestLater">Not now</button>
 				<button type="button" class="nx-suggestNever" id="suggestNever">Never</button>
+			</div>
+		</div>
+
+		<div class="nx-firstRun" id="firstRunCard" hidden>
+			<div class="nx-firstRunBody">
+				<div class="nx-firstRunTitle">Add an API key to start</div>
+				<div class="nx-firstRunSub">Chat needs a provider key. Paste one here or open Settings. You can dismiss this and keep using the editor.</div>
+				<div class="nx-firstRunRow">
+					<label class="sr-only" for="firstRunProvider">Provider</label>
+					<select id="firstRunProvider" class="nx-firstRunSelect" aria-label="LLM provider">
+						<option value="openrouter">OpenRouter</option>
+						<option value="openai">OpenAI</option>
+						<option value="anthropic">Anthropic</option>
+					</select>
+					<input class="nx-firstRunInput" type="password" id="firstRunKey" autocomplete="off" spellcheck="false" placeholder="Paste API key…" aria-label="API key" />
+				</div>
+				<div class="nx-firstRunActions">
+					<button type="button" class="nx-firstRunSave" id="firstRunSave">Save key</button>
+					<button type="button" class="nx-firstRunSettings" id="firstRunSettings">Open Settings</button>
+					<button type="button" class="nx-firstRunDismiss" id="firstRunDismiss" title="Dismiss">Not now</button>
+				</div>
+				<div class="nx-firstRunMsg" id="firstRunMsg" role="status"></div>
 			</div>
 		</div>
 
@@ -171,7 +165,8 @@ export function getChatWebviewHtml(
 					</div>
 					<div class="nx-sendActions">
 						<button class="nx-btn nx-btnPrimary nx-sendBtn" id="sendBtn" type="button" title="Send (Enter)" aria-label="Send, press Enter">
-							<span class="nx-sendGlyph" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M22 2 11 13" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2l-7 20-4-9-9-4 20-7z" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+							<span class="nx-sendGlyph nx-sendGlyphSend" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M22 2 11 13" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2l-7 20-4-9-9-4 20-7z" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+							<span class="nx-sendGlyph nx-sendGlyphStop" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/></svg></span>
 							<span class="nx-sendBtnSr" id="sendBtnText">Send</span>
 						</button>
 					</div>
@@ -181,6 +176,17 @@ export function getChatWebviewHtml(
 				<span class="nx-hintText">Chat mode: Have a conversation, ask questions, get explanations</span>
 			</div>
 		</footer>
+		</div>
+		<aside class="nx-sessionRail" id="sessionRail" style="--nx-rail-width: ${sessionRailWidthPx}px;" aria-label="Chat sessions">
+			<div class="nx-railResize" id="railResize" role="separator" aria-orientation="vertical" aria-label="Resize session list"></div>
+			<div class="nx-railTop">
+				<button class="nx-railNew" id="newSessionBtn" type="button" title="New chat">
+					<span class="nx-railNewMark" aria-hidden="true">+</span>
+					<span>New chat</span>
+				</button>
+			</div>
+			<div class="nx-railList" id="sessionList" role="list"></div>
+		</aside>
 	</div>
 
 	<script nonce="${nonce}">

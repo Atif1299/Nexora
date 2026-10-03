@@ -3,10 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as vscode from 'vscode';
 import * as path from 'path';
 import { promises as fs } from 'fs';
+import * as vscode from 'vscode';
+import { getAgentFlag, shouldConfirmFileEdits } from '../agentRunMode';
 import type { ToolResult } from './executor';
+import { confirmOrPreviewDiff } from './diffProvider';
 
 const SKIP_PATTERNS = ['.env', '.pem', 'credentials', 'secret', '.key', 'node_modules', '.git'];
 
@@ -26,9 +28,27 @@ function isSensitivePath(filePath: string): boolean {
 	return SKIP_PATTERNS.some(p => lower.includes(p));
 }
 
+/** Format the written URI. Failures are ignored. */
+export async function formatAfterWrite(fullPath: string): Promise<void> {
+	if (!getAgentFlag('autoFormat')) {
+		return;
+	}
+	try {
+		const uri = vscode.Uri.file(fullPath);
+		const doc = await vscode.workspace.openTextDocument(uri);
+		await vscode.window.showTextDocument(doc, { preview: true, preserveFocus: true });
+		await vscode.commands.executeCommand('editor.action.formatDocument');
+		if (doc.isDirty) {
+			await doc.save();
+		}
+	} catch {
+		// ignore formatter errors
+	}
+}
+
 /**
  * Write or create a file in the workspace.
- * Shows confirmation dialog before writing.
+ * Shows a vscode.diff preview with Accept / Reject before writing.
  */
 export async function writeFileTool(
 	workspaceRoot: string,
@@ -54,23 +74,21 @@ export async function writeFileTool(
 
 	const fullPath = path.resolve(workspaceRoot, filePath);
 	const isNewFile = !await fs.access(fullPath).then(() => true).catch(() => false);
+	const originalContent = isNewFile ? '' : await fs.readFile(fullPath, 'utf8').catch(() => '');
 
-	// Show confirmation dialog
-	if (requireConfirmation) {
-		const action = isNewFile ? 'Create' : 'Overwrite';
-		const result = await vscode.window.showWarningMessage(
-			`${action} file: ${filePath}?`,
-			{ modal: true, detail: `Content: ${content.slice(0, 200)}${content.length > 200 ? '...' : ''}` },
-			'Yes',
-			'No'
-		);
-
-		if (result !== 'Yes') {
-			return {
-				success: false,
-				error: 'User cancelled file write'
-			};
-		}
+	const accepted = await confirmOrPreviewDiff({
+		filePath,
+		fullPath,
+		proposedContent: content,
+		existsOnDisk: !isNewFile,
+		originalContent,
+		requireConfirmation
+	});
+	if (!accepted) {
+		return {
+			success: false,
+			error: 'User rejected'
+		};
 	}
 
 	try {
@@ -80,6 +98,11 @@ export async function writeFileTool(
 
 		// Write file
 		await fs.writeFile(fullPath, content, 'utf8');
+		await formatAfterWrite(fullPath);
+
+		if (requireConfirmation && !shouldConfirmFileEdits()) {
+			void vscode.window.showInformationMessage(`Applied edit to ${filePath}`);
+		}
 
 		return {
 			success: true,

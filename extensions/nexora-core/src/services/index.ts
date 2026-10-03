@@ -7,4 +7,6 @@ export { BackendClient, getBackendClient, setApiKeyHeaderProvider } from './back
 export type { BackendConfig } from './backendClient';
 export { SettingsService, getSettingsService } from './settingsService';
 export type { NexoraPreferences, ApiKeyProvider } from './settingsService';
+export { getAgentRunMode, shouldConfirmFileEdits, shouldConfirmTerminal } from './agentRunMode';
+export type { AgentRunMode } from './agentRunMode';
 export { NotificationService, getNotificationService } from './notificationService';

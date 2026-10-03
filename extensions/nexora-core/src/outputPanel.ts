@@ -97,9 +97,7 @@ export class OutputPanelProvider implements vscode.WebviewViewProvider {
 	public showTaskOutput(taskId: string): void {
 		this._selectedTaskId = taskId;
 		this._updateSelectedTask();
-
-		// Focus the output panel
-		vscode.commands.executeCommand('nexora.outputViewer.focus');
+		void vscode.commands.executeCommand('nexora.openOutput');
 	}
 
 	public updateTaskOutput(output: TaskOutput): void {

@@ -441,6 +441,26 @@ function packageTask(platform, arch, sourceFolderName, destinationFolderName, op
 	return task;
 }
 
+function nexoraEngineBundleDir() {
+	return path.join(path.dirname(root), 'Nexora-IDE-Backend-Architecture', 'backend', 'dist', 'engine');
+}
+
+function copyNexoraEngineTask(destinationFolderName) {
+	const destination = path.join(path.dirname(root), destinationFolderName, 'engine');
+	const src = nexoraEngineBundleDir();
+	const taskFn = async () => {
+		const exe = path.join(src, 'nexora-engine.exe');
+		if (!fs.existsSync(exe)) {
+			console.warn(`[nexora] engine bundle not found at ${src}; skipping copy into ${destination}`);
+			return;
+		}
+		await fs.promises.cp(src, destination, { recursive: true });
+		console.log(`[nexora] copied engine to ${destination}`);
+	};
+	taskFn.taskName = `copy-nexora-engine-${destinationFolderName}`;
+	return taskFn;
+}
+
 function patchWin32DependenciesTask(destinationFolderName) {
 	const cwd = path.join(path.dirname(root), destinationFolderName);
 
@@ -499,6 +519,7 @@ BUILD_TARGETS.forEach(buildTarget => {
 
 		if (platform === 'win32') {
 			tasks.push(patchWin32DependenciesTask(destinationFolderName));
+			tasks.push(copyNexoraEngineTask(destinationFolderName));
 		}
 
 		const vscodeTaskCI = task.define(`vscode${dashed(platform)}${dashed(arch)}${dashed(minified)}-ci`, task.series(...tasks));

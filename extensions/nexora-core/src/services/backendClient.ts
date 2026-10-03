@@ -6,9 +6,10 @@
 export interface BackendConfig {
 	baseUrl: string;
 	timeout: number;
+	localToken?: string;
 }
 
-import { createTransport, type HeaderProvider } from './backend/transport';
+import { createTransport, type HeaderProvider, type SSEEvent } from './backend/transport';
 import { createPlatformsApi } from './backend/platforms';
 import { createMemoryApi, type MemorySuggestion, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
 import { createWorkflowsApi, type WorkflowTemplate, type TemplateListResponse, type SuggestFromPlanResponse, type SaveFromPlanRequest, type ImportPreview } from './backend/workflows';
@@ -18,12 +19,13 @@ import { createOrchestrateApi } from './backend/orchestrate';
 import { createHistoryApi, type HistoryItem, type RollbackableItem, type RollbackInfo, type RollbackResponse, type HistoryStats } from './backend/history';
 import { createAnalyticsApi, type AnalyticsDashboardData, type CostSummary, type MemoryInsights } from './backend/analytics';
 import { createAgentApi, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './backend/agent';
-import { createSessionsApi, type ChatSession, type ChatMessage, type SessionSummary, type SessionListResponse } from './backend/sessions';
 import { createStatusApi, type ConnectionsResponse, type TestResult, type ProviderStatus } from './backend/status';
+import { createCapabilitiesApi, type CapabilitiesReport } from './backend/capabilities';
 
 export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
-export type { ChatSession, ChatMessage, SessionSummary, SessionListResponse };
+export type { SSEEvent };
 export type { ConnectionsResponse, TestResult, ProviderStatus };
+export type { CapabilitiesReport };
 export type { SaasConnector };
 export type { MemorySuggestion, SuggestionsResponse, TimelineEntry, TimelineResponse, TimelineDiff };
 export type { WorkflowTemplate, TemplateListResponse, SuggestFromPlanResponse, SaveFromPlanRequest, ImportPreview };
@@ -49,36 +51,61 @@ async function resolveApiKeyHeaders(): Promise<Record<string, string>> {
 export class BackendClient {
 	private config: BackendConfig;
 	private transport: ReturnType<typeof createTransport>;
+	private _healthyUntil = 0;
+	private _healthInflight?: Promise<boolean>;
 
 	constructor(config?: Partial<BackendConfig>) {
 		this.config = {
 			// Use 127.0.0.1 so health checks succeed on Windows when localhost resolves to IPv6 first
 			baseUrl: config?.baseUrl || 'http://127.0.0.1:8000',
-			timeout: config?.timeout || 30000
+			timeout: config?.timeout || 30000,
+			localToken: config?.localToken
 		};
 
-		this.transport = createTransport(
-			this.config,
-			(endpoint) => this._getMockResponse(endpoint),
-			resolveApiKeyHeaders
-		);
+		this.transport = createTransport(this.config, resolveApiKeyHeaders);
+	}
+
+	getBaseUrl(): string {
+		return this.config.baseUrl;
+	}
+
+	markUnhealthy(): void {
+		this._healthyUntil = 0;
 	}
 
 	async checkHealth(): Promise<boolean> {
+		if (Date.now() < this._healthyUntil) {
+			return true;
+		}
+		if (this._healthInflight) {
+			return this._healthInflight;
+		}
+		this._healthInflight = this._checkHealthOnce();
+		try {
+			return await this._healthInflight;
+		} finally {
+			this._healthInflight = undefined;
+		}
+	}
+
+	private async _checkHealthOnce(): Promise<boolean> {
 		try {
 			const response = await this.transport.get('/api/health');
-			return response?.status === 'ok';
+			const ok = response?.status === 'ok';
+			this._healthyUntil = ok ? Date.now() + 20_000 : 0;
+			return ok;
 		} catch {
+			this._healthyUntil = 0;
 			return false;
 		}
 	}
 
 	async getPlatforms(): Promise<any[]> {
-		return createPlatformsApi(this.transport, () => this._getMockPlatforms()).getPlatforms();
+		return createPlatformsApi(this.transport).getPlatforms();
 	}
 
 	async searchPlatforms(query: string): Promise<any[]> {
-		return createPlatformsApi(this.transport, () => this._getMockPlatforms()).searchPlatforms(query);
+		return createPlatformsApi(this.transport).searchPlatforms(query);
 	}
 
 	/**
@@ -90,7 +117,7 @@ export class BackendClient {
 	 * @returns Array of matching platforms with relevance scores
 	 */
 	async semanticSearchPlatforms(query: string, limit: number = 5): Promise<any[]> {
-		return createPlatformsApi(this.transport, () => this._getMockPlatforms()).semanticSearchPlatforms(query, limit);
+		return createPlatformsApi(this.transport).semanticSearchPlatforms(query, limit);
 	}
 
 	/**
@@ -158,7 +185,7 @@ export class BackendClient {
 		message: string,
 		workspacePath?: string,
 		model?: string,
-		options?: { session_id?: string; workspace_id?: string }
+		options?: { session_id?: string; workspace_id?: string; signal?: AbortSignal }
 	): Promise<{ response: string; model_used: string }> {
 		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string } = {
 			message,
@@ -171,7 +198,30 @@ export class BackendClient {
 		if (options?.workspace_id) {
 			body.workspace_id = options.workspace_id;
 		}
-		return this.transport.post('/api/cognitive/chat', body);
+		return this.transport.post('/api/cognitive/chat', body, undefined, options?.signal);
+	}
+
+	/**
+	 * Stream a chat reply as SSE events (token, done, error).
+	 */
+	chatStream(
+		message: string,
+		workspacePath?: string,
+		model?: string,
+		options?: { session_id?: string; workspace_id?: string; signal?: AbortSignal }
+	): AsyncIterable<SSEEvent> {
+		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string } = {
+			message,
+			workspace_path: workspacePath,
+			model
+		};
+		if (options?.session_id) {
+			body.session_id = options.session_id;
+		}
+		if (options?.workspace_id) {
+			body.workspace_id = options.workspace_id;
+		}
+		return this.transport.postStream('/api/cognitive/chat/stream', body, options?.signal);
 	}
 
 	/**
@@ -189,9 +239,61 @@ export class BackendClient {
 		workspaceId: string,
 		workspacePath?: string,
 		model?: string,
-		mode: AgentMode = 'ask'
+		mode: AgentMode = 'ask',
+		sessionId?: string,
+		signal?: AbortSignal
 	): Promise<AgentTurnResponse> {
-		return createAgentApi(this.transport).agentTurn(messages, workspaceId, workspacePath, model, mode);
+		return createAgentApi(this.transport).agentTurn(
+			messages,
+			workspaceId,
+			workspacePath,
+			model,
+			mode,
+			sessionId,
+			signal
+		);
+	}
+
+	/**
+	 * Stream one agent turn as SSE events (token, tool_calls, done, error).
+	 */
+	agentTurnStream(
+		messages: AgentMessage[],
+		workspaceId: string,
+		workspacePath?: string,
+		model?: string,
+		mode: AgentMode = 'ask',
+		sessionId?: string,
+		signal?: AbortSignal
+	): AsyncIterable<SSEEvent> {
+		return createAgentApi(this.transport).agentTurnStream(
+			messages,
+			workspaceId,
+			workspacePath,
+			model,
+			mode,
+			sessionId,
+			signal
+		);
+	}
+
+	/**
+	 * Append one chat/agent turn to the backend jsonl transcript (Layer A).
+	 */
+	async appendTranscript(
+		workspaceId: string,
+		sessionId: string,
+		role: string,
+		content: string,
+		mode: string
+	): Promise<void> {
+		await this.transport.post('/api/transcript/append', {
+			workspace_id: workspaceId,
+			session_id: sessionId,
+			role,
+			content,
+			mode
+		});
 	}
 
 	/**
@@ -240,12 +342,8 @@ export class BackendClient {
 	 * @returns List of available connector type names (openai, anthropic, rest, mcp)
 	 */
 	async getConnectorTypes(): Promise<string[]> {
-		try {
-			const response = await this.transport.get('/api/connectors/types');
-			return response?.types || [];
-		} catch {
-			return ['openai', 'anthropic', 'rest', 'mcp'];
-		}
+		const response = await this.transport.get('/api/connectors/types');
+		return response?.types || [];
 	}
 
 	/**
@@ -287,12 +385,8 @@ export class BackendClient {
 	 * @returns Usage metrics per connector and total aggregated usage
 	 */
 	async getConnectorUsage(): Promise<any> {
-		try {
-			const response = await this.transport.get('/api/connectors/usage');
-			return response || { connectors: {}, total: { input_tokens: 0, output_tokens: 0, api_calls: 0, estimated_cost: 0 } };
-		} catch {
-			return { connectors: {}, total: { input_tokens: 0, output_tokens: 0, api_calls: 0, estimated_cost: 0 } };
-		}
+		const response = await this.transport.get('/api/connectors/usage');
+		return response || { connectors: {}, total: { input_tokens: 0, output_tokens: 0, api_calls: 0, estimated_cost: 0 } };
 	}
 
 	/**
@@ -303,11 +397,7 @@ export class BackendClient {
 	 * @returns Health status
 	 */
 	async checkConnectorHealth(connectorType: string, config: Record<string, any> = {}): Promise<any> {
-		try {
-			return await this.transport.post(`/api/connectors/health/${connectorType}`, { config });
-		} catch {
-			return { healthy: false, status: 'FAILED_TO_CONNECT' };
-		}
+		return this.transport.post(`/api/connectors/health/${connectorType}`, { config });
 	}
 
 	/**
@@ -316,12 +406,8 @@ export class BackendClient {
 	 * @returns List of active connector instances
 	 */
 	async getActiveConnectors(): Promise<any[]> {
-		try {
-			const response = await this.transport.get('/api/connectors/active');
-			return response?.connectors || [];
-		} catch {
-			return [];
-		}
+		const response = await this.transport.get('/api/connectors/active');
+		return response?.connectors || [];
 	}
 
 	/**
@@ -387,6 +473,14 @@ export class BackendClient {
 		userId: string = 'default'
 	): Promise<{ status: string }> {
 		return createAuthApi(this.transport).disconnectSaasConnector(provider, userId);
+	}
+
+	/**
+	 * Honest engine capability report (ready / not_configured / unavailable / failed).
+	 * Never returns secret values.
+	 */
+	async getCapabilities(): Promise<CapabilitiesReport> {
+		return createCapabilitiesApi(this.transport).getCapabilities();
 	}
 
 	/**
@@ -527,8 +621,8 @@ export class BackendClient {
 		return createOrchestrateApi(this.transport).estimatePlan(request, userId, workspacePath, model);
 	}
 
-	async getAnalyticsDashboard(userId: string = 'default'): Promise<AnalyticsDashboardData> {
-		return createAnalyticsApi(this.transport).getDashboard(userId);
+	async getAnalyticsDashboard(userId: string = 'default', force = false): Promise<AnalyticsDashboardData> {
+		return createAnalyticsApi(this.transport).getDashboard(userId, force);
 	}
 
 	async getCostSummary(userId: string = 'default'): Promise<CostSummary> {
@@ -691,97 +785,49 @@ export class BackendClient {
 		return createHistoryApi(this.transport).getStats(userId);
 	}
 
-	// ============================================================================
-	// Sessions API (FYP Integration)
-	// ============================================================================
-
-	/**
-	 * Create a new chat session.
-	 */
-	async createSession(name: string = 'New Chat', userId: string = 'default'): Promise<ChatSession> {
-		return createSessionsApi(this.transport).createSession(name, userId);
-	}
-
-	/**
-	 * List all sessions for a user.
-	 */
-	async listSessions(userId: string = 'default', limit: number = 50, offset: number = 0): Promise<SessionListResponse> {
-		return createSessionsApi(this.transport).listSessions(userId, limit, offset);
-	}
-
-	/**
-	 * Load a session with all messages.
-	 */
-	async loadSession(sessionId: string, userId: string = 'default'): Promise<ChatSession> {
-		return createSessionsApi(this.transport).loadSession(sessionId, userId);
-	}
-
-	/**
-	 * Save/update a session.
-	 */
-	async saveSession(session: {
-		id: string;
-		name: string;
-		messages: ChatMessage[];
-		workspace_id?: string;
-		workspace_path?: string;
-	}, userId: string = 'default'): Promise<ChatSession> {
-		return createSessionsApi(this.transport).saveSession(session, userId);
-	}
-
-	/**
-	 * Add a message to a session.
-	 */
-	async addSessionMessage(
-		sessionId: string,
-		message: { role: string; content: string; mode?: string },
-		userId: string = 'default'
-	): Promise<ChatSession> {
-		return createSessionsApi(this.transport).addMessage(sessionId, message, userId);
-	}
-
-	/**
-	 * Delete a session.
-	 */
-	async deleteSession(sessionId: string, userId: string = 'default'): Promise<{ status: string; session_id: string }> {
-		return createSessionsApi(this.transport).deleteSession(sessionId, userId);
-	}
-
-	/**
-	 * Search across sessions.
-	 */
-	async searchSessions(query: string, userId: string = 'default', limit: number = 10): Promise<SessionListResponse> {
-		return createSessionsApi(this.transport).searchSessions(query, userId, limit);
-	}
-
-	private _getMockResponse(endpoint: string): any {
-		if (endpoint === '/api/health') {
-			return { status: 'mock', message: 'Backend not connected' };
-		}
-		if (endpoint === '/api/platforms') {
-			return { platforms: this._getMockPlatforms() };
-		}
-		return {};
-	}
-
-	private _getMockPlatforms(): any[] {
-		return [
-			{ id: 'openai', name: 'OpenAI GPT-4', category: 'LLM', status: 'available' },
-			{ id: 'claude', name: 'Anthropic Claude', category: 'LLM', status: 'available' },
-			{ id: 'v0-dev', name: 'v0.dev', category: 'UI Generation', status: 'available' },
-			{ id: 'github', name: 'GitHub', category: 'Version Control', status: 'connected' },
-			{ id: 'vercel', name: 'Vercel', category: 'Deployment', status: 'available' },
-			{ id: 'elevenlabs', name: 'ElevenLabs', category: 'Voice/Audio', status: 'available' },
-			{ id: 'tavily', name: 'Tavily', category: 'Research', status: 'available' }
-		];
-	}
 }
 
 let instance: BackendClient | null = null;
+let backendClientConfigured = false;
+const configuredListeners: Array<() => void> = [];
 
-export function getBackendClient(): BackendClient {
-	if (!instance) {
-		instance = new BackendClient();
+export function isBackendClientConfigured(): boolean {
+	return backendClientConfigured;
+}
+
+export function onDidConfigureBackendClient(listener: () => void): { dispose(): void } {
+	configuredListeners.push(listener);
+	return {
+		dispose(): void {
+			const index = configuredListeners.indexOf(listener);
+			if (index >= 0) {
+				configuredListeners.splice(index, 1);
+			}
+		}
+	};
+}
+
+/**
+ * Mark the HTTP client as wired (base URL + local token). First-paint
+ * fetches must wait for this so /api/capabilities and /api/platforms
+ * never go out without X-Nexora-Local-Token.
+ */
+export function notifyBackendClientConfigured(): void {
+	if (backendClientConfigured) {
+		return;
+	}
+	backendClientConfigured = true;
+	for (const listener of configuredListeners.slice()) {
+		listener();
+	}
+}
+
+export function getBackendClient(config?: Partial<BackendConfig>): BackendClient {
+	if (!instance || config) {
+		instance = new BackendClient(config);
+	}
+	if (config && typeof config.localToken === 'string' && config.localToken.length > 0) {
+		notifyBackendClientConfigured();
 	}
 	return instance;
 }

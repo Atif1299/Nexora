@@ -11,12 +11,18 @@ import { grepTool } from './grep';
 import { listFilesTool } from './listFiles';
 import { writeFileTool } from './writeFile';
 import { applyPatchTool, insertLinesTool } from './applyPatch';
+import { runTerminalCommandTool, type TerminalCommandProgress } from './terminalCommand';
 
 export interface ToolResult {
 	success: boolean;
 	data?: any;
 	error?: string;
 	truncated?: boolean;
+}
+
+export interface ExecuteToolCallsOptions {
+	cancellationToken?: vscode.CancellationToken;
+	onToolProgress?: (toolCallId: string, name: string, progress: TerminalCommandProgress) => void;
 }
 
 export interface ExecutedToolCall {
@@ -32,7 +38,8 @@ export interface ExecutedToolCall {
  */
 export async function executeToolCalls(
 	toolCalls: ToolCall[],
-	workspaceRoot: string
+	workspaceRoot: string,
+	options?: ExecuteToolCallsOptions
 ): Promise<ExecutedToolCall[]> {
 	const results: ExecutedToolCall[] = [];
 
@@ -105,6 +112,21 @@ export async function executeToolCalls(
 						args.line_number,
 						args.lines,
 						true
+					);
+					break;
+
+				case 'run_terminal_command':
+					result = await runTerminalCommandTool(
+						workspaceRoot,
+						args.command,
+						args.cwd,
+						args.timeout_ms,
+						{
+							cancellationToken: options?.cancellationToken,
+							onProgress: options?.onToolProgress
+								? (progress) => options.onToolProgress!(tc.id, tc.name, progress)
+								: undefined
+						}
 					);
 					break;
 

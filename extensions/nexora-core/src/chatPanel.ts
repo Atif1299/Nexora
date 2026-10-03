@@ -4,17 +4,51 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
 import * as path from 'path';
 import { promises as fs } from 'fs';
-import { getBackendClient, type AgentMessage, type ToolCall, type AgentMode } from './services/backendClient';
+import { getBackendClient, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './services/backendClient';
+import { RequestCancelledError, isRequestCancelled } from './services/backend/transport';
 import { getChatWebviewHtml } from './webview/chat';
 import type { ChatActivityItem, ChatInitialState, WebviewInboundMessage } from './webview/chat/types';
 import { getOrchestrationWebSocket, type WebSocketMessage } from './services/websocketClient';
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
+import type { TerminalCommandProgress } from './services/tools/terminalCommand';
 import { getSettingsService } from './services/settingsService';
+import { getAgentFlag, getAgentMaxTurns, getSubmitWithCtrlEnter } from './services/agentRunMode';
 import { getNotificationService } from './services/notificationService';
+import { showEngineOutput } from './services/engineProcess';
+import {
+	allLlmNotConfigured,
+	getCachedCapabilities,
+	onDidChangeCapabilities,
+	refreshCapabilities,
+	type CapabilitiesReport
+} from './services/backend/capabilities';
 
 type ChatMode = 'chat' | 'ask' | 'plan' | 'execute' | 'agent';
+
+const FIRST_RUN_DISMISSED_KEY = 'nexora.firstRunKeyCardDismissed';
+const FIRST_RUN_PROVIDERS = ['openai', 'anthropic', 'openrouter'] as const;
+const SESSION_RAIL_WIDTH_KEY = 'nexora.sessionRailWidth';
+const SESSION_RAIL_WIDTH_DEFAULT = 196;
+const SESSION_RAIL_WIDTH_MIN = 140;
+const SESSION_RAIL_WIDTH_MAX = 360;
+
+/** Match backend `app.memory.indexer.get_workspace_id` so jsonl lands in the same project dir. */
+function deriveWorkspaceId(workspacePath: string): string {
+	const pathHash = crypto.createHash('md5').update(workspacePath, 'utf8').digest('hex').slice(0, 8);
+	const base = path.basename(workspacePath).replace(/ /g, '_').toLowerCase();
+	const name = Array.from(base).filter((c) => /[a-z0-9_]/.test(c)).join('');
+	return `${name}_${pathHash}`;
+}
+
+function formatElapsedMs(ms: number): string {
+	const totalSec = Math.max(0, Math.floor((ms || 0) / 1000));
+	const m = Math.floor(totalSec / 60);
+	const s = totalSec % 60;
+	return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 type ChatSessionMessage = {
 	role: 'user' | 'assistant';
@@ -32,6 +66,12 @@ type ChatSessionRecord = {
 	memoryWorkspacePath?: string;
 };
 
+type InFlightReply = {
+	controller: AbortController;
+	signal: AbortSignal;
+	isCancelled: () => boolean;
+};
+
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nexora.chatPanel';
 	private _view?: vscode.WebviewView;
@@ -43,10 +83,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	private _sessions: ChatSessionRecord[] = [];
 	private _activeSessionId: string = '';
 	private _backendOffline = false;
+	private _backendConnected = false;
+	private _cachedWorkspaceId?: string;
+	private _cachedWorkspacePath?: string;
+	private _replyAbort?: AbortController;
 
 	constructor(private readonly _extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
 		this._context = context;
 		this._loadSessions();
+		onDidChangeCapabilities((report) => {
+			void this._pushFirstRunCard(report);
+		});
+		context.subscriptions.push(
+			vscode.workspace.onDidChangeConfiguration((e) => {
+				if (e.affectsConfiguration('nexora.chat.submitWithCtrlEnter')) {
+					this._pushChatComposerSettings();
+				}
+			})
+		);
 	}
 
 	private _loadSessions(): void {
@@ -55,12 +109,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		this._sessions = Array.isArray(storedSessions) ? storedSessions.map(s => this._coerceSession(s)) : [];
 		this._activeSessionId = typeof storedActive === 'string' ? storedActive : '';
+		this._sessions.sort((a, b) => b.createdAt - a.createdAt);
+		const retitled = this._retitleDefaultSessions();
 
 		if (this._sessions.length === 0) {
 			const id = `s-${Date.now()}`;
 			this._sessions = [{
 				id,
-				name: 'Chat 1',
+				name: 'New chat',
 				messages: [],
 				createdAt: Date.now()
 			}];
@@ -68,6 +124,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			void this._persistSessions();
 		} else if (!this._activeSessionId || !this._sessions.some(s => s.id === this._activeSessionId)) {
 			this._activeSessionId = this._sessions[0].id;
+			void this._persistSessions();
+		} else if (retitled) {
 			void this._persistSessions();
 		}
 	}
@@ -85,16 +143,124 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _persistSessions(): Promise<void> {
+		this._retitleDefaultSessions();
 		await this._context.globalState.update('nexora.chatSessions', this._sessions);
 		await this._context.globalState.update('nexora.activeSessionId', this._activeSessionId);
+	}
+
+	private _readSessionRailWidth(): number {
+		const raw = this._context.globalState.get(SESSION_RAIL_WIDTH_KEY);
+		if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+			return SESSION_RAIL_WIDTH_DEFAULT;
+		}
+		const rounded = Math.round(raw);
+		if (rounded < SESSION_RAIL_WIDTH_MIN) {
+			return SESSION_RAIL_WIDTH_MIN;
+		}
+		if (rounded > SESSION_RAIL_WIDTH_MAX) {
+			return SESSION_RAIL_WIDTH_MAX;
+		}
+		return rounded;
+	}
+
+	private async _persistSessionRailWidth(width: number): Promise<void> {
+		if (typeof width !== 'number' || !Number.isFinite(width)) {
+			return;
+		}
+		const rounded = Math.round(width);
+		let clamped = rounded;
+		if (clamped < SESSION_RAIL_WIDTH_MIN) {
+			clamped = SESSION_RAIL_WIDTH_MIN;
+		} else if (clamped > SESSION_RAIL_WIDTH_MAX) {
+			clamped = SESSION_RAIL_WIDTH_MAX;
+		}
+		await this._context.globalState.update(SESSION_RAIL_WIDTH_KEY, clamped);
 	}
 
 	private _getActiveSession() {
 		return this._sessions.find(s => s.id === this._activeSessionId);
 	}
 
+	private _isDefaultChatName(name: string): boolean {
+		const n = String(name || '').trim();
+		if (!n) {
+			return true;
+		}
+		if (/^new chat$/i.test(n)) {
+			return true;
+		}
+		return /^chat(?:\s+\d+)?$/i.test(n);
+	}
+
+	private _titleFromPrompt(text: string): string {
+		const collapsed = String(text || '').replace(/\s+/g, ' ').trim();
+		const max = 44;
+		if (!collapsed) {
+			return '';
+		}
+		if (collapsed.length <= max) {
+			return collapsed;
+		}
+		let cut = collapsed.slice(0, max);
+		const sp = cut.lastIndexOf(' ');
+		if (sp >= 20) {
+			cut = cut.slice(0, sp);
+		}
+		cut = cut.replace(/[\s.,;:!?-]+$/g, '');
+		if (!cut) {
+			cut = collapsed.slice(0, max).trim();
+		}
+		return cut + '...';
+	}
+
+	private _maybeApplyFirstPromptTitle(session: ChatSessionRecord): boolean {
+		if (!this._isDefaultChatName(session.name)) {
+			return false;
+		}
+		const firstUser = session.messages.find((m) => m.role === 'user' && String(m.content || '').trim());
+		if (!firstUser) {
+			return false;
+		}
+		const title = this._titleFromPrompt(firstUser.content);
+		if (!title || title === session.name) {
+			return false;
+		}
+		session.name = title;
+		return true;
+	}
+
+	private _retitleDefaultSessions(): boolean {
+		let changed = false;
+		for (const session of this._sessions) {
+			if (this._maybeApplyFirstPromptTitle(session)) {
+				changed = true;
+			}
+		}
+		return changed;
+	}
+
+	private async _recordUserMessage(content: string, mode?: ChatMode): Promise<ChatSessionRecord | undefined> {
+		const session = this._getActiveSession();
+		if (!session) {
+			return undefined;
+		}
+		const entry: ChatSessionMessage = { role: 'user', content };
+		if (mode) {
+			entry.mode = mode;
+			entry.timestamp = Date.now();
+		}
+		session.messages.push(entry);
+		this._maybeApplyFirstPromptTitle(session);
+		void this._persistSessions();
+		void this._broadcastSessions();
+		return session;
+	}
+
 	private _sessionSummaries() {
-		return this._sessions.map(s => ({ id: s.id, name: s.name }));
+		return this._sessions
+			.slice()
+			.sort((a, b) => b.createdAt - a.createdAt)
+			.map(s => ({ id: s.id, name: s.name }));
 	}
 
 	private async _broadcastSessions(): Promise<void> {
@@ -125,7 +291,80 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		if (!this._view) {
 			return;
 		}
-		this._view.webview.postMessage({ type: 'chatActivity', items });
+		this._view.webview.postMessage({
+			type: 'chatActivity',
+			items,
+			caption: this._activityCaption(items)
+		});
+	}
+
+	private _activityCaption(items: ChatActivityItem[]): string {
+		const liveTerm = [...items].reverse().find(
+			(i) => i.kind === 'terminal' && (i.status === 'running' || i.status === 'confirming')
+		);
+		if (liveTerm) {
+			const cmd = String(liveTerm.command || liveTerm.label || '').replace(/^\$\s*/, '');
+			if (liveTerm.status === 'confirming') {
+				return `Waiting for Allow - $ ${cmd}`;
+			}
+			return `$ ${cmd} · ${formatElapsedMs(liveTerm.elapsedMs || 0)}`;
+		}
+		const running = items.find((i) => !i.done);
+		return running?.label || 'Working...';
+	}
+
+	private _cancellationTokenFromReply(reply?: InFlightReply): vscode.CancellationToken | undefined {
+		if (!reply) {
+			return undefined;
+		}
+		const emitter = new vscode.EventEmitter<void>();
+		const fire = () => emitter.fire();
+		if (reply.signal.aborted) {
+			setTimeout(fire, 0);
+		} else {
+			reply.signal.addEventListener('abort', fire, { once: true });
+		}
+		return {
+			get isCancellationRequested() {
+				return reply.isCancelled();
+			},
+			onCancellationRequested: emitter.event
+		};
+	}
+
+	private _applyTerminalProgress(
+		activityItems: ChatActivityItem[],
+		toolCallId: string,
+		progress: TerminalCommandProgress
+	): void {
+		const item = activityItems.find((a) => a.id === `tool-${toolCallId}`);
+		if (!item) {
+			return;
+		}
+		item.kind = 'terminal';
+		item.command = progress.command;
+		item.elapsedMs = progress.elapsedMs;
+		item.preview = progress.preview;
+		item.status = progress.status;
+		item.exitCode = progress.exitCode;
+		item.label = `$ ${progress.command}`.trim();
+		item.done = progress.status !== 'running' && progress.status !== 'confirming';
+	}
+
+	private _pushToolActivity(activityItems: ChatActivityItem[], tc: ToolCall): void {
+		const existingTool = activityItems.find((a) => a.id === `tool-${tc.id}`);
+		if (existingTool) {
+			return;
+		}
+		const isTerminal = tc.name === 'run_terminal_command';
+		activityItems.push({
+			id: `tool-${tc.id}`,
+			label: this._formatToolLabel(tc.name, tc.arguments),
+			done: false,
+			kind: isTerminal ? 'terminal' : 'step',
+			command: isTerminal ? String(tc.arguments.command || '') : undefined,
+			status: isTerminal ? 'confirming' : undefined
+		});
 	}
 
 	private _clearChatActivity(): void {
@@ -183,7 +422,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			auth: { github: false, vercel: false, supabase: false, stripe: false, v0: false, elevenlabs: false, tavily: false },
 			messages: this._getActiveSession()?.messages || [],
 			sessions: this._sessionSummaries(),
-			activeSessionId: this._activeSessionId
+			activeSessionId: this._activeSessionId,
+			sessionRailWidth: this._readSessionRailWidth(),
+			submitWithCtrlEnter: getSubmitWithCtrlEnter()
 		};
 
 		webviewView.webview.html = getChatWebviewHtml(
@@ -199,17 +440,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			this._pushActiveSessionToWebview();
 			void this._broadcastSessions();
 			void this._pushSuggestions();
+			void this._pushFirstRunCard();
 		});
 
 		webviewView.webview.onDidReceiveMessage(async (data: WebviewInboundMessage) => {
 			if (data.type === 'chatWebviewReady') {
 				this._pushActiveSessionToWebview();
+				this._pushChatComposerSettings();
 				void this._broadcastSessions();
 				void this._pushSuggestions();
+				void this._pushFirstRunCard();
 				return;
 			}
 			if (data.type === 'sendMessage') {
 				await this._handleUserMessage(data.message, data.model);
+			} else if (data.type === 'requestAtComplete') {
+				await this._handleRequestAtComplete(data.prefix);
 			} else if (data.type === 'askWorkspace') {
 				await this._handleAskWorkspaceMessage(data.message, data.model);
 			} else if (data.type === 'newSession') {
@@ -218,6 +464,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._handleSwitchSession(data.sessionId);
 			} else if (data.type === 'deleteSession') {
 				await this._handleDeleteSession(data.sessionId);
+			} else if (data.type === 'persistSessionRailWidth') {
+				await this._persistSessionRailWidth(data.width);
 			} else if (data.type === 'checkBackend') {
 				await this._checkBackendStatus();
 			} else if (data.type === 'generateCode') {
@@ -230,6 +478,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._handleSaasToggle(data.provider);
 			} else if (data.type === 'openSettings') {
 				await this._handleOpenSettings(data.section);
+			} else if (data.type === 'saveFirstRunKey') {
+				await this._handleSaveFirstRunKey(data.provider, data.key);
+			} else if (data.type === 'dismissFirstRunCard') {
+				await this._dismissFirstRunCard();
 			} else if (data.type === 'deployProject') {
 				await this._handleDeployment(data.prompt, data.repoName, data.projectName);
 			} else if (data.type === 'checkAuthStatus') {
@@ -252,10 +504,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._handleBrowsePlatforms();
 			} else if (data.type === 'indexWorkspace') {
 				await this._handleIndexWorkspace();
+			} else if (data.type === 'showEngineOutput') {
+				showEngineOutput();
 			} else if (data.type === 'executeRequest') {
 				await this._handleExecuteRequest(data.request, data.model);
 			} else if (data.type === 'runAgent') {
 				await this._handleRunAgent(data.request, data.model);
+			} else if (data.type === 'stopGeneration') {
+				this._abortInFlightReply();
 			} else if (data.type === 'confirmSaveTemplate') {
 				await this._handleConfirmSaveTemplate(data);
 			} else if (data.type === 'cancelSaveTemplate') {
@@ -272,15 +528,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		this._checkBackendStatus();
 		this._checkAuthStatus();
 		this._setupWebSocketListener();
+		void this._pushFirstRunCard();
 		void this._broadcastSessions();
 	}
 
 	private async _handleNewSession(): Promise<void> {
-		const nextIndex = this._sessions.length + 1;
 		const id = `s-${Date.now()}`;
 		this._sessions.unshift({
 			id,
-			name: `Chat ${nextIndex}`,
+			name: 'New chat',
 			messages: [],
 			createdAt: Date.now()
 		});
@@ -305,19 +561,266 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 	/** Week 12: Public method to cancel current operation from command */
 	public async cancelCurrentOperation(): Promise<void> {
+		this._abortInFlightReply();
 		if (this._currentPlanId) {
 			await this._handleCancelPlan(this._currentPlanId);
-			await vscode.commands.executeCommand('nexora.setOperationInProgress', false);
 		}
+		await vscode.commands.executeCommand('nexora.setOperationInProgress', false);
 	}
 
 	/** Week 12: Check if an operation is in progress */
 	public isOperationInProgress(): boolean {
-		return !!this._currentPlanId;
+		return !!this._currentPlanId || !!this._replyAbort;
 	}
 
 	private async _syncOperationContext(): Promise<void> {
-		await vscode.commands.executeCommand('nexora.setOperationInProgress', !!this._currentPlanId);
+		await vscode.commands.executeCommand(
+			'nexora.setOperationInProgress',
+			!!this._currentPlanId || !!this._replyAbort
+		);
+	}
+
+	private _abortInFlightReply(): void {
+		if (this._replyAbort && !this._replyAbort.signal.aborted) {
+			this._replyAbort.abort();
+		}
+	}
+
+	private _paintWorking(): void {
+		if (!this._view) {
+			return;
+		}
+		this._view.webview.postMessage({
+			type: 'addMessage',
+			role: 'assistant',
+			content: '',
+			isLoading: true
+		});
+		this._emitChatActivity([{ id: 'agent', label: 'Working...', done: false }]);
+	}
+
+	private async _backendReady(): Promise<boolean> {
+		if (this._backendConnected) {
+			return true;
+		}
+		const ok = await getBackendClient().checkHealth();
+		this._backendConnected = ok;
+		if (this._view) {
+			this._view.webview.postMessage({
+				type: 'backendStatus',
+				connected: ok
+			});
+		}
+		return ok;
+	}
+
+	private _noteBackendDown(): void {
+		this._backendConnected = false;
+		getBackendClient().markUnhealthy();
+	}
+
+	private _beginReply(): InFlightReply | undefined {
+		if (this._replyAbort) {
+			return undefined;
+		}
+		const controller = new AbortController();
+		this._replyAbort = controller;
+		void this._syncOperationContext();
+		if (this._view) {
+			this._view.webview.postMessage({ type: 'generationRunning', running: true });
+		}
+		return {
+			controller,
+			signal: controller.signal,
+			isCancelled: () => controller.signal.aborted || this._replyAbort !== controller
+		};
+	}
+
+	private _endReply(reply: InFlightReply): void {
+		if (this._replyAbort !== reply.controller) {
+			return;
+		}
+		this._replyAbort = undefined;
+		void this._syncOperationContext();
+		if (this._view) {
+			this._view.webview.postMessage({ type: 'generationRunning', running: false });
+		}
+	}
+
+	private _assertReply(reply?: InFlightReply): void {
+		if (reply && reply.isCancelled()) {
+			throw new RequestCancelledError();
+		}
+	}
+
+	private async _streamChatToWebview(
+		message: string,
+		workspacePath: string | undefined,
+		llmModel: string | undefined,
+		sessionId: string | undefined,
+		workspaceId: string | undefined,
+		reply: InFlightReply
+	): Promise<string> {
+		const client = getBackendClient();
+		let assembled = '';
+		let finished = false;
+		for await (const ev of client.chatStream(message, workspacePath, llmModel, {
+			session_id: sessionId,
+			workspace_id: workspaceId,
+			signal: reply.signal
+		})) {
+			this._assertReply(reply);
+			if (ev.type === 'token' && ev.content) {
+				assembled += ev.content;
+				this._view?.webview.postMessage({ type: 'appendToken', content: ev.content });
+			} else if (ev.type === 'done') {
+				if (typeof ev.content === 'string' && ev.content.length > 0) {
+					assembled = ev.content;
+				}
+				this._view?.webview.postMessage({ type: 'finishMessage' });
+				finished = true;
+			} else if (ev.type === 'error') {
+				throw new Error(ev.message || 'Chat stream error');
+			}
+		}
+		if (!finished) {
+			this._view?.webview.postMessage({ type: 'finishMessage' });
+		}
+		return assembled;
+	}
+
+	private async _consumeStreamedAgentTurn(
+		messages: AgentMessage[],
+		workspaceId: string,
+		workspacePath: string,
+		model: string | undefined,
+		mode: AgentMode,
+		sessionId: string | undefined,
+		reply?: InFlightReply
+	): Promise<AgentTurnResponse> {
+		const client = getBackendClient();
+		let assembled = '';
+		let modelUsed = '';
+		let toolCalls: ToolCall[] | undefined;
+		let startedTokens = false;
+		let usagePromptTokens = 0;
+		let usageCompletionTokens = 0;
+
+		for await (const ev of client.agentTurnStream(
+			messages,
+			workspaceId,
+			workspacePath,
+			model,
+			mode,
+			sessionId,
+			reply?.signal
+		)) {
+			this._assertReply(reply);
+			if (ev.type === 'token' && ev.content) {
+				if (toolCalls && toolCalls.length > 0) {
+					continue;
+				}
+				startedTokens = true;
+				assembled += ev.content;
+				if (this._view) {
+					this._view.webview.postMessage({ type: 'appendToken', content: ev.content });
+				}
+			} else if (ev.type === 'tool_calls' && Array.isArray(ev.tool_calls) && ev.tool_calls.length > 0) {
+				toolCalls = ev.tool_calls as ToolCall[];
+			} else if (ev.type === 'done') {
+				if (typeof ev.content === 'string' && ev.content.length > 0 && !(toolCalls && toolCalls.length > 0)) {
+					assembled = ev.content;
+				}
+				if (ev.model_used) {
+					modelUsed = ev.model_used;
+				}
+				if (ev.usage) {
+					usagePromptTokens = ev.usage.prompt_tokens || 0;
+					usageCompletionTokens = ev.usage.completion_tokens || 0;
+				}
+			} else if (ev.type === 'error') {
+				throw new Error(ev.message || 'Agent stream error');
+			}
+		}
+
+		// Post per-turn cost estimate when usage data is available
+		if (this._view && (usagePromptTokens > 0 || usageCompletionTokens > 0)) {
+			const costUsd = this._computeCostEstimate(modelUsed, usagePromptTokens, usageCompletionTokens);
+			this._view.webview.postMessage({
+				type: 'costUpdate',
+				cost_usd: costUsd,
+				tokens_in: usagePromptTokens,
+				tokens_out: usageCompletionTokens
+			});
+		}
+
+		if (toolCalls && toolCalls.length > 0) {
+			return { type: 'tool_calls', tool_calls: toolCalls, model_used: modelUsed || 'unknown' };
+		}
+
+		if (startedTokens && this._view) {
+			this._view.webview.postMessage({ type: 'finishMessage' });
+		} else if (this._view) {
+			this._view.webview.postMessage({
+				type: 'addMessage',
+				role: 'assistant',
+				content: assembled || 'No response generated.',
+				isLoading: false
+			});
+		}
+
+		return {
+			type: 'final',
+			content: assembled || 'No response generated.',
+			model_used: modelUsed || 'unknown'
+		};
+	}
+
+	private async _nextAgentLoopTurn(
+		messages: AgentMessage[],
+		workspaceId: string,
+		workspacePath: string,
+		model: string | undefined,
+		mode: AgentMode,
+		sessionId: string | undefined,
+		reply?: InFlightReply
+	): Promise<AgentTurnResponse> {
+		return this._consumeStreamedAgentTurn(
+			messages,
+			workspaceId,
+			workspacePath,
+			model,
+			mode,
+			sessionId,
+			reply
+		);
+	}
+
+	private async _finishStopped(reply: InFlightReply, mode?: ChatMode): Promise<void> {
+		if (this._replyAbort !== reply.controller) {
+			return;
+		}
+		this._clearChatActivity();
+		const stopped = 'Stopped.';
+		const sessionAfter = this._getActiveSession();
+		if (sessionAfter) {
+			const entry: ChatSessionMessage = { role: 'assistant', content: stopped };
+			if (mode) {
+				entry.mode = mode;
+				entry.timestamp = Date.now();
+			}
+			sessionAfter.messages.push(entry);
+			await this._persistSessions();
+		}
+		if (this._view) {
+			this._view.webview.postMessage({
+				type: 'addMessage',
+				role: 'assistant',
+				content: stopped,
+				isLoading: false,
+				stopped: true
+			});
+		}
 	}
 
 	public showPlanApproval(plan: any): void {
@@ -339,27 +842,365 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		void vscode.commands.executeCommand('nexora.updateTaskTreeFromPlan', plan);
 		void vscode.commands.executeCommand('nexora.updateWorkflowPlan', plan);
 		void vscode.commands.executeCommand('nexora.chatPanel.focus');
+		void this._maybeAutoApprovePlan(plan.plan_id);
+	}
+
+	private async _maybeAutoApprovePlan(planId: string | undefined): Promise<void> {
+		if (!planId || !getAgentFlag('autoApproveModeSwitch')) {
+			return;
+		}
+		await this._handleApprovePlan(planId);
+	}
+
+	private async _resolveWorkspaceIdForPath(
+		workspacePath: string,
+		active: ChatSessionRecord | undefined
+	): Promise<string> {
+		if (this._cachedWorkspaceId && this._cachedWorkspacePath === workspacePath) {
+			if (active && active.memoryWorkspaceId !== this._cachedWorkspaceId) {
+				active.memoryWorkspaceId = this._cachedWorkspaceId;
+				active.memoryWorkspacePath = workspacePath;
+				void this._persistSessions();
+			}
+			return this._cachedWorkspaceId;
+		}
+		const sessionCached = active?.memoryWorkspaceId;
+		if (sessionCached && !sessionCached.startsWith('temp_') && active?.memoryWorkspacePath === workspacePath) {
+			this._cachedWorkspaceId = sessionCached;
+			this._cachedWorkspacePath = workspacePath;
+			return sessionCached;
+		}
+		const workspaceId = deriveWorkspaceId(workspacePath);
+		this._cachedWorkspaceId = workspaceId;
+		this._cachedWorkspacePath = workspacePath;
+		if (active) {
+			active.memoryWorkspaceId = workspaceId;
+			active.memoryWorkspacePath = workspacePath;
+			void this._persistSessions();
+		}
+		return workspaceId;
 	}
 
 	private async _workspaceContext(): Promise<{ workspaceId?: string; workspacePath?: string }> {
 		const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 		const active = this._getActiveSession();
-		if (active?.memoryWorkspaceId) {
-			return { workspaceId: active.memoryWorkspaceId, workspacePath: active.memoryWorkspacePath || workspacePath };
-		}
 		if (!workspacePath) {
-			return {};
+			return { workspaceId: active ? `session_${active.id}` : undefined };
+		}
+		const workspaceId = await this._resolveWorkspaceIdForPath(workspacePath, active);
+		return { workspaceId, workspacePath };
+	}
+
+	private _escapeAtGlob(value: string): string {
+		return value.replace(/\\/g, '/').replace(/[\[\]\{\}\*\?]/g, '\\$&');
+	}
+
+	private _toAtPosixRel(uri: vscode.Uri): string {
+		const includeRoot = (vscode.workspace.workspaceFolders?.length || 0) > 1;
+		return vscode.workspace.asRelativePath(uri, includeRoot).replace(/\\/g, '/');
+	}
+
+	private async _handleRequestAtComplete(prefix: string): Promise<void> {
+		if (!this._view) {
+			return;
+		}
+		const items = await this._collectAtCompleteItems(prefix || '');
+		this._view.webview.postMessage({
+			type: 'atCompleteResults',
+			items
+		});
+	}
+
+	private async _collectAtCompleteItems(
+		prefix: string
+	): Promise<Array<{ icon: string; label: string; path: string; kind: 'file' | 'folder' }>> {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return [];
+		}
+
+		const needle = prefix.replace(/\\/g, '/').replace(/^\.\//, '');
+		const needleLower = needle.toLowerCase();
+		const escaped = this._escapeAtGlob(needle);
+		const exclude = '**/node_modules/**';
+		const globs = new Set<string>();
+		if (!escaped) {
+			globs.add('**/*');
+		} else {
+			globs.add(`${escaped}**`);
+			globs.add(`**/${escaped}**`);
+			globs.add(`**/*${escaped}*`);
+		}
+
+		const fileUris: vscode.Uri[] = [];
+		const seenFiles = new Set<string>();
+		for (const glob of globs) {
+			const matches = await vscode.workspace.findFiles(glob, exclude, 20);
+			for (const uri of matches) {
+				if (seenFiles.has(uri.fsPath)) {
+					continue;
+				}
+				seenFiles.add(uri.fsPath);
+				fileUris.push(uri);
+			}
+			if (fileUris.length >= 20) {
+				break;
+			}
+		}
+
+		const items: Array<{ icon: string; label: string; path: string; kind: 'file' | 'folder'; score: number }> = [];
+		const seenPaths = new Set<string>();
+
+		const scorePath = (rel: string): number => {
+			const lower = rel.toLowerCase();
+			const base = path.posix.basename(lower);
+			if (!needleLower) {
+				return 0;
+			}
+			if (lower === needleLower || base === needleLower) {
+				return 0;
+			}
+			if (lower.startsWith(needleLower) || base.startsWith(needleLower)) {
+				return 1;
+			}
+			if (lower.includes(needleLower) || base.includes(needleLower)) {
+				return 2;
+			}
+			return 3;
+		};
+
+		const pushItem = (kind: 'file' | 'folder', rel: string) => {
+			if (!rel || seenPaths.has(rel)) {
+				return;
+			}
+			if (needleLower && scorePath(rel) > 2) {
+				return;
+			}
+			seenPaths.add(rel);
+			const label = path.posix.basename(rel) || rel;
+			items.push({
+				icon: kind === 'folder' ? 'dir' : 'file',
+				label,
+				path: rel,
+				kind,
+				score: scorePath(rel)
+			});
+		};
+
+		for (const folder of folders) {
+			if (!needleLower || folder.name.toLowerCase().includes(needleLower)) {
+				const rel = folders.length > 1 ? folder.name : '.';
+				if (!seenPaths.has(rel)) {
+					seenPaths.add(rel);
+					items.push({
+						icon: 'dir',
+						label: folder.name,
+						path: rel,
+						kind: 'folder',
+						score: scorePath(folder.name)
+					});
+				}
+			}
+		}
+
+		for (const uri of fileUris) {
+			const rel = this._toAtPosixRel(uri);
+			const dir = path.posix.dirname(rel);
+			if (dir && dir !== '.') {
+				pushItem('folder', dir);
+			}
+			pushItem('file', rel);
+		}
+
+		items.sort((a, b) => {
+			if (a.kind !== b.kind) {
+				return a.kind === 'folder' ? -1 : 1;
+			}
+			if (a.score !== b.score) {
+				return a.score - b.score;
+			}
+			return a.path.length - b.path.length || a.path.localeCompare(b.path);
+		});
+
+		return items.slice(0, 20).map(({ icon, label, path: itemPath, kind }) => ({ icon, label, path: itemPath, kind }));
+	}
+
+	private _parseAtMentions(text: string): string[] {
+		const found: string[] = [];
+		const re = /(^|[\s])@(?:"([^"]+)"|'([^']+)'|([^\s@]+))/g;
+		let match: RegExpExecArray | null = re.exec(text);
+		while (match) {
+			const raw = (match[2] || match[3] || match[4] || '').replace(/[.,;:!?)]+$/, '').trim();
+			if (raw && !found.includes(raw)) {
+				found.push(raw);
+			}
+			match = re.exec(text);
+		}
+		return found;
+	}
+
+	private async _resolveAtMentionUri(mention: string): Promise<vscode.Uri | undefined> {
+		const folders = vscode.workspace.workspaceFolders;
+		if (!folders || folders.length === 0) {
+			return undefined;
+		}
+		const normalized = mention.replace(/\\/g, '/').replace(/^\.\//, '');
+		if (path.isAbsolute(mention)) {
+			return vscode.Uri.file(mention);
+		}
+		if (normalized === '.' || normalized === '') {
+			return folders[0].uri;
+		}
+		for (const folder of folders) {
+			if (folder.name === normalized || this._toAtPosixRel(folder.uri) === normalized) {
+				return folder.uri;
+			}
+		}
+		for (const folder of folders) {
+			const candidate = vscode.Uri.joinPath(folder.uri, normalized);
+			try {
+				await vscode.workspace.fs.stat(candidate);
+				return candidate;
+			} catch {
+				// try next folder
+			}
+		}
+		const base = path.posix.basename(normalized);
+		if (!base) {
+			return undefined;
+		}
+		const matches = await vscode.workspace.findFiles(`**/${this._escapeAtGlob(base)}`, '**/node_modules/**', 5);
+		const exact = matches.find(uri => this._toAtPosixRel(uri) === normalized);
+		return exact || matches[0];
+	}
+
+	private async _readAtMentionBlock(mention: string): Promise<string | undefined> {
+		const uri = await this._resolveAtMentionUri(mention);
+		if (!uri) {
+			return `[Context: ${mention}]\n(not found in workspace)`;
+		}
+		let stat: vscode.FileStat;
+		try {
+			stat = await vscode.workspace.fs.stat(uri);
+		} catch {
+			return `[Context: ${mention}]\n(not found in workspace)`;
+		}
+
+		const rel = this._toAtPosixRel(uri);
+		if (stat.type & vscode.FileType.Directory) {
+			const entries = await vscode.workspace.fs.readDirectory(uri);
+			const names = entries.slice(0, 50).map(([name, type]) => {
+				return type & vscode.FileType.Directory ? `${name}/` : name;
+			});
+			const extra = entries.length > 50 ? `\n... (${entries.length - 50} more)` : '';
+			return `[Context: ${rel}]\n${names.join('\n')}${extra}`;
+		}
+
+		const bytes = await vscode.workspace.fs.readFile(uri);
+		const text = new TextDecoder('utf8').decode(bytes);
+		if (text.includes('\u0000')) {
+			return `[Context: ${rel}]\n(binary file omitted)`;
+		}
+		const maxChars = 4000;
+		if (text.length <= maxChars) {
+			return `[Context: ${rel}]\n\`\`\`\n${text}\n\`\`\``;
+		}
+		return `[Context: ${rel}]\n\`\`\`\n${text.slice(0, maxChars)}\n\`\`\`\n... (truncated)`;
+	}
+
+	private async _injectAtMentionContext(message: string): Promise<string> {
+		const mentions = this._parseAtMentions(message);
+		const blocks: string[] = [];
+		for (const mention of mentions) {
+			const block = await this._readAtMentionBlock(mention);
+			if (block) {
+				blocks.push(block);
+			}
+		}
+		blocks.push(...this._openEditorContextBlocks(mentions));
+		if (blocks.length === 0) {
+			return message;
+		}
+		return `${blocks.join('\n\n')}\n\n${message}`;
+	}
+
+	private _pushChatComposerSettings(): void {
+		if (!this._view) {
+			return;
+		}
+		this._view.webview.postMessage({
+			type: 'composerSettings',
+			submitWithCtrlEnter: getSubmitWithCtrlEnter()
+		});
+	}
+
+	private _openEditorContextBlocks(mentions: string[]): string[] {
+		if (!getAgentFlag('includeOpenEditors')) {
+			return [];
+		}
+		const mentioned = new Set(mentions.map((m) => m.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase()));
+		const mentionedMatch = (rel: string): boolean => {
+			const n = rel.replace(/\\/g, '/').toLowerCase();
+			const base = path.posix.basename(n);
+			return mentioned.has(n) || mentioned.has(base) || [...mentioned].some((m) => n.endsWith('/' + m));
+		};
+
+		const seen = new Set<string>();
+		const docs: vscode.TextDocument[] = [];
+		const push = (doc: vscode.TextDocument | undefined) => {
+			if (!doc || seen.has(doc.uri.toString())) {
+				return;
+			}
+			if (doc.uri.scheme !== 'file' && doc.uri.scheme !== 'untitled') {
+				return;
+			}
+			seen.add(doc.uri.toString());
+			docs.push(doc);
+		};
+		push(vscode.window.activeTextEditor?.document);
+		for (const group of vscode.window.tabGroups.all) {
+			for (const tab of group.tabs) {
+				if (tab.input instanceof vscode.TabInputText) {
+					const uri = tab.input.uri.toString();
+					push(vscode.workspace.textDocuments.find((d) => d.uri.toString() === uri));
+				}
+			}
+		}
+
+		const blocks: string[] = [];
+		for (const doc of docs) {
+			if (blocks.length >= 5) {
+				break;
+			}
+			const rel = doc.uri.scheme === 'untitled' ? doc.fileName : this._toAtPosixRel(doc.uri);
+			if (mentionedMatch(rel)) {
+				continue;
+			}
+			const text = doc.getText();
+			if (!text || text.includes('\u0000') || text.length > 200_000) {
+				continue;
+			}
+			const maxChars = 4000;
+			const body = text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n... (truncated)`;
+			blocks.push(`[Context: ${rel}]\n\`\`\`\n${body}\n\`\`\``);
+		}
+		return blocks;
+	}
+
+	private async _appendTranscript(
+		sessionId: string | undefined,
+		workspaceId: string | undefined,
+		role: string,
+		content: string,
+		mode: string
+	): Promise<void> {
+		if (!sessionId || !workspaceId) {
+			return;
 		}
 		try {
-			const mapped = await getBackendClient().getWorkspaceIdForPath(workspacePath);
-			if (active && mapped?.workspace_id) {
-				active.memoryWorkspaceId = mapped.workspace_id;
-				active.memoryWorkspacePath = workspacePath;
-				await this._persistSessions();
-			}
-			return { workspaceId: mapped?.workspace_id, workspacePath };
+			await getBackendClient().appendTranscript(workspaceId, sessionId, role, content, mode);
 		} catch {
-			return { workspacePath };
+			// best-effort: local session persist is independent of jsonl
 		}
 	}
 
@@ -440,7 +1281,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		const notifications = getNotificationService();
 		const { workspaceId, workspacePath } = await this._workspaceContext();
 		if (!workspaceId) {
-			void notifications.showWarning('Index this workspace before running a suggestion.');
+			if (suggestionId === 'index-workspace') {
+				void notifications.showWarning('Open a folder first, then Index workspace.');
+			} else {
+				void notifications.showWarning('Index this workspace before running a suggestion.');
+			}
 			return;
 		}
 		try {
@@ -509,12 +1354,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			const id = `s-${Date.now()}`;
 			this._sessions = [{
 				id,
-				name: 'Chat 1',
+				name: 'New chat',
 				messages: [],
 				createdAt: Date.now()
 			}];
 			this._activeSessionId = id;
 		} else if (this._activeSessionId === sessionId) {
+			this._sessions.sort((a, b) => b.createdAt - a.createdAt);
 			this._activeSessionId = this._sessions[0].id;
 		}
 
@@ -618,6 +1464,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	private async _checkBackendStatus(): Promise<void> {
 		const client = getBackendClient();
 		const isConnected = await client.checkHealth();
+		this._backendConnected = isConnected;
 
 		if (this._view) {
 			this._view.webview.postMessage({
@@ -632,30 +1479,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		const session = this._getActiveSession();
-		if (session) {
-			session.messages.push({ role: 'user', content: message });
-			await this._persistSessions();
+		const reply = this._beginReply();
+		if (!reply) {
+			return;
 		}
 
-		this._view.webview.postMessage({
-			type: 'addMessage',
-			role: 'assistant',
-			content: 'Thinking...',
-			isLoading: true
-		});
-
-		this._emitChatActivity([
-			{ id: 'backend', label: 'Checking Nexora backend...', done: false },
-			{ id: 'model', label: 'Calling chat model...', done: false }
-		]);
-
 		try {
-			const client = getBackendClient();
-			const isConnected = await client.checkHealth();
+			this._paintWorking();
+			const session = await this._recordUserMessage(message);
+			const sessionId = session?.id;
+
+			const isConnected = await this._backendReady();
+			this._assertReply(reply);
 
 			if (!isConnected) {
 				this._clearChatActivity();
+				this._noteBackendDown();
 				this._view.webview.postMessage({
 					type: 'backendStatus',
 					connected: false
@@ -669,39 +1508,42 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 
-			this._emitChatActivity([
-				{ id: 'backend', label: 'Checking Nexora backend...', done: true },
-				{ id: 'model', label: 'Calling chat model...', done: false }
-			]);
-
 			const ctx = await this._workspaceContext();
+			this._assertReply(reply);
 			const llmModel = this._mapUiModelToLiteLlm(model);
-			const sessionAfterCheck = this._getActiveSession();
 
-			// Simple chat - no task decomposition
-			const chatResponse = await client.chat(message, ctx.workspacePath, llmModel, {
-				session_id: sessionAfterCheck?.id,
-				workspace_id: ctx.workspaceId
-			});
+			void this._appendTranscript(sessionId, ctx.workspaceId, 'user', message, 'chat');
+
+			const atContextMessage = await this._injectAtMentionContext(message);
+			this._assertReply(reply);
+
+			const responseText = await this._streamChatToWebview(
+				atContextMessage,
+				ctx.workspacePath,
+				llmModel,
+				sessionId,
+				ctx.workspaceId,
+				reply
+			);
 
 			const sessionAfter = this._getActiveSession();
 			if (sessionAfter) {
-				sessionAfter.messages.push({ role: 'assistant', content: chatResponse.response });
+				sessionAfter.messages.push({ role: 'assistant', content: responseText });
 				await this._persistSessions();
 			}
 
-			this._clearChatActivity();
-			this._view.webview.postMessage({
-				type: 'addMessage',
-				role: 'assistant',
-				content: chatResponse.response,
-				isLoading: false
-			});
+			await this._appendTranscript(sessionId, ctx.workspaceId, 'assistant', responseText, 'chat');
 
+			this._clearChatActivity();
 		} catch (error) {
+			if (isRequestCancelled(error) || reply.isCancelled()) {
+				await this._finishStopped(reply, 'chat');
+				return;
+			}
 			const errMsg = error instanceof Error ? error.message : 'Unknown error';
 			const errText = `Error: ${errMsg}`;
 			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|Failed to fetch/i.test(errMsg)) {
+				this._noteBackendDown();
 				this._view.webview.postMessage({
 					type: 'backendStatus',
 					connected: false
@@ -719,6 +1561,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				content: errText,
 				isLoading: false
 			});
+		} finally {
+			this._endReply(reply);
 		}
 	}
 
@@ -727,26 +1571,21 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		const session = this._getActiveSession();
-		if (session) {
-			session.messages.push({ role: 'user', content: message });
-			await this._persistSessions();
+		const reply = this._beginReply();
+		if (!reply) {
+			return;
 		}
 
-		this._view.webview.postMessage({
-			type: 'addMessage',
-			role: 'assistant',
-			content: 'Analyzing workspace...',
-			isLoading: true
-		});
-
-		this._emitChatActivity([{ id: 'backend', label: 'Checking Nexora backend...', done: false }]);
-
 		try {
-			const client = getBackendClient();
-			const isConnected = await client.checkHealth();
+			this._paintWorking();
+			const session = await this._recordUserMessage(message);
+			const sessionId = session?.id;
+
+			const isConnected = await this._backendReady();
+			this._assertReply(reply);
 			if (!isConnected) {
 				this._clearChatActivity();
+				this._noteBackendDown();
 				const offline = `Backend is offline. Your question: "${message}"\n\nPlease start the backend server and try again.`;
 				const s0 = this._getActiveSession();
 				if (s0) {
@@ -762,15 +1601,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 
-			this._emitChatActivity([
-				{ id: 'backend', label: 'Checking Nexora backend...', done: true },
-				{ id: 'folder', label: 'Checking workspace folder...', done: false }
-			]);
-
 			const workspaceFolders = vscode.workspace.workspaceFolders;
 			if (!workspaceFolders || workspaceFolders.length === 0) {
 				this._clearChatActivity();
-				const noFolder = 'No workspace folder open. Open a folder, then use **Index Workspace** before Ask mode.';
+				const noFolder = 'No workspace folder open. Open a folder to use Ask mode.';
 				const s1 = this._getActiveSession();
 				if (s1) {
 					s1.messages.push({ role: 'assistant', content: noFolder });
@@ -785,59 +1619,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 
-			this._emitChatActivity([
-				{ id: 'backend', label: 'Checking Nexora backend...', done: true },
-				{ id: 'folder', label: 'Checking workspace folder...', done: true },
-				{ id: 'workspaceId', label: 'Resolving workspace memory id...', done: false }
-			]);
-
 			const workspacePath = workspaceFolders[0].uri.fsPath;
 			const active = this._getActiveSession();
+			const workspaceId = await this._resolveWorkspaceIdForPath(workspacePath, active);
+			this._assertReply(reply);
 
-			let workspaceId = active?.memoryWorkspaceId;
-			if (!workspaceId) {
-				const mapped = await client.getWorkspaceIdForPath(workspacePath).catch(() => undefined);
-				workspaceId = mapped?.workspace_id;
-				if (active && workspaceId) {
-					active.memoryWorkspaceId = workspaceId;
-					active.memoryWorkspacePath = workspacePath;
-					await this._persistSessions();
-				}
-			}
-
-			if (!workspaceId) {
-				this._clearChatActivity();
-				const notIndexed =
-					'This workspace is not indexed yet (no `workspace_id` found).\n\n' +
-					'Click **Index Workspace** in the welcome screen, then try Ask mode again.';
-				const s2 = this._getActiveSession();
-				if (s2) {
-					s2.messages.push({ role: 'assistant', content: notIndexed });
-					await this._persistSessions();
-				}
-				this._view.webview.postMessage({
-					type: 'addMessage',
-					role: 'assistant',
-					content: notIndexed,
-					isLoading: false
-				});
-				return;
-			}
-
-			this._emitChatActivity([
-				{ id: 'backend', label: 'Checking Nexora backend...', done: true },
-				{ id: 'folder', label: 'Checking workspace folder...', done: true },
-				{ id: 'workspaceId', label: 'Resolving workspace memory id...', done: true },
-				{ id: 'agent', label: 'Running agent loop...', done: false }
-			]);
-
-			// Run agent loop with tools
 			const llmModel = this._mapUiModelToLiteLlm(model);
+			void this._appendTranscript(sessionId, workspaceId, 'user', message, 'ask');
+			const atContextMessage = await this._injectAtMentionContext(message);
+			this._assertReply(reply);
 			const finalAnswer = await this._runAgentLoop(
-				message,
+				atContextMessage,
 				workspaceId,
 				workspacePath,
-				llmModel
+				llmModel,
+				sessionId,
+				reply
 			);
 
 			const sessionAfter = this._getActiveSession();
@@ -846,15 +1643,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._persistSessions();
 			}
 
+			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'ask');
+
 			this._clearChatActivity();
-			this._view.webview.postMessage({
-				type: 'addMessage',
-				role: 'assistant',
-				content: finalAnswer,
-				isLoading: false
-			});
 		} catch (error) {
+			if (isRequestCancelled(error) || reply.isCancelled()) {
+				await this._finishStopped(reply, 'ask');
+				return;
+			}
 			const errText = `Ask mode error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|Failed to fetch/i.test(errText)) {
+				this._noteBackendDown();
+			}
 			const sessionAfter = this._getActiveSession();
 			if (sessionAfter) {
 				sessionAfter.messages.push({ role: 'assistant', content: errText });
@@ -867,6 +1667,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				content: errText,
 				isLoading: false
 			});
+		} finally {
+			this._endReply(reply);
 		}
 	}
 
@@ -878,10 +1680,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		userMessage: string,
 		workspaceId: string,
 		workspacePath: string,
-		model?: string
+		model?: string,
+		sessionId?: string,
+		reply?: InFlightReply
 	): Promise<string> {
-		const client = getBackendClient();
-		const maxTurns = 10;
+		const maxTurns = getAgentMaxTurns();
 		let turn = 0;
 
 		// Build initial messages
@@ -891,17 +1694,30 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		// Track activity items for UI
 		const activityItems: ChatActivityItem[] = [
-			{ id: 'backend', label: 'Checking Nexora backend...', done: true },
-			{ id: 'folder', label: 'Checking workspace folder...', done: true },
-			{ id: 'workspaceId', label: 'Resolving workspace memory id...', done: true },
-			{ id: 'agent', label: 'Running agent loop...', done: false }
+			{ id: 'agent', label: 'Working...', done: false }
 		];
 
 		while (turn < maxTurns) {
 			turn++;
+			// Update turn counter in activity item fields
+			const agentItem = activityItems.find(a => a.id === 'agent');
+			if (agentItem) {
+				agentItem.turn = turn;
+				agentItem.totalTurns = maxTurns;
+			}
+			this._emitChatActivity(activityItems);
+			this._assertReply(reply);
 
-			// Call backend agent turn
-			const response = await client.agentTurn(messages, workspaceId, workspacePath, model);
+			const response = await this._nextAgentLoopTurn(
+				messages,
+				workspaceId,
+				workspacePath,
+				model,
+				'ask',
+				sessionId,
+				reply
+			);
+			this._assertReply(reply);
 
 			if (response.type === 'final') {
 				// Agent is done, return the answer
@@ -912,25 +1728,38 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Handle tool calls
 			if (response.type === 'tool_calls' && response.tool_calls) {
-				// Update activity with tool names
 				for (const tc of response.tool_calls) {
-					const toolLabel = this._formatToolLabel(tc.name, tc.arguments);
-					const existingTool = activityItems.find(a => a.id === `tool-${tc.id}`);
-					if (!existingTool) {
-						activityItems.push({ id: `tool-${tc.id}`, label: toolLabel, done: false });
-					}
+					this._pushToolActivity(activityItems, tc);
+				}
+				const agentBusy = activityItems.find(a => a.id === 'agent');
+				if (agentBusy) {
+					agentBusy.done = true;
 				}
 				this._emitChatActivity(activityItems);
 
-				// Execute tools (file tools run locally, search_codebase pre-executed on backend)
-				const executed = await executeToolCalls(response.tool_calls, workspacePath);
+				const executed = await executeToolCalls(response.tool_calls, workspacePath, {
+					cancellationToken: this._cancellationTokenFromReply(reply),
+					onToolProgress: (toolCallId, name, progress) => {
+						if (name !== 'run_terminal_command') {
+							return;
+						}
+						this._applyTerminalProgress(activityItems, toolCallId, progress);
+						this._emitChatActivity(activityItems);
+					}
+				});
+				this._assertReply(reply);
 
-				// Mark tools as done in activity
 				for (const ex of executed) {
 					const item = activityItems.find(a => a.id === `tool-${ex.id}`);
 					if (item) {
 						item.done = true;
+						if (item.kind === 'terminal' && !item.status) {
+							item.status = ex.result.success ? 'succeeded' : 'failed';
+						}
 					}
+				}
+				if (agentBusy) {
+					agentBusy.done = false;
 				}
 				this._emitChatActivity(activityItems);
 
@@ -956,7 +1785,30 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 		}
 
-		return 'Agent reached maximum turns without completing. Try a more specific question.';
+		const maxMsg = `Agent reached maximum turns (${turn}/${maxTurns}) without completing. Try breaking the request into smaller steps or continue in a new message.`;
+		if (this._view) {
+			this._view.webview.postMessage({
+				type: 'addMessage',
+				role: 'assistant',
+				content: maxMsg,
+				isLoading: false
+			});
+		}
+		return maxMsg;
+	}
+
+	private _computeCostEstimate(model: string, promptTokens: number, completionTokens: number): number {
+		const m = (model || '').toLowerCase();
+		let inPer1k = 0.001;
+		let outPer1k = 0.003;
+		if (m.includes('gpt-4o')) {
+			inPer1k = 0.00015;
+			outPer1k = 0.0006;
+		} else if (m.includes('claude-3-5-sonnet') || m.includes('claude-3.5-sonnet') || m.includes('claude-3-haiku')) {
+			inPer1k = 0.003;
+			outPer1k = 0.015;
+		}
+		return (promptTokens / 1000) * inPer1k + (completionTokens / 1000) * outPer1k;
 	}
 
 	private _formatToolLabel(toolName: string, args: Record<string, any>): string {
@@ -975,6 +1827,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return `apply_patch: ${args.path || ''}`.slice(0, 60);
 			case 'insert_lines':
 				return `insert_lines: ${args.path || ''}:${args.line_number || ''}`.slice(0, 60);
+			case 'run_terminal_command':
+				return `$ ${args.command || ''}`.slice(0, 80);
 			default:
 				return `${toolName}`.slice(0, 60);
 		}
@@ -1179,10 +2033,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		if (status.backend_offline !== this._backendOffline) {
 			this._backendOffline = !!status.backend_offline;
 			if (status.backend_offline) {
+				this._noteBackendDown();
 				this._view.webview.postMessage({
 					type: 'addMessage',
 					role: 'assistant',
-					content: 'Cannot reach the Nexora backend, so connection badges may be inaccurate. Start it with `uvicorn app.main:app --reload` in `backend/`.',
+					content: 'Cannot reach the Nexora engine, so connection badges may be inaccurate. Check the "Nexora Engine" output channel.',
 					isLoading: false
 				});
 			}
@@ -1312,7 +2167,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 	private async _handleOpenSettings(section?: string): Promise<void> {
 		// Open Nexora settings panel with optional section hint
-		await vscode.commands.executeCommand('nexora.openSettings');
+		await vscode.commands.executeCommand('nexora.openSettings', section);
 
 		if (this._view && section) {
 			// Show a message about which connector needs configuration
@@ -1330,6 +2185,76 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				role: 'assistant',
 				content: `**Configure ${name}**\n\nOpen Settings panel and add your ${name} credentials in the API Keys section.`,
 				isLoading: false
+			});
+		}
+	}
+
+	private async _pushFirstRunCard(report?: CapabilitiesReport): Promise<void> {
+		if (!this._view) {
+			return;
+		}
+		const caps = report || getCachedCapabilities() || await refreshCapabilities();
+		const dismissed = this._context.globalState.get<boolean>(FIRST_RUN_DISMISSED_KEY, false);
+		if (caps && !allLlmNotConfigured(caps) && dismissed) {
+			await this._context.globalState.update(FIRST_RUN_DISMISSED_KEY, false);
+		}
+		const show = allLlmNotConfigured(caps) && !this._context.globalState.get<boolean>(FIRST_RUN_DISMISSED_KEY, false);
+		this._view.webview.postMessage({ type: 'firstRunKeyCard', show });
+	}
+
+	private async _dismissFirstRunCard(): Promise<void> {
+		await this._context.globalState.update(FIRST_RUN_DISMISSED_KEY, true);
+		if (this._view) {
+			this._view.webview.postMessage({ type: 'firstRunKeyCard', show: false });
+		}
+	}
+
+	private async _handleSaveFirstRunKey(provider: string, key: string): Promise<void> {
+		if (!this._view) {
+			return;
+		}
+		if (!(FIRST_RUN_PROVIDERS as readonly string[]).includes(provider)) {
+			this._view.webview.postMessage({
+				type: 'firstRunKeyResult',
+				success: false,
+				error: 'Choose OpenAI, Anthropic, or OpenRouter'
+			});
+			return;
+		}
+		const trimmed = (key || '').trim();
+		if (!trimmed) {
+			this._view.webview.postMessage({
+				type: 'firstRunKeyResult',
+				success: false,
+				error: 'Paste a key to save'
+			});
+			return;
+		}
+
+		const client = getBackendClient();
+		const settings = getSettingsService(this._context);
+		try {
+			const result = await client.validateApiKey(provider, trimmed);
+			if (!result?.success) {
+				this._view.webview.postMessage({
+					type: 'firstRunKeyResult',
+					success: false,
+					error: result?.error || 'Key validation failed - not saved'
+				});
+				return;
+			}
+			await settings.setApiKey(provider as typeof FIRST_RUN_PROVIDERS[number], trimmed);
+			await refreshCapabilities();
+			this._view.webview.postMessage({ type: 'firstRunKeyResult', success: true });
+			void getNotificationService().showSuccess(
+				`${provider} key saved - used for Chat, Plan, and Agent`
+			);
+			await this._pushFirstRunCard();
+		} catch (error) {
+			this._view.webview.postMessage({
+				type: 'firstRunKeyResult',
+				success: false,
+				error: error instanceof Error ? error.message : 'Save failed'
 			});
 		}
 	}
@@ -1356,12 +2281,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				let errorMsg = '**Deployment Failed**\n\n';
 				errorMsg += 'OAuth connections required:\n';
 				if (!authStatus.github_connected) {
-					errorMsg += '- [ ] GitHub (click GH badge to connect)\n';
+					errorMsg += '- [ ] GitHub (open Settings → Connections)\n';
 				} else {
 					errorMsg += '- [x] GitHub connected\n';
 				}
 				if (!authStatus.vercel_connected) {
-					errorMsg += '- [ ] Vercel (click Vc badge to connect)\n';
+					errorMsg += '- [ ] Vercel (open Settings → Connections)\n';
 				} else {
 					errorMsg += '- [x] Vercel connected\n';
 				}
@@ -1434,7 +2359,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			if (error instanceof Error) {
 				if (error.message.includes('401')) {
 					errorMsg += 'OAuth authentication required. Please connect GitHub and Vercel.\n\n';
-					errorMsg += 'Click the GH and Vc badges in the status bar to connect.';
+					errorMsg += 'Open Settings → Connections to connect GitHub and Vercel.';
 				} else if (error.message.includes('400')) {
 					errorMsg += 'Invalid request. Check repo name and project name format.\n\n';
 					errorMsg += 'Use only alphanumeric characters, hyphens, and underscores.';
@@ -1460,12 +2385,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		// Persist user message with mode
-		const session = this._getActiveSession();
-		if (session) {
-			session.messages.push({ role: 'user', content: request, mode: 'plan', timestamp: Date.now() });
-			await this._persistSessions();
-		}
+		await this._recordUserMessage(request, 'plan');
 
 		this._view.webview.postMessage({
 			type: 'addMessage',
@@ -1482,7 +2402,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				: undefined;
 
 			const llmModel = this._mapUiModelToLiteLlm(model);
-			const plan = await client.generatePlan(request, 'default', workspacePath, llmModel);
+			const atContextRequest = await this._injectAtMentionContext(request);
+			const plan = await client.generatePlan(atContextRequest, 'default', workspacePath, llmModel);
 
 			// Store current plan ID and subscribe to WebSocket updates
 			this._currentPlanId = plan.plan_id;
@@ -1511,6 +2432,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Week 11: Update workflow panel with plan visualization
 			vscode.commands.executeCommand('nexora.updateWorkflowPlan', plan);
+
+			await this._maybeAutoApprovePlan(plan.plan_id);
 
 		} catch (error) {
 			const errMsg = `Error generating plan: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -1588,6 +2511,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			const client = getBackendClient();
 			// This will trigger execution - WebSocket will send real-time updates
 			const result = await client.approvePlan(planId);
+
+			await this._rememberIndexedWorkspace(result);
 
 			// Final result (WebSocket may have already sent updates, but this is the definitive result)
 			this._view.webview.postMessage({
@@ -1884,53 +2809,29 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		const workspacePath = workspaceFolders[0].uri.fsPath;
+		await this._handleAcceptSuggestion('index-workspace');
+	}
 
-		this._view.webview.postMessage({
-			type: 'addMessage',
-			role: 'assistant',
-			content: `Indexing workspace: ${workspacePath}...`,
-			isLoading: true
+	private async _rememberIndexedWorkspace(result: { tasks?: Array<{ operation?: string; status?: string; result?: { workspace_id?: string } }> }): Promise<void> {
+		const tasks = result.tasks || [];
+		const indexed = tasks.find((task) => {
+			const op = (task.operation || '').toLowerCase();
+			const status = (task.status || '').toLowerCase();
+			return (op === 'index' || op === 'index_workspace') && status === 'success' && !!task.result?.workspace_id;
 		});
-
-		try {
-			const client = getBackendClient();
-			const result = await client.indexWorkspace(workspacePath);
-
-			const wid =
-				(typeof result?.workspace_id === 'string' && result.workspace_id) ? result.workspace_id :
-					(typeof result?.workspace_context?.workspace_id === 'string' ? result.workspace_context.workspace_id : undefined);
-
-			const active = this._getActiveSession();
-			if (active && wid) {
-				active.memoryWorkspaceId = wid;
-				active.memoryWorkspacePath = workspacePath;
-				await this._persistSessions();
-			}
-
-			let response = `**Workspace Indexed**\n\n`;
-			response += `- **Workspace ID:** ${wid || 'unknown'}\n`;
-			response += `- **Files indexed:** ${result.files_indexed || 'N/A'}\n`;
-			response += `- **Status:** ${result.status || 'completed'}\n`;
-
-			await this._appendAssistantToSession(response);
-			this._view.webview.postMessage({
-				type: 'addMessage',
-				role: 'assistant',
-				content: response,
-				isLoading: false
-			});
-
-		} catch (error) {
-			const errMsg = `Error indexing workspace: ${error instanceof Error ? error.message : 'Unknown error'}`;
-			await this._appendAssistantToSession(errMsg);
-			this._view.webview.postMessage({
-				type: 'addMessage',
-				role: 'assistant',
-				content: errMsg,
-				isLoading: false
-			});
+		if (!indexed?.result?.workspace_id) {
+			return;
 		}
+		const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const active = this._getActiveSession();
+		if (!active || !folder) {
+			return;
+		}
+		active.memoryWorkspaceId = indexed.result.workspace_id;
+		active.memoryWorkspacePath = folder;
+		this._cachedWorkspaceId = indexed.result.workspace_id;
+		this._cachedWorkspacePath = folder;
+		void this._persistSessions();
 	}
 
 	private async _handleExecuteRequest(request: string, model?: string): Promise<void> {
@@ -1938,12 +2839,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		// Persist user message with mode
-		const session = this._getActiveSession();
-		if (session) {
-			session.messages.push({ role: 'user', content: request, mode: 'execute', timestamp: Date.now() });
-			await this._persistSessions();
-		}
+		await this._recordUserMessage(request, 'execute');
 
 		// Check if there's an existing approved plan to execute
 		if (this._currentPlanId) {
@@ -1968,6 +2864,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				});
 
 				const result = await client.approvePlan(this._currentPlanId);
+				await this._rememberIndexedWorkspace(result);
 
 				const resultMsg = this._formatExecutionResult(result);
 				const sessionAfter = this._getActiveSession();
@@ -2006,6 +2903,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 
 		// No approved plan - generate and execute immediately
+		// autoApproveModeSwitch: Execute already runs without a Plan/Execute confirm.
 		this._view.webview.postMessage({
 			type: 'addMessage',
 			role: 'assistant',
@@ -2022,7 +2920,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Generate plan
 			const llmModel = this._mapUiModelToLiteLlm(model);
-			const plan = await client.generatePlan(request, 'default', workspacePath, llmModel);
+			const atContextRequest = await this._injectAtMentionContext(request);
+			const plan = await client.generatePlan(atContextRequest, 'default', workspacePath, llmModel);
 
 			// Subscribe to WebSocket
 			const wsClient = getOrchestrationWebSocket('default');
@@ -2050,6 +2949,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 
 			const result = await client.approvePlan(plan.plan_id);
+			await this._rememberIndexedWorkspace(result);
 
 			const resultMsg = this._formatExecutionResult(result);
 			const sessionAfter = this._getActiveSession();
@@ -2088,27 +2988,21 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		// Persist user message with mode
-		const session = this._getActiveSession();
-		if (session) {
-			session.messages.push({ role: 'user', content: request, mode: 'agent', timestamp: Date.now() });
-			await this._persistSessions();
+		const reply = this._beginReply();
+		if (!reply) {
+			return;
 		}
 
-		this._view.webview.postMessage({
-			type: 'addMessage',
-			role: 'assistant',
-			content: '**Agent Mode**\n\nAnalyzing workspace and preparing to make changes...',
-			isLoading: true
-		});
-
-		this._emitChatActivity([{ id: 'backend', label: 'Checking Nexora backend...', done: false }]);
-
 		try {
-			const client = getBackendClient();
-			const isConnected = await client.checkHealth();
+			this._paintWorking();
+			const session = await this._recordUserMessage(request, 'agent');
+			const sessionId = session?.id;
+
+			const isConnected = await this._backendReady();
+			this._assertReply(reply);
 			if (!isConnected) {
 				this._clearChatActivity();
+				this._noteBackendDown();
 				const offline = `Backend is offline. Your request: "${request}"\n\nPlease start the backend server and try again.`;
 				const s0 = this._getActiveSession();
 				if (s0) {
@@ -2123,11 +3017,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				});
 				return;
 			}
-
-			this._emitChatActivity([
-				{ id: 'backend', label: 'Checking Nexora backend...', done: true },
-				{ id: 'folder', label: 'Checking workspace folder...', done: false }
-			]);
 
 			const workspaceFolders = vscode.workspace.workspaceFolders;
 			if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -2147,47 +3036,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 
-			this._emitChatActivity([
-				{ id: 'backend', label: 'Checking Nexora backend...', done: true },
-				{ id: 'folder', label: 'Checking workspace folder...', done: true },
-				{ id: 'workspaceId', label: 'Resolving workspace memory id...', done: false }
-			]);
-
 			const workspacePath = workspaceFolders[0].uri.fsPath;
 			const active = this._getActiveSession();
+			const workspaceId = await this._resolveWorkspaceIdForPath(workspacePath, active);
+			this._assertReply(reply);
 
-			let workspaceId = active?.memoryWorkspaceId;
-			if (!workspaceId) {
-				const mapped = await client.getWorkspaceIdForPath(workspacePath).catch(() => undefined);
-				workspaceId = mapped?.workspace_id;
-				if (active && workspaceId) {
-					active.memoryWorkspaceId = workspaceId;
-					active.memoryWorkspacePath = workspacePath;
-					await this._persistSessions();
-				}
-			}
-
-			// For agent mode, we can work even without indexed workspace
-			// (write tools don't need Memvid, they work with filesystem)
-			if (!workspaceId) {
-				workspaceId = `temp_${Date.now()}`;
-			}
-
-			this._emitChatActivity([
-				{ id: 'backend', label: 'Checking Nexora backend...', done: true },
-				{ id: 'folder', label: 'Checking workspace folder...', done: true },
-				{ id: 'workspaceId', label: 'Resolving workspace memory id...', done: true },
-				{ id: 'agent', label: 'Running agent with edit tools...', done: false }
-			]);
-
-			// Run agent loop with write tools (mode='agent')
 			const llmModel = this._mapUiModelToLiteLlm(model);
+			void this._appendTranscript(sessionId, workspaceId, 'user', request, 'agent');
+			const atContextRequest = await this._injectAtMentionContext(request);
+			this._assertReply(reply);
 			const finalAnswer = await this._runAgentLoopWithMode(
-				request,
+				atContextRequest,
 				workspaceId,
 				workspacePath,
 				llmModel,
-				'agent'
+				'agent',
+				sessionId,
+				reply
 			);
 
 			const sessionAfter = this._getActiveSession();
@@ -2196,15 +3061,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._persistSessions();
 			}
 
+			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'agent');
+
 			this._clearChatActivity();
-			this._view.webview.postMessage({
-				type: 'addMessage',
-				role: 'assistant',
-				content: finalAnswer,
-				isLoading: false
-			});
 		} catch (error) {
+			if (isRequestCancelled(error) || reply.isCancelled()) {
+				await this._finishStopped(reply, 'agent');
+				return;
+			}
 			const errText = `Agent error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|Failed to fetch/i.test(errText)) {
+				this._noteBackendDown();
+			}
 			const sessionAfter = this._getActiveSession();
 			if (sessionAfter) {
 				sessionAfter.messages.push({ role: 'assistant', content: errText, mode: 'agent', timestamp: Date.now() });
@@ -2217,6 +3085,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				content: errText,
 				isLoading: false
 			});
+		} finally {
+			this._endReply(reply);
 		}
 	}
 
@@ -2229,10 +3099,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		workspaceId: string,
 		workspacePath: string,
 		model: string | undefined,
-		mode: AgentMode
+		mode: AgentMode,
+		sessionId?: string,
+		reply?: InFlightReply
 	): Promise<string> {
-		const client = getBackendClient();
-		const maxTurns = 10;
+		const maxTurns = getAgentMaxTurns();
 		let turn = 0;
 
 		// Build initial messages
@@ -2240,19 +3111,35 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			{ role: 'user', content: userMessage }
 		];
 
+		// Track files modified during this agent loop
+		const modifiedFiles = new Set<string>();
+
 		// Track activity items for UI
 		const activityItems: ChatActivityItem[] = [
-			{ id: 'backend', label: 'Checking Nexora backend...', done: true },
-			{ id: 'folder', label: 'Checking workspace folder...', done: true },
-			{ id: 'workspaceId', label: 'Resolving workspace memory id...', done: true },
-			{ id: 'agent', label: mode === 'agent' ? 'Running agent with edit tools...' : 'Running agent loop...', done: false }
+			{ id: 'agent', label: 'Working...', done: false }
 		];
 
 		while (turn < maxTurns) {
 			turn++;
+			// Update turn counter in activity item fields
+			const agentItem = activityItems.find(a => a.id === 'agent');
+			if (agentItem) {
+				agentItem.turn = turn;
+				agentItem.totalTurns = maxTurns;
+			}
+			this._emitChatActivity(activityItems);
+			this._assertReply(reply);
 
-			// Call backend agent turn with mode
-			const response = await client.agentTurn(messages, workspaceId, workspacePath, model, mode);
+			const response = await this._nextAgentLoopTurn(
+				messages,
+				workspaceId,
+				workspacePath,
+				model,
+				mode,
+				sessionId,
+				reply
+			);
+			this._assertReply(reply);
 
 			if (response.type === 'final') {
 				// Agent is done, return the answer
@@ -2263,25 +3150,38 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// Handle tool calls
 			if (response.type === 'tool_calls' && response.tool_calls) {
-				// Update activity with tool names
 				for (const tc of response.tool_calls) {
-					const toolLabel = this._formatToolLabel(tc.name, tc.arguments);
-					const existingTool = activityItems.find(a => a.id === `tool-${tc.id}`);
-					if (!existingTool) {
-						activityItems.push({ id: `tool-${tc.id}`, label: toolLabel, done: false });
-					}
+					this._pushToolActivity(activityItems, tc);
+				}
+				const agentBusy = activityItems.find(a => a.id === 'agent');
+				if (agentBusy) {
+					agentBusy.done = true;
 				}
 				this._emitChatActivity(activityItems);
 
-				// Execute tools (file tools run locally, search_codebase pre-executed on backend)
-				const executed = await executeToolCalls(response.tool_calls, workspacePath);
+				const executed = await executeToolCalls(response.tool_calls, workspacePath, {
+					cancellationToken: this._cancellationTokenFromReply(reply),
+					onToolProgress: (toolCallId, name, progress) => {
+						if (name !== 'run_terminal_command') {
+							return;
+						}
+						this._applyTerminalProgress(activityItems, toolCallId, progress);
+						this._emitChatActivity(activityItems);
+					}
+				});
+				this._assertReply(reply);
 
-				// Mark tools as done in activity
 				for (const ex of executed) {
 					const item = activityItems.find(a => a.id === `tool-${ex.id}`);
 					if (item) {
 						item.done = true;
+						if (item.kind === 'terminal' && !item.status) {
+							item.status = ex.result.success ? 'succeeded' : 'failed';
+						}
 					}
+				}
+				if (agentBusy) {
+					agentBusy.done = false;
 				}
 				this._emitChatActivity(activityItems);
 
@@ -2304,10 +3204,38 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				for (const tm of toolMessages) {
 					messages.push(tm);
 				}
+
+				// Track modified files for multi-file awareness
+				const writeToolNames = new Set(['write_file', 'apply_patch', 'insert_lines']);
+				for (const tc of response.tool_calls) {
+					if (writeToolNames.has(tc.name) && tc.arguments.path) {
+						const ex = executed.find(e => e.id === tc.id);
+						if (ex && ex.result.success) {
+							modifiedFiles.add(tc.arguments.path as string);
+						}
+					}
+				}
+
+				// Inject modified-file context before the next LLM turn
+				if (modifiedFiles.size > 0) {
+					messages.push({
+						role: 'system',
+						content: `[Files modified so far: ${Array.from(modifiedFiles).join(', ')}]`
+					});
+				}
 			}
 		}
 
-		return 'Agent reached maximum turns without completing. Try a more specific request.';
+		const maxMsg = `Agent reached maximum turns (${turn}/${maxTurns}) without completing. Try breaking the request into smaller steps or continue in a new message.`;
+		if (this._view) {
+			this._view.webview.postMessage({
+				type: 'addMessage',
+				role: 'assistant',
+				content: maxMsg,
+				isLoading: false
+			});
+		}
+		return maxMsg;
 	}
 
 	private _getHtmlContent(): string {

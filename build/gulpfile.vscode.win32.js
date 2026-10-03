@@ -122,12 +122,30 @@ function buildWin32Setup(arch, target) {
 }
 
 /**
- * @param {string} arch
- * @param {string} target
+ * Copy the frozen Nexora engine (backend/dist/engine) beside the unpacked app
+ * so Inno [Files] can include it. No-op if the bundle is missing.
  */
+function nexoraEngineBundleDir() {
+	return path.join(path.dirname(repoPath), 'Nexora-IDE-Backend-Architecture', 'backend', 'dist', 'engine');
+}
+
+function copyNexoraEngine(arch) {
+	return cb => {
+		const src = nexoraEngineBundleDir();
+		const dest = path.join(buildPath(arch), 'engine');
+		if (!fs.existsSync(path.join(src, 'nexora-engine.exe'))) {
+			console.warn(`[nexora] engine bundle not found at ${src}; installer may omit engine/`);
+			return cb();
+		}
+		fs.cpSync(src, dest, { recursive: true });
+		console.log(`[nexora] copied engine to ${dest}`);
+		cb();
+	};
+}
+
 function defineWin32SetupTasks(arch, target) {
 	const cleanTask = util.rimraf(setupDir(arch, target));
-	gulp.task(task.define(`vscode-win32-${arch}-${target}-setup`, task.series(cleanTask, buildWin32Setup(arch, target))));
+	gulp.task(task.define(`vscode-win32-${arch}-${target}-setup`, task.series(cleanTask, copyNexoraEngine(arch), buildWin32Setup(arch, target))));
 }
 
 defineWin32SetupTasks('x64', 'system');

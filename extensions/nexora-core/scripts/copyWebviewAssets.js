@@ -53,6 +53,9 @@ function main() {
 	// Week 16: Templates + Timeline panel assets
 	copyWebviewFolder(root, 'templates', ['templates.css', 'templates.js']);
 	copyWebviewFolder(root, 'timeline', ['timeline.css', 'timeline.js']);
+
+	// Platforms editor page assets
+	copyWebviewFolder(root, 'platforms', ['platforms.css', 'platforms.js']);
 }
 
 main();
