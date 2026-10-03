@@ -30,36 +30,50 @@
         {
           "type": "webview",
           "id": "nexora.chatPanel",
-          "name": "Nexora Chat",
+          "name": "Chat",
           "visibility": "visible"
-        },
+        }
+      ],
+      "panel": [
         {
           "type": "webview",
           "id": "nexora.workflowViewer",
           "name": "Workflow",
-          "visibility": "collapsed"
+          "icon": "$(type-hierarchy)",
+          "visibility": "visible"
+        },
+        {
+          "type": "webview",
+          "id": "nexora.analytics",
+          "name": "Analytics",
+          "icon": "$(graph)",
+          "visibility": "visible"
         },
         {
           "type": "webview",
           "id": "nexora.outputViewer",
-          "name": "Output",
-          "visibility": "collapsed"
-        },
-        {
-          "id": "nexora.taskTree",
-          "name": "Task Plan",
-          "visibility": "collapsed"
-        },
-        {
-          "id": "nexora.platformBrowser",
-          "name": "Platform Browser",
-          "visibility": "collapsed"
+          "name": "Task Output",
+          "icon": "$(output)",
+          "visibility": "visible"
         },
         {
           "type": "webview",
           "id": "nexora.settings",
           "name": "Settings",
-          "visibility": "collapsed"
+          "icon": "$(gear)",
+          "visibility": "visible"
+        },
+        {
+          "id": "nexora.taskTree",
+          "name": "Task Plan",
+          "icon": "$(list-tree)",
+          "visibility": "visible"
+        },
+        {
+          "id": "nexora.platformBrowser",
+          "name": "Platforms",
+          "icon": "$(plug)",
+          "visibility": "visible"
         }
       ]
     },
@@ -118,6 +132,11 @@
         "category": "Nexora"
       },
       {
+        "command": "nexora.openNexoraPanel",
+        "title": "Open Nexora Panel",
+        "category": "Nexora"
+      },
+      {
         "command": "nexora.newSession",
         "title": "New Chat Session",
         "category": "Nexora"
@@ -141,6 +160,17 @@
         "command": "nexora.refreshSettings",
         "title": "Refresh Settings Status",
         "category": "Nexora"
+      },
+      {
+        "command": "nexora.openAnalytics",
+        "title": "Open Analytics",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.refreshAnalytics",
+        "title": "Refresh Analytics",
+        "category": "Nexora",
+        "icon": "$(refresh)"
       }
     ],
     "menus": {
@@ -163,6 +193,11 @@
         {
           "command": "nexora.refreshSettings",
           "when": "view == nexora.settings",
+          "group": "navigation"
+        },
+        {
+          "command": "nexora.refreshAnalytics",
+          "when": "view == nexora.analytics",
           "group": "navigation"
         }
       ]
@@ -193,6 +228,11 @@
         "command": "nexora.openSettings",
         "key": "ctrl+alt+,",
         "mac": "cmd+alt+,"
+      },
+      {
+        "command": "nexora.openAnalytics",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a"
       },
       {
         "command": "nexora.showKeyboardShortcuts",

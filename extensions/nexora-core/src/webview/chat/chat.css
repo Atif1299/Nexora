@@ -923,6 +923,28 @@ body
 	font-weight: 500;
 }
 
+.nx-costBreakdown
+{
+	padding: 8px 16px 4px;
+	border-bottom: 1px solid color-mix(in srgb, var(--nx-border) 50%, transparent);
+	font-size: 11px;
+}
+
+.nx-costBreakdownTitle
+{
+	color: var(--nx-muted);
+	margin-bottom: 6px;
+	font-weight: 600;
+}
+
+.nx-costRow
+{
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 2px 0;
+}
+
 .nx-planTasks
 {
 	padding: var(--nx-space-2) 0;

@@ -10,6 +10,7 @@ import { TaskTreeProvider } from './taskTreeProvider';
 import { WorkflowPanelProvider } from './workflowPanel';
 import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { SettingsPanelProvider } from './settingsPanel';
+import { AnalyticsPanelProvider } from './analyticsPanel';
 import { getBackendClient, setApiKeyHeaderProvider } from './services/backendClient';
 import { getSettingsService } from './services/settingsService';
 import { getNotificationService } from './services/notificationService';
@@ -60,27 +61,34 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
+	const retainHidden = {
+		webviewOptions: { retainContextWhenHidden: true }
+	};
+
 	const chatProvider = new ChatPanelProvider(context.extensionUri, context);
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider('nexora.chatPanel', chatProvider)
+		vscode.window.registerWebviewViewProvider('nexora.chatPanel', chatProvider, retainHidden)
 	);
 
-	// Week 11: Workflow Panel (DAG visualization)
+	// Week 11: Workflow / Output live in the bottom panel as horizontal tabs
 	const workflowProvider = new WorkflowPanelProvider(context.extensionUri);
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider('nexora.workflowViewer', workflowProvider)
+		vscode.window.registerWebviewViewProvider('nexora.workflowViewer', workflowProvider, retainHidden)
 	);
 
-	// Week 11: Output Panel (task results and logs)
 	const outputProvider = new OutputPanelProvider(context.extensionUri);
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider('nexora.outputViewer', outputProvider)
+		vscode.window.registerWebviewViewProvider('nexora.outputViewer', outputProvider, retainHidden)
 	);
 
-	// Week 12: Settings Panel
 	const settingsProvider = new SettingsPanelProvider(context.extensionUri, context);
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider(SettingsPanelProvider.viewType, settingsProvider)
+		vscode.window.registerWebviewViewProvider(SettingsPanelProvider.viewType, settingsProvider, retainHidden)
+	);
+
+	const analyticsProvider = new AnalyticsPanelProvider(context.extensionUri);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(AnalyticsPanelProvider.viewType, analyticsProvider, retainHidden)
 	);
 
 	const platformProvider = new PlatformBrowserProvider();
@@ -140,6 +148,11 @@ export function activate(context: vscode.ExtensionContext) {
 			console.log(`[Nexora] Plan ${message.plan_id} completed with status: ${message.status}`);
 			void setOperationInProgress(false);
 			notifications.handleOrchestrationEvent(message);
+			void analyticsProvider.refresh();
+		}
+
+		if (message.type === 'task_success') {
+			void analyticsProvider.refresh();
 		}
 	});
 
@@ -219,16 +232,20 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.showTaskOutput', (taskId: string) => {
 			outputProvider.showTaskOutput(taskId);
 		}),
-		vscode.commands.registerCommand('nexora.openWorkflow', () => {
-			vscode.commands.executeCommand('nexora.workflowViewer.focus');
+		vscode.commands.registerCommand('nexora.openNexoraPanel', async () => {
+			await vscode.commands.executeCommand('nexora.workflowViewer.focus');
 		}),
-		vscode.commands.registerCommand('nexora.openOutput', () => {
-			vscode.commands.executeCommand('nexora.outputViewer.focus');
+		vscode.commands.registerCommand('nexora.openWorkflow', async () => {
+			await vscode.commands.executeCommand('nexora.workflowViewer.focus');
+		}),
+		vscode.commands.registerCommand('nexora.openOutput', async () => {
+			await vscode.commands.executeCommand('nexora.outputViewer.focus');
 		}),
 		vscode.commands.registerCommand('nexora.updateWorkflowPlan', (plan: any) => {
 			if (plan && plan.tasks) {
 				workflowProvider.updatePlan(plan);
 				outputProvider.clearOutputs();
+				void vscode.commands.executeCommand('nexora.workflowViewer.focus');
 			}
 		}),
 		vscode.commands.registerCommand('nexora.newSession', async () => {
@@ -254,6 +271,14 @@ export function activate(context: vscode.ExtensionContext) {
 			await settingsProvider.refresh();
 			void notifications.showInfo('Settings status refreshed');
 		}),
+		vscode.commands.registerCommand('nexora.openAnalytics', async () => {
+			await vscode.commands.executeCommand('nexora.analytics.focus');
+			await analyticsProvider.refresh();
+		}),
+		vscode.commands.registerCommand('nexora.refreshAnalytics', async () => {
+			await analyticsProvider.refresh();
+			void notifications.showInfo('Analytics refreshed');
+		}),
 		vscode.commands.registerCommand('nexora.showKeyboardShortcuts', async () => {
 			const lines = [
 				'Nexora Keyboard Shortcuts',
@@ -261,7 +286,8 @@ export function activate(context: vscode.ExtensionContext) {
 				'Ctrl+K          Open Chat',
 				'Ctrl+Shift+K    New Session',
 				'Ctrl+Alt+I      Open Chat (legacy)',
-				'Ctrl+Alt+,      Open Nexora Settings',
+				'Ctrl+Alt+,      Open Settings tab',
+				'Ctrl+Alt+A      Open Analytics tab',
 				'Escape          Cancel operation (when in progress)',
 				'Ctrl+Shift+/    Show this help'
 			];

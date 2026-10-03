@@ -614,6 +614,19 @@
 		`;
 		card.appendChild(header);
 
+		if (Array.isArray(plan.cost_breakdown) && plan.cost_breakdown.length) {
+			const breakdown = document.createElement('div');
+			breakdown.className = 'nx-costBreakdown';
+			breakdown.innerHTML = '<div class="nx-costBreakdownTitle">Cost breakdown</div>' +
+				plan.cost_breakdown.map(item => `
+					<div class="nx-costRow">
+						<span>${escapeHtml(item.task || item.platform || 'task')} · ${escapeHtml(item.platform || '')}</span>
+						<span>$${(item.estimated_cost || 0).toFixed(4)}</span>
+					</div>
+				`).join('');
+			card.appendChild(breakdown);
+		}
+
 		const taskList = document.createElement('div');
 		taskList.className = 'nx-planTasks';
 		taskList.id = 'plan-tasks-' + plan.plan_id;
