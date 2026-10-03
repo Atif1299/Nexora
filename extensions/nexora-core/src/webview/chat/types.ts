@@ -11,7 +11,7 @@ export type WebviewInboundMessage =
 	| { type: 'generateCode'; prompt: string; connector: string }
 	| { type: 'connectGitHub' }
 	| { type: 'connectVercel' }
-	| { type: 'toggleSaas'; provider: 'supabase' | 'stripe' | 'v0' }
+	| { type: 'toggleSaas'; provider: 'supabase' | 'stripe' | 'v0' | 'elevenlabs' | 'tavily' }
 	| { type: 'openSettings'; section?: string }  // Week 13: SaaS connector settings
 	| { type: 'deployProject'; prompt: string; repoName: string; projectName: string }
 	| { type: 'checkAuthStatus' }
@@ -37,7 +37,7 @@ export type WebviewOutboundMessage =
 	| { type: 'chatActivity'; items: ChatActivityItem[] }
 	| { type: 'chatActivityClear' }
 	| { type: 'backendStatus'; connected: boolean }
-	| { type: 'authStatus'; github: boolean; vercel: boolean; supabase?: boolean; stripe?: boolean; v0?: boolean }
+	| { type: 'authStatus'; github: boolean; vercel: boolean; supabase?: boolean; stripe?: boolean; v0?: boolean; elevenlabs?: boolean; tavily?: boolean }
 	| { type: 'showPlanApproval'; plan: any }
 	| { type: 'loadSession'; sessionId: string; messages: Array<{ role: 'user' | 'assistant'; content: string }> }
 	| { type: 'updateSessions'; sessions: Array<{ id: string; name: string }>; activeSessionId: string }
@@ -55,6 +55,8 @@ export type ChatInitialState = {
 		supabase?: boolean;
 		stripe?: boolean;
 		v0?: boolean;
+		elevenlabs?: boolean;
+		tavily?: boolean;
 	};
 	messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
 	sessions?: Array<{ id: string; name: string }>;

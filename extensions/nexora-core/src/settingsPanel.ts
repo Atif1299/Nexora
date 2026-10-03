@@ -10,7 +10,7 @@ import { getBackendClient } from './services/backendClient';
 import { getNotificationService } from './services/notificationService';
 
 const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'openrouter'];
-const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0'] as const;
+const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0', 'elevenlabs', 'tavily'] as const;
 type SaasProvider = (typeof SAAS_PROVIDERS)[number];
 
 function isApiKeyProvider(value: string): value is ApiKeyProvider {
@@ -123,6 +123,8 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 		configured['supabase_key'] = !!authStatus.supabase_configured;
 		configured['stripe'] = !!authStatus.stripe_configured;
 		configured['v0'] = !!authStatus.v0_configured;
+		configured['elevenlabs'] = !!authStatus.elevenlabs_configured;
+		configured['tavily'] = !!authStatus.tavily_configured;
 
 		this._view.webview.postMessage({
 			type: 'updateState',
@@ -373,7 +375,9 @@ export class SettingsPanelProvider implements vscode.WebviewViewProvider {
 			'supabase_url': 'SUPABASE_URL',
 			'supabase_key': 'SUPABASE_SERVICE_KEY',
 			'stripe': 'STRIPE_SECRET_KEY',
-			'v0': 'V0_API_KEY'
+			'v0': 'V0_API_KEY',
+			'elevenlabs': 'ELEVENLABS_API_KEY',
+			'tavily': 'TAVILY_API_KEY'
 		};
 		return envKeyMap[provider] || provider.toUpperCase();
 	}

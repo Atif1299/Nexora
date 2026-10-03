@@ -24,6 +24,8 @@
 	const supabaseBadge = document.getElementById('supabaseBadge');
 	const stripeBadge = document.getElementById('stripeBadge');
 	const v0Badge = document.getElementById('v0Badge');
+	const elevenlabsBadge = document.getElementById('elevenlabsBadge');
+	const tavilyBadge = document.getElementById('tavilyBadge');
 	const welcome = document.getElementById('welcome');
 	const sessionSelect = document.getElementById('sessionSelect');
 	const newSessionBtn = document.getElementById('newSessionBtn');
@@ -333,7 +335,7 @@
 		}
 	}
 
-	function updateAuthStatus(github, vercel, supabase, stripe, v0) {
+	function updateAuthStatus(github, vercel, supabase, stripe, v0, elevenlabs, tavily) {
 		githubBadge.classList.toggle('nx-connected', !!github);
 		githubBadge.title = github ? 'GitHub connected (click to reconnect)' : 'Click to connect GitHub';
 
@@ -354,6 +356,20 @@
 		v0Badge.title = v0
 			? 'v0.dev enabled (click to disable)'
 			: 'v0.dev disabled (click to enable or configure)';
+
+		if (elevenlabsBadge) {
+			elevenlabsBadge.classList.toggle('nx-connected', !!elevenlabs);
+			elevenlabsBadge.title = elevenlabs
+				? 'ElevenLabs enabled (click to disable)'
+				: 'ElevenLabs disabled (click to enable or configure)';
+		}
+
+		if (tavilyBadge) {
+			tavilyBadge.classList.toggle('nx-connected', !!tavily);
+			tavilyBadge.title = tavily
+				? 'Tavily enabled (click to disable)'
+				: 'Tavily disabled (click to enable or configure)';
+		}
 	}
 
 	function toggleSaasBadge(provider) {
@@ -853,6 +869,12 @@
 	supabaseBadge.onclick = () => toggleSaasBadge('supabase');
 	stripeBadge.onclick = () => toggleSaasBadge('stripe');
 	v0Badge.onclick = () => toggleSaasBadge('v0');
+	if (elevenlabsBadge) {
+		elevenlabsBadge.onclick = () => toggleSaasBadge('elevenlabs');
+	}
+	if (tavilyBadge) {
+		tavilyBadge.onclick = () => toggleSaasBadge('tavily');
+	}
 
 	// Quick action buttons
 	document.querySelectorAll('.nx-quickBtn').forEach(btn => {
@@ -937,7 +959,7 @@
 				break;
 
 			case 'authStatus':
-				updateAuthStatus(data.github, data.vercel, data.supabase, data.stripe, data.v0);
+				updateAuthStatus(data.github, data.vercel, data.supabase, data.stripe, data.v0, data.elevenlabs, data.tavily);
 				break;
 
 			case 'showPlanApproval':
@@ -981,7 +1003,7 @@
 	// Initialize
 	updateModeUI();
 	updateStatus(!!initial.connected);
-	updateAuthStatus(!!initial.auth.github, !!initial.auth.vercel, !!initial.auth.supabase, !!initial.auth.stripe, !!initial.auth.v0);
+	updateAuthStatus(!!initial.auth.github, !!initial.auth.vercel, !!initial.auth.supabase, !!initial.auth.stripe, !!initial.auth.v0, !!initial.auth.elevenlabs, !!initial.auth.tavily);
 
 	if (initial.sessions && initial.activeSessionId) {
 		renderSessions(initial.sessions, initial.activeSessionId);
