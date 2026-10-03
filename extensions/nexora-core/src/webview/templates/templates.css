@@ -14,8 +14,10 @@
 	--nx-btn-hover: var(--vscode-button-hoverBackground);
 	--nx-btn2-bg: var(--vscode-button-secondaryBackground);
 	--nx-btn2-fg: var(--vscode-button-secondaryForeground);
-	--nx-ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
-	--nx-bar: var(--vscode-charts-blue, var(--vscode-button-background));
+	--nx-focus: var(--vscode-focusBorder);
+	--nx-input-bg: var(--vscode-input-background);
+	--nx-input-fg: var(--vscode-input-foreground);
+	--nx-input-border: var(--vscode-input-border);
 }
 
 * { box-sizing: border-box; }
@@ -29,7 +31,7 @@ body {
 	background: var(--nx-bg);
 }
 
-#analytics-root {
+#templates-root {
 	padding: 12px;
 	display: flex;
 	flex-direction: column;
@@ -55,6 +57,11 @@ h1 {
 	gap: 8px;
 }
 
+.nx-head-actions {
+	display: flex;
+	gap: 6px;
+}
+
 .nx-hint {
 	margin: 0;
 	font-size: 11px;
@@ -70,14 +77,23 @@ h1 {
 	font-size: 12px;
 }
 
+.nx-btn-primary {
+	background: var(--nx-btn-bg);
+	color: var(--nx-btn-fg);
+}
+
+.nx-btn-primary:hover {
+	background: var(--nx-btn-hover);
+}
+
 .nx-btn-secondary {
 	background: var(--nx-btn2-bg);
 	color: var(--nx-btn2-fg);
 }
 
-.nx-cards {
-	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
+.nx-list {
+	display: flex;
+	flex-direction: column;
 	gap: 8px;
 }
 
@@ -88,86 +104,101 @@ h1 {
 	padding: 10px;
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: 8px;
 }
 
-.nx-cardLabel {
+.nx-cardHead {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.nx-cardTitle {
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.nx-badge {
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--nx-muted);
+	border: 1px solid var(--nx-border);
+	border-radius: 4px;
+	padding: 1px 6px;
+}
+
+.nx-cardMeta {
 	font-size: 11px;
 	color: var(--nx-muted);
 }
 
-.nx-cardValue {
-	font-size: 16px;
-	font-weight: 600;
-	font-variant-numeric: tabular-nums;
+.nx-cardActions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
 }
 
-.nx-cardTrend {
+.nx-form {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding-top: 4px;
+	border-top: 1px solid var(--nx-border);
+}
+
+.nx-field {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.nx-field label {
 	font-size: 11px;
-	color: var(--nx-ok);
+	color: var(--nx-muted);
 }
 
-.nx-chart,
-.nx-bars,
-.nx-stats,
-.nx-memory {
+.nx-field input,
+.nx-field select {
+	background: var(--nx-input-bg);
+	color: var(--nx-input-fg);
+	border: 1px solid var(--nx-input-border, var(--nx-border));
+	border-radius: 4px;
+	padding: 4px 8px;
+	font-size: 12px;
+	font-family: inherit;
+}
+
+.nx-field input:focus,
+.nx-field select:focus {
+	outline: 1px solid var(--nx-focus);
+	outline-offset: 1px;
+}
+
+.nx-formActions {
+	display: flex;
+	gap: 6px;
+}
+
+.nx-preview {
 	border: 1px solid var(--nx-border);
 	border-radius: 6px;
 	background: var(--nx-surface);
 	padding: 10px;
-}
-
-.nx-dayRow,
-.nx-barRow,
-.nx-fileRow {
-	display: grid;
-	grid-template-columns: 72px 1fr 56px;
-	gap: 8px;
-	align-items: center;
-	margin-bottom: 6px;
-	font-size: 11px;
-}
-
-.nx-barRow {
-	grid-template-columns: 88px 1fr 64px;
-}
-
-.nx-fileRow {
-	grid-template-columns: 1fr auto;
-}
-
-.nx-barTrack {
-	height: 8px;
-	border-radius: 4px;
-	background: color-mix(in srgb, var(--nx-border) 70%, transparent);
-	overflow: hidden;
-}
-
-.nx-barFill {
-	height: 100%;
-	background: var(--nx-bar);
-	border-radius: 4px;
-}
-
-.nx-muted {
-	color: var(--nx-muted);
-}
-
-.nx-statGrid {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
 	font-size: 12px;
 }
 
-.nx-empty {
-	font-size: 12px;
-	color: var(--nx-muted);
-	padding: 8px 0;
+.nx-previewTitle {
+	font-weight: 600;
+	font-size: 13px;
 }
 
 .nx-banner {
-	margin: 8px 0 12px;
+	margin: 0;
 	padding: 8px 10px;
 	border-radius: 4px;
 	font-size: 12px;
@@ -176,30 +207,14 @@ h1 {
 	color: var(--vscode-foreground);
 }
 
-.nx-recentRow {
-	display: grid;
-	grid-template-columns: 1fr 1.2fr auto auto auto auto;
-	gap: 8px;
-	align-items: center;
+.nx-empty {
 	font-size: 12px;
-	padding: 4px 0;
-	border-bottom: 1px solid var(--nx-border, rgba(128, 128, 128, 0.2));
+	color: var(--nx-muted);
+	padding: 8px 0;
 }
 
-.nx-recentRow:last-child {
-	border-bottom: none;
-}
-
-.nx-recentPlatform {
-	font-weight: 600;
-}
-
-.nx-recentStatus {
-	text-transform: capitalize;
-}
-
-.nx-recentRow-failed .nx-recentStatus {
-	color: var(--vscode-errorForeground, #f14c4c);
+.nx-muted {
+	color: var(--nx-muted);
 }
 
 .sr-only {

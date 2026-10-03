@@ -27,6 +27,12 @@
 	const elevenlabsBadge = document.getElementById('elevenlabsBadge');
 	const tavilyBadge = document.getElementById('tavilyBadge');
 	const welcome = document.getElementById('welcome');
+	const suggestionStrip = document.getElementById('suggestionStrip');
+	const suggestTitle = document.getElementById('suggestTitle');
+	const suggestReason = document.getElementById('suggestReason');
+	const suggestRun = document.getElementById('suggestRun');
+	const suggestLater = document.getElementById('suggestLater');
+	const suggestNever = document.getElementById('suggestNever');
 	const sessionSelect = document.getElementById('sessionSelect');
 	const newSessionBtn = document.getElementById('newSessionBtn');
 	const deleteSessionBtn = document.getElementById('deleteSessionBtn');
@@ -35,6 +41,8 @@
 	let chatActivityCard = null;
 	let currentPlan = null;
 	let planCardElement = null;
+	let currentSuggestionId = null;
+	let saveTemplateCard = null;
 	let currentMode = 'chat';
 	let activeSessionId = null;
 	let openDdRoot = null;
@@ -810,6 +818,82 @@
 		currentPlan = null;
 	}
 
+	function showSuggestion(suggestion) {
+		if (!suggestionStrip) {
+			return;
+		}
+		if (!suggestion || !suggestion.id) {
+			currentSuggestionId = null;
+			suggestionStrip.hidden = true;
+			return;
+		}
+		currentSuggestionId = suggestion.id;
+		if (suggestTitle) {
+			suggestTitle.textContent = suggestion.title || 'Suggested next step';
+		}
+		if (suggestReason) {
+			suggestReason.textContent = suggestion.reason || '';
+		}
+		suggestionStrip.hidden = false;
+	}
+
+	function hideSuggestion() {
+		currentSuggestionId = null;
+		if (suggestionStrip) {
+			suggestionStrip.hidden = true;
+		}
+	}
+
+	function showSaveTemplateForm(planId, parameters) {
+		if (welcome) {
+			welcome.style.display = 'none';
+		}
+		if (saveTemplateCard) {
+			saveTemplateCard.remove();
+		}
+
+		const card = document.createElement('div');
+		card.className = 'nx-saveCard';
+		card.id = 'save-template-' + planId;
+
+		const params = Array.isArray(parameters) ? parameters : [];
+		const rows = params.map((param, index) => {
+			const included = param.suggest_only ? '' : ' checked';
+			return `
+				<div class="nx-saveParam" data-index="${index}">
+					<label><input type="checkbox" data-include${included} /> include</label>
+					<input type="text" data-name value="${escapeHtml(param.name || '')}" placeholder="name" />
+					<input type="text" data-value value="${escapeHtml(param.source_value || '')}" placeholder="value" />
+				</div>
+			`;
+		}).join('');
+
+		card.innerHTML = `
+			<div class="nx-saveTitle">Save as template</div>
+			<div class="nx-saveField">
+				<label for="saveTplName">Name</label>
+				<input id="saveTplName" type="text" value="Saved workflow" />
+			</div>
+			<div class="nx-saveField">
+				<label for="saveTplDesc">Description</label>
+				<input id="saveTplDesc" type="text" value="" />
+			</div>
+			<div class="nx-saveField">
+				<label for="saveTplCat">Category</label>
+				<input id="saveTplCat" type="text" value="custom" />
+			</div>
+			${rows}
+			<div class="nx-saveActions">
+				<button type="button" class="nx-saveConfirm" id="saveTplConfirm" data-plan-id="${escapeHtml(planId)}">Save template</button>
+				<button type="button" class="nx-saveCancel" id="saveTplCancel">Cancel</button>
+			</div>
+		`;
+
+		messages.appendChild(card);
+		messages.scrollTop = messages.scrollHeight;
+		saveTemplateCard = card;
+	}
+
 	function handleSend() {
 		const text = input.value.trim();
 		if (!text) {
@@ -932,6 +1016,50 @@
 			}
 		}
 
+		if (target.id === 'saveTplConfirm') {
+			const planId = target.getAttribute('data-plan-id');
+			const card = document.getElementById('save-template-' + planId);
+			if (!card || !planId) {
+				return;
+			}
+			const name = (card.querySelector('#saveTplName') || {}).value || 'Saved workflow';
+			const description = (card.querySelector('#saveTplDesc') || {}).value || '';
+			const category = (card.querySelector('#saveTplCat') || {}).value || 'custom';
+			const parameters = [];
+			card.querySelectorAll('.nx-saveParam').forEach(row => {
+				const include = row.querySelector('[data-include]');
+				if (include && !include.checked) {
+					return;
+				}
+				parameters.push({
+					name: (row.querySelector('[data-name]') || {}).value || '',
+					source_value: (row.querySelector('[data-value]') || {}).value || '',
+					type: 'string',
+					required: true
+				});
+			});
+			vscode.postMessage({
+				type: 'confirmSaveTemplate',
+				planId: planId,
+				name: name,
+				description: description,
+				category: category,
+				parameters: parameters
+			});
+			card.remove();
+			saveTemplateCard = null;
+			return;
+		}
+
+		if (target.id === 'saveTplCancel') {
+			if (saveTemplateCard) {
+				saveTemplateCard.remove();
+				saveTemplateCard = null;
+			}
+			vscode.postMessage({ type: 'cancelSaveTemplate' });
+			return;
+		}
+
 		if (target.classList.contains('nx-cancelBtn')) {
 			const planId = target.getAttribute('data-plan-id');
 			if (planId) {
@@ -946,6 +1074,34 @@
 			}
 		}
 	});
+
+	if (suggestRun) {
+		suggestRun.addEventListener('click', () => {
+			if (!currentSuggestionId) {
+				return;
+			}
+			vscode.postMessage({ type: 'acceptSuggestion', id: currentSuggestionId });
+			hideSuggestion();
+		});
+	}
+	if (suggestLater) {
+		suggestLater.addEventListener('click', () => {
+			if (!currentSuggestionId) {
+				return;
+			}
+			vscode.postMessage({ type: 'dismissSuggestion', id: currentSuggestionId, permanent: false });
+			hideSuggestion();
+		});
+	}
+	if (suggestNever) {
+		suggestNever.addEventListener('click', () => {
+			if (!currentSuggestionId) {
+				return;
+			}
+			vscode.postMessage({ type: 'dismissSuggestion', id: currentSuggestionId, permanent: true });
+			hideSuggestion();
+		});
+	}
 
 	// Message handler from extension
 	window.addEventListener('message', (e) => {
@@ -1009,6 +1165,14 @@
 
 			case 'planCompleted':
 				showPlanComplete(data.planId, data.status, null, data.actualCost);
+				break;
+
+			case 'showSaveTemplate':
+				showSaveTemplateForm(data.planId, data.parameters);
+				break;
+
+			case 'showSuggestion':
+				showSuggestion(data.suggestion);
 				break;
 		}
 	});

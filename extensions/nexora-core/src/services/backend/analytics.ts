@@ -57,7 +57,23 @@ export interface MemoryInsights {
 	retrievals_this_week: number;
 	avg_latency_ms: number;
 	top_files: MemoryFileHit[];
+	/** Share of all requests that memory informed. */
 	pct_requests_using_memory: number;
+	/** Share of memory lookups that returned context. */
+	memory_hit_rate: number;
+	total_requests: number;
+	requests_using_memory: number;
+}
+
+export interface RecentExecution {
+	task_id: string;
+	platform: string;
+	operation: string;
+	status: string;
+	cost_usd: number;
+	estimated_cost_usd: number;
+	duration_ms: number;
+	completed_at: string | null;
 }
 
 export interface AnalyticsDashboardData {
@@ -66,6 +82,10 @@ export interface AnalyticsDashboardData {
 	byPlatform: PlatformCostItem[];
 	stats: ExecutionStats;
 	memory: MemoryInsights;
+	recent: RecentExecution[];
+	/** False when the backend could not be reached, so zeros must not be shown as fact. */
+	available: boolean;
+	error?: string;
 }
 
 const emptySummary = (): CostSummary => ({
@@ -93,76 +113,87 @@ const emptyMemory = (): MemoryInsights => ({
 	retrievals_this_week: 0,
 	avg_latency_ms: 0,
 	top_files: [],
-	pct_requests_using_memory: 0
+	pct_requests_using_memory: 0,
+	memory_hit_rate: 0,
+	total_requests: 0,
+	requests_using_memory: 0
+});
+
+const emptyDashboard = (error: string): AnalyticsDashboardData => ({
+	summary: emptySummary(),
+	daily: [],
+	byPlatform: [],
+	stats: emptyStats(),
+	memory: emptyMemory(),
+	recent: [],
+	available: false,
+	error
 });
 
 export function createAnalyticsApi(transport: Transport) {
-	return {
+	const api = {
 		getCostSummary: async (userId: string = 'default'): Promise<CostSummary> => {
-			try {
-				const response = await transport.get(
-					`/api/analytics/costs/summary?user_id=${encodeURIComponent(userId)}`
-				);
-				return response || emptySummary();
-			} catch {
-				return emptySummary();
-			}
+			const response = await transport.getStrict(
+				`/api/analytics/costs/summary?user_id=${encodeURIComponent(userId)}`
+			);
+			return response || emptySummary();
 		},
 
 		getDailyCosts: async (days: number = 7, userId: string = 'default'): Promise<DailyCostItem[]> => {
-			try {
-				const response = await transport.get(
-					`/api/analytics/costs/daily?days=${days}&user_id=${encodeURIComponent(userId)}`
-				);
-				return response?.data || [];
-			} catch {
-				return [];
-			}
+			const response = await transport.getStrict(
+				`/api/analytics/costs/daily?days=${days}&user_id=${encodeURIComponent(userId)}`
+			);
+			return response?.data || [];
 		},
 
 		getCostsByPlatform: async (userId: string = 'default'): Promise<PlatformCostItem[]> => {
-			try {
-				const response = await transport.get(
-					`/api/analytics/costs/by-platform?user_id=${encodeURIComponent(userId)}`
-				);
-				return response?.data || [];
-			} catch {
-				return [];
-			}
+			const response = await transport.getStrict(
+				`/api/analytics/costs/by-platform?user_id=${encodeURIComponent(userId)}`
+			);
+			return response?.data || [];
 		},
 
 		getExecutionStats: async (userId: string = 'default'): Promise<ExecutionStats> => {
-			try {
-				const response = await transport.get(
-					`/api/analytics/executions/stats?user_id=${encodeURIComponent(userId)}`
-				);
-				return response || emptyStats();
-			} catch {
-				return emptyStats();
-			}
+			const response = await transport.getStrict(
+				`/api/analytics/executions/stats?user_id=${encodeURIComponent(userId)}`
+			);
+			return response || emptyStats();
 		},
 
 		getMemoryInsights: async (userId: string = 'default'): Promise<MemoryInsights> => {
-			try {
-				const response = await transport.get(
-					`/api/analytics/memory/insights?user_id=${encodeURIComponent(userId)}`
-				);
-				return response || emptyMemory();
-			} catch {
-				return emptyMemory();
-			}
+			const response = await transport.getStrict(
+				`/api/analytics/memory/insights?user_id=${encodeURIComponent(userId)}`
+			);
+			return { ...emptyMemory(), ...(response || {}) };
+		},
+
+		getRecentExecutions: async (limit: number = 10, userId: string = 'default'): Promise<RecentExecution[]> => {
+			const response = await transport.getStrict(
+				`/api/analytics/executions/recent?limit=${limit}&user_id=${encodeURIComponent(userId)}`
+			);
+			return response?.data || [];
 		},
 
 		getDashboard: async (userId: string = 'default'): Promise<AnalyticsDashboardData> => {
-			const api = createAnalyticsApi(transport);
-			const [summary, daily, byPlatform, stats, memory] = await Promise.all([
-				api.getCostSummary(userId),
-				api.getDailyCosts(7, userId),
-				api.getCostsByPlatform(userId),
-				api.getExecutionStats(userId),
-				api.getMemoryInsights(userId)
-			]);
-			return { summary, daily, byPlatform, stats, memory };
+			// One rejected request marks the whole dashboard unavailable rather than
+			// leaving some panels populated and others silently zeroed, which would read
+			// as "you spent nothing" instead of "we could not ask".
+			try {
+				const [summary, daily, byPlatform, stats, memory, recent] = await Promise.all([
+					api.getCostSummary(userId),
+					api.getDailyCosts(7, userId),
+					api.getCostsByPlatform(userId),
+					api.getExecutionStats(userId),
+					api.getMemoryInsights(userId),
+					api.getRecentExecutions(10, userId)
+				]);
+				return { summary, daily, byPlatform, stats, memory, recent, available: true };
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				return emptyDashboard(message);
+			}
 		}
 	};
+
+	return api;
 }

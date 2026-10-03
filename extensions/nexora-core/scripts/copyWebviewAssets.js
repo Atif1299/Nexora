@@ -49,6 +49,10 @@ function main() {
 
 	// Week 15: Analytics panel assets
 	copyWebviewFolder(root, 'analytics', ['analytics.css', 'analytics.js']);
+
+	// Week 16: Templates + Timeline panel assets
+	copyWebviewFolder(root, 'templates', ['templates.css', 'templates.js']);
+	copyWebviewFolder(root, 'timeline', ['timeline.css', 'timeline.js']);
 }
 
 main();

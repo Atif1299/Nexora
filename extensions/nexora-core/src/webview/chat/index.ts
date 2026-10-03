@@ -85,6 +85,24 @@ export function getChatWebviewHtml(
 			</div>
 		</header>
 
+		<div class="nx-suggest" id="suggestionStrip" hidden>
+			<span class="nx-suggestIcon" aria-hidden="true">
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+					<circle cx="12" cy="12" r="9"/>
+					<path d="M12 8v4l2.5 2.5"/>
+				</svg>
+			</span>
+			<div class="nx-suggestBody">
+				<div class="nx-suggestTitle" id="suggestTitle"></div>
+				<div class="nx-suggestReason" id="suggestReason"></div>
+			</div>
+			<div class="nx-suggestActions">
+				<button type="button" class="nx-suggestRun" id="suggestRun">Run</button>
+				<button type="button" class="nx-suggestLater" id="suggestLater">Not now</button>
+				<button type="button" class="nx-suggestNever" id="suggestNever">Never</button>
+			</div>
+		</div>
+
 		<main class="nx-main">
 			<section class="nx-messages" id="messages" aria-label="Messages">
 				<div class="nx-welcome" id="welcome">

@@ -28,7 +28,12 @@ export type WebviewInboundMessage =
 	| { type: 'browsePlatforms' }
 	| { type: 'indexWorkspace' }
 	| { type: 'executeRequest'; request: string; model?: string }
-	| { type: 'runAgent'; request: string; model?: string };
+	| { type: 'runAgent'; request: string; model?: string }
+	| { type: 'confirmSaveTemplate'; planId: string; name: string; description: string; category: string; parameters: Array<{ name: string; source_value: string; type?: string; required?: boolean; description?: string }> }
+	| { type: 'cancelSaveTemplate' }
+	| { type: 'acceptSuggestion'; id: string }
+	| { type: 'dismissSuggestion'; id: string; permanent: boolean }
+	| { type: 'requestSuggestions' };
 
 export type ChatActivityItem = { id: string; label: string; done?: boolean };
 
@@ -45,7 +50,9 @@ export type WebviewOutboundMessage =
 	| { type: 'taskRetry'; planId: string; taskId: string; taskName?: string; attempt: number; maxAttempts: number; platform: string }
 	| { type: 'planCompleted'; planId: string; status: string; actualCost: number }
 	| { type: 'planExecutionStarted'; planId: string }
-	| { type: 'planExecutionComplete'; planId: string; status: string; tasks: any[]; actualCost: number };
+	| { type: 'planExecutionComplete'; planId: string; status: string; tasks: any[]; actualCost: number }
+	| { type: 'showSaveTemplate'; planId: string; parameters: any[] }
+	| { type: 'showSuggestion'; suggestion: any | null };
 
 export type ChatInitialState = {
 	connected: boolean;
