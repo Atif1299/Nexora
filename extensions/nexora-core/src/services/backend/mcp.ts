@@ -19,12 +19,6 @@ export interface McpServerRow {
 	tools_count: number;
 }
 
-const MCP_OAUTH_IDS = new Set(['github', 'vercel', 'supabase', 'v0']);
-
-export function mcpNeedsOAuth(row: McpServerRow): boolean {
-	return MCP_OAUTH_IDS.has(row.id) && (row.missing_requires || []).length > 0;
-}
-
 export function createMcpApi(transport: Transport) {
 	return {
 		listServers: async (): Promise<McpServerRow[]> => {
@@ -61,16 +55,6 @@ export function createMcpApi(transport: Transport) {
 					disconnected: false,
 					error: error instanceof Error ? error.message : 'MCP disconnect failed'
 				};
-			}
-		},
-
-		startOAuth: async (provider: string, userId: string = 'default'): Promise<{ authorization_url: string } | null> => {
-			try {
-				return await transport.get(
-					`/api/mcp/auth/start/${encodeURIComponent(provider)}?user_id=${encodeURIComponent(userId)}`
-				);
-			} catch {
-				return null;
 			}
 		}
 	};
