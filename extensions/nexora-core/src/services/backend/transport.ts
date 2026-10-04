@@ -19,6 +19,8 @@ export type SSEEvent = {
 	model?: string;
 	message?: string;
 	usage?: { prompt_tokens: number; completion_tokens: number };
+	/** chat/stream "remembered": the project fact this message just saved. */
+	value?: string;
 };
 
 export type Transport = {
