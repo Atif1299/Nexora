@@ -15,6 +15,9 @@ import { TemplatesPanelProvider } from './templatesPanel';
 import { TimelinePanelProvider } from './timelinePanel';
 import { getBackendClient, notifyBackendClientConfigured, setApiKeyHeaderProvider } from './services/backendClient';
 import { getSettingsService } from './services/settingsService';
+import { registerOAuthUriHandler } from './services/oauthConnect';
+import { registerMcpConnect } from './services/mcpConnect';
+import { registerInlineCompletion } from './services/inlineCompletion';
 import { getNotificationService } from './services/notificationService';
 import { getOrchestrationWebSocket, disposeWebSocket, type WebSocketMessage } from './services/websocketClient';
 import {
@@ -221,6 +224,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Initialize settings singleton (SecretStorage + preferences)
 	const settingsService = getSettingsService(context);
+	// GitHub/Vercel Connect: deep link from the OAuth success page back into Nexora
+	registerOAuthUriHandler(context);
+	// Remote MCP Connect: browser and device sign-in for vendor-hosted MCP servers
+	registerMcpConnect(context);
+	// Inline completion: grey text ahead of the cursor in every editor
+	registerInlineCompletion(context);
 	// Wire IDE keys into every backend HTTP call (primary runtime credentials)
 	setApiKeyHeaderProvider(async () => {
 		const headers: Record<string, string> = {};

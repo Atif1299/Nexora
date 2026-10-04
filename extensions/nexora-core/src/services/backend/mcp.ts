@@ -19,14 +19,44 @@ export interface McpServerRow {
 	tools_count: number;
 }
 
-const MCP_OAUTH_IDS = new Set(['github', 'vercel', 'supabase', 'v0']);
-
-export function mcpNeedsOAuth(row: McpServerRow): boolean {
-	return MCP_OAUTH_IDS.has(row.id) && (row.missing_requires || []).length > 0;
+/** Outcome of one approved platform tool call. */
+export interface McpCallResult {
+	success: boolean;
+	data?: unknown;
+	error?: string;
 }
 
 export function createMcpApi(transport: Transport) {
 	return {
+		/**
+		 * Run one tool on a connected server, after the user has approved it.
+		 *
+		 * The engine makes the call because the credential is there and never
+		 * comes here; the IDE's part is asking the user first.
+		 */
+		callTool: async (
+			serverId: string,
+			tool: string,
+			args: Record<string, unknown>
+		): Promise<McpCallResult> => {
+			try {
+				const response = await transport.post(
+					`/api/connectors/mcp/${encodeURIComponent(serverId)}/call`,
+					{ tool, arguments: args }
+				);
+				return {
+					success: response?.success === true,
+					data: response?.data,
+					error: response?.error ? String(response.error) : undefined
+				};
+			} catch (error) {
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : 'Platform call failed'
+				};
+			}
+		},
+
 		listServers: async (): Promise<McpServerRow[]> => {
 			try {
 				const response = await transport.get('/api/connectors/mcp/servers');
@@ -61,16 +91,6 @@ export function createMcpApi(transport: Transport) {
 					disconnected: false,
 					error: error instanceof Error ? error.message : 'MCP disconnect failed'
 				};
-			}
-		},
-
-		startOAuth: async (provider: string, userId: string = 'default'): Promise<{ authorization_url: string } | null> => {
-			try {
-				return await transport.get(
-					`/api/mcp/auth/start/${encodeURIComponent(provider)}?user_id=${encodeURIComponent(userId)}`
-				);
-			} catch {
-				return null;
 			}
 		}
 	};

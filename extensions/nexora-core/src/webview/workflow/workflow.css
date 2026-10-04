@@ -3,23 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root {
-	--wf-bg: var(--vscode-editor-background);
-	--wf-fg: var(--vscode-editor-foreground);
-	--wf-muted: var(--vscode-descriptionForeground, #888);
-	--wf-border: var(--vscode-panel-border, #3c3c3c);
-	--wf-surface: var(--vscode-input-background, #3c3c3c);
-	--wf-surface-2: var(--vscode-sideBar-background, #252526);
-	--wf-radius: 6px;
-	--wf-space: 8px;
-
-	--wf-pending: var(--vscode-descriptionForeground, #6b7280);
-	--wf-running: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #f59e0b));
-	--wf-success: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #10b981));
-	--wf-failed: var(--vscode-testing-iconFailed, var(--vscode-errorForeground, #ef4444));
-	--wf-skipped: var(--vscode-disabledForeground, #9ca3af);
-	--wf-info: var(--vscode-charts-blue, #3b82f6);
-}
 
 * {
 	box-sizing: border-box;
@@ -40,8 +23,8 @@ body {
 	min-height: 220px;
 	font-family: var(--vscode-font-family);
 	font-size: var(--vscode-font-size, 13px);
-	color: var(--wf-fg);
-	background: var(--wf-bg);
+	color: var(--nx-fg);
+	background: var(--nx-bg);
 }
 
 #workflow-root {
@@ -50,7 +33,7 @@ body {
 	width: 100%;
 	min-height: 220px;
 	height: 100%;
-	padding: var(--wf-space);
+	padding: var(--nx-space-2);
 	overflow: auto;
 }
 
@@ -62,7 +45,7 @@ body {
 	justify-content: center;
 	min-height: 180px;
 	text-align: center;
-	color: var(--wf-muted);
+	color: var(--nx-muted);
 }
 
 .wf-emptyIcon {
@@ -74,7 +57,7 @@ body {
 	margin: 0 0 8px 0;
 	font-size: 14px;
 	font-weight: 600;
-	color: var(--wf-fg);
+	color: var(--nx-fg);
 }
 
 .wf-emptyText {
@@ -86,7 +69,7 @@ body {
 .wf-header {
 	margin-bottom: 16px;
 	padding-bottom: 12px;
-	border-bottom: 1px solid var(--wf-border);
+	border-bottom: 1px solid var(--nx-border);
 }
 
 .wf-title {
@@ -109,24 +92,24 @@ body {
 
 .wf-status {
 	padding: 2px 8px;
-	border-radius: var(--wf-radius);
+	border-radius: var(--nx-radius-lg);
 	font-size: 10px;
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.5px;
 }
 
-.wf-status-awaiting-approval { background: var(--wf-info); color: var(--vscode-button-foreground, white); }
-.wf-status-planning { background: var(--wf-pending); color: var(--vscode-button-foreground, white); }
-.wf-status-approved { background: var(--wf-info); color: var(--vscode-button-foreground, white); }
-.wf-status-executing { background: var(--wf-running); color: var(--vscode-button-foreground, white); }
-.wf-status-completed { background: var(--wf-success); color: white; }
-.wf-status-failed { background: var(--wf-failed); color: white; }
-.wf-status-cancelled { background: var(--wf-skipped); color: white; }
+.wf-status-awaiting-approval { background: var(--nx-info); color: var(--vscode-button-foreground, white); }
+.wf-status-planning { background: var(--nx-muted); color: var(--vscode-button-foreground, white); }
+.wf-status-approved { background: var(--nx-info); color: var(--vscode-button-foreground, white); }
+.wf-status-executing { background: var(--nx-warn); color: var(--vscode-button-foreground, white); }
+.wf-status-completed { background: var(--nx-ok); color: white; }
+.wf-status-failed { background: var(--nx-err); color: white; }
+.wf-status-cancelled { background: var(--nx-disabled); color: white; }
 
 .wf-cost {
 	font-size: 11px;
-	color: var(--wf-muted);
+	color: var(--nx-muted);
 }
 
 /* Container */
@@ -159,11 +142,11 @@ body {
 	justify-content: center;
 	min-width: 28px;
 	padding: 0 4px;
-	color: var(--wf-muted);
+	color: var(--nx-muted);
 	font-size: 12px;
 	font-weight: 600;
-	border-left: 1px solid var(--wf-border);
-	border-right: 1px solid var(--wf-border);
+	border-left: 1px solid var(--nx-border);
+	border-right: 1px solid var(--nx-border);
 	align-self: center;
 	height: 24px;
 	margin: 0 4px;
@@ -171,10 +154,10 @@ body {
 
 /* Task nodes */
 .wf-node {
-	background: var(--wf-surface);
-	border: 1px solid var(--wf-border);
-	border-left: 4px solid var(--wf-pending);
-	border-radius: var(--wf-radius);
+	background: var(--nx-surface);
+	border: 1px solid var(--nx-border);
+	border-left: 4px solid var(--nx-muted);
+	border-radius: var(--nx-radius-lg);
 	cursor: pointer;
 	transition: transform 0.15s ease, box-shadow 0.15s ease;
 	position: relative;
@@ -187,21 +170,21 @@ body {
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
-.wf-node-pending { border-left-color: var(--wf-pending); }
-.wf-node-queued { border-left-color: var(--wf-info); }
+.wf-node-pending { border-left-color: var(--nx-muted); }
+.wf-node-queued { border-left-color: var(--nx-info); }
 
 .wf-node:focus-visible {
 	outline: 2px solid var(--vscode-focusBorder);
 	outline-offset: 2px;
 }
 .wf-node-running {
-	border-left-color: var(--wf-running);
+	border-left-color: var(--nx-warn);
 	animation: wf-pulse 2s infinite;
 }
-.wf-node-success { border-left-color: var(--wf-success); }
-.wf-node-failed { border-left-color: var(--wf-failed); }
-.wf-node-skipped { border-left-color: var(--wf-skipped); }
-.wf-node-cancelled { border-left-color: var(--wf-skipped); }
+.wf-node-success { border-left-color: var(--nx-ok); }
+.wf-node-failed { border-left-color: var(--nx-err); }
+.wf-node-skipped { border-left-color: var(--nx-disabled); }
+.wf-node-cancelled { border-left-color: var(--nx-disabled); }
 
 @keyframes wf-pulse {
 	0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
@@ -213,8 +196,8 @@ body {
 	align-items: center;
 	gap: 8px;
 	padding: 8px 10px;
-	background: var(--wf-surface-2);
-	border-bottom: 1px solid var(--wf-border);
+	background: var(--nx-surface-2);
+	border-bottom: 1px solid var(--nx-border);
 }
 
 .wf-nodeIcon {
@@ -225,10 +208,10 @@ body {
 	text-align: center;
 }
 
-.wf-node-success .wf-nodeIcon { color: var(--wf-success); }
-.wf-node-failed .wf-nodeIcon { color: var(--wf-failed); }
-.wf-node-running .wf-nodeIcon { color: var(--wf-running); }
-.wf-node-skipped .wf-nodeIcon { color: var(--wf-skipped); }
+.wf-node-success .wf-nodeIcon { color: var(--nx-ok); }
+.wf-node-failed .wf-nodeIcon { color: var(--nx-err); }
+.wf-node-running .wf-nodeIcon { color: var(--nx-warn); }
+.wf-node-skipped .wf-nodeIcon { color: var(--nx-disabled); }
 
 .wf-nodeName {
 	font-size: 12px;
@@ -245,18 +228,18 @@ body {
 .wf-nodeStatus {
 	font-size: 10px;
 	text-transform: lowercase;
-	color: var(--wf-muted);
+	color: var(--nx-muted);
 }
 
-.wf-node-running .wf-nodeStatus { color: var(--wf-running); }
-.wf-node-success .wf-nodeStatus { color: var(--wf-success); }
-.wf-node-failed .wf-nodeStatus { color: var(--wf-failed); }
-.wf-node-skipped .wf-nodeStatus { color: var(--wf-skipped); }
+.wf-node-running .wf-nodeStatus { color: var(--nx-warn); }
+.wf-node-success .wf-nodeStatus { color: var(--nx-ok); }
+.wf-node-failed .wf-nodeStatus { color: var(--nx-err); }
+.wf-node-skipped .wf-nodeStatus { color: var(--nx-disabled); }
 
 .wf-nodeError {
 	margin-top: 4px;
 	font-size: 10px;
-	color: var(--wf-failed);
+	color: var(--nx-err);
 	line-height: 1.3;
 	word-break: break-word;
 }
@@ -268,7 +251,7 @@ body {
 	right: 8px;
 	width: 14px;
 	height: 14px;
-	border: 2px solid var(--wf-running);
+	border: 2px solid var(--nx-warn);
 	border-top-color: transparent;
 	border-radius: 50%;
 	animation: wf-spin 1s linear infinite;
@@ -285,7 +268,7 @@ body {
 	gap: 16px;
 	margin-top: 16px;
 	padding-top: 12px;
-	border-top: 1px solid var(--wf-border);
+	border-top: 1px solid var(--nx-border);
 }
 
 .wf-legendItem {
@@ -293,7 +276,7 @@ body {
 	align-items: center;
 	gap: 6px;
 	font-size: 10px;
-	color: var(--wf-muted);
+	color: var(--nx-muted);
 }
 
 .wf-dot {
@@ -302,8 +285,8 @@ body {
 	border-radius: 50%;
 }
 
-.wf-dot-pending { background: var(--wf-pending); }
-.wf-dot-running { background: var(--wf-running); }
-.wf-dot-success { background: var(--wf-success); }
-.wf-dot-failed { background: var(--wf-failed); }
-.wf-dot-skipped { background: var(--wf-skipped); }
+.wf-dot-pending { background: var(--nx-muted); }
+.wf-dot-running { background: var(--nx-warn); }
+.wf-dot-success { background: var(--nx-ok); }
+.wf-dot-failed { background: var(--nx-err); }
+.wf-dot-skipped { background: var(--nx-disabled); }

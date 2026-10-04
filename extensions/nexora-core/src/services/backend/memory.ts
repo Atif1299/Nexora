@@ -5,6 +5,24 @@
 
 import type { Transport } from './transport';
 
+/** One standing project fact (memory Layer C) injected into every request. */
+export interface ProjectFact {
+	id: string;
+	label: string;
+	value: string;
+	/** agent = remember_fact tool, chat = "remember ..." typed in chat, user = Settings. */
+	source: 'agent' | 'chat' | 'user' | string;
+	updated_at: number;
+}
+
+export interface ProjectFactsResponse {
+	workspace_id: string;
+	facts: ProjectFact[];
+	total: number;
+	/** Exactly the text the backend injects, so Settings can show the real block. */
+	injected: string;
+}
+
 export interface MemorySuggestion {
 	id: string;
 	title: string;
@@ -124,6 +142,51 @@ export function createMemoryApi(transport: Transport) {
 				return response?.workspaces || [];
 			} catch {
 				return [];
+			}
+		},
+
+		getFacts: async (workspaceId: string): Promise<ProjectFactsResponse> => {
+			try {
+				const response = await transport.get(
+					`/api/memory/facts?workspace_id=${encodeURIComponent(workspaceId)}`
+				);
+				return {
+					workspace_id: response?.workspace_id || workspaceId,
+					facts: Array.isArray(response?.facts) ? response.facts : [],
+					total: Number(response?.total) || 0,
+					injected: typeof response?.injected === 'string' ? response.injected : ''
+				};
+			} catch {
+				return { workspace_id: workspaceId, facts: [], total: 0, injected: '' };
+			}
+		},
+
+		saveFact: async (
+			workspaceId: string,
+			value: string,
+			key: string = ''
+		): Promise<ProjectFact | null> => {
+			try {
+				const response = await transport.post('/api/memory/facts', {
+					workspace_id: workspaceId,
+					value,
+					key
+				});
+				return response?.id ? (response as ProjectFact) : null;
+			} catch {
+				return null;
+			}
+		},
+
+		forgetFact: async (workspaceId: string, factId: string): Promise<boolean> => {
+			try {
+				const response = await transport.delete(
+					`/api/memory/facts?workspace_id=${encodeURIComponent(workspaceId)}` +
+					`&fact_id=${encodeURIComponent(factId)}`
+				);
+				return !!response?.removed;
+			} catch {
+				return false;
 			}
 		},
 

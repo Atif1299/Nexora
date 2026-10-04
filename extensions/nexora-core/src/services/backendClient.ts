@@ -11,7 +11,7 @@ export interface BackendConfig {
 
 import { createTransport, type HeaderProvider, type SSEEvent } from './backend/transport';
 import { createPlatformsApi } from './backend/platforms';
-import { createMemoryApi, type MemorySuggestion, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
+import { createMemoryApi, type MemorySuggestion, type ProjectFact, type ProjectFactsResponse, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
 import { createWorkflowsApi, type WorkflowTemplate, type TemplateListResponse, type SuggestFromPlanResponse, type SaveFromPlanRequest, type ImportPreview } from './backend/workflows';
 import { createCognitiveApi } from './backend/cognitive';
 import { createAuthApi, type AuthStatus, type SaasConnector } from './backend/auth';
@@ -22,7 +22,18 @@ import { createAgentApi, type AgentMessage, type AgentTurnResponse, type ToolCal
 import { createStatusApi, type ConnectionsResponse, type TestResult, type ProviderStatus } from './backend/status';
 import { createCapabilitiesApi, type CapabilitiesReport } from './backend/capabilities';
 import { createModelsApi, type ModelCatalog } from './backend/models';
-import { createMcpApi, type McpServerRow } from './backend/mcp';
+import { createMcpApi, type McpCallResult, type McpServerRow } from './backend/mcp';
+import {
+	createCompletionApi,
+	type InlineCompletionRequest,
+	type InlineCompletionResult
+} from './backend/completion';
+import {
+	createMcpConnectApi,
+	type McpConnectOutcome,
+	type McpConnectRow,
+	type McpDevicePoll
+} from './backend/mcpConnect';
 import { createA2AApi, type A2ADelegateResult } from './backend/a2a';
 
 export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
@@ -192,7 +203,7 @@ export class BackendClient {
 		workspacePath?: string,
 		model?: string,
 		options?: { session_id?: string; workspace_id?: string; signal?: AbortSignal }
-	): Promise<{ response: string; model_used: string }> {
+	): Promise<{ response: string; model_used: string; remembered?: string | null }> {
 		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string } = {
 			message,
 			workspace_path: workspacePath,
@@ -416,6 +427,41 @@ export class BackendClient {
 		return response?.connectors || [];
 	}
 
+	/** Remote MCP servers the engine holds a browser login for. */
+	async getMcpConnectStatus(userId: string = 'default'): Promise<McpConnectRow[]> {
+		return createMcpConnectApi(this.transport).status(userId);
+	}
+
+	/** Start a remote MCP connection; the engine decides browser vs device code. */
+	async connectMcpConnect(serverId: string, returnUri?: string): Promise<McpConnectOutcome> {
+		return createMcpConnectApi(this.transport).connect(serverId, 'default', returnUri);
+	}
+
+	async pollMcpDevice(serverId: string): Promise<McpDevicePoll> {
+		return createMcpConnectApi(this.transport).pollDevice(serverId);
+	}
+
+	async disconnectMcpConnect(serverId: string): Promise<{ had_token: boolean }> {
+		return createMcpConnectApi(this.transport).disconnect(serverId);
+	}
+
+	/** Text that belongs at the cursor. Empty when there is nothing to suggest. */
+	async inlineComplete(
+		request: InlineCompletionRequest,
+		signal?: AbortSignal
+	): Promise<InlineCompletionResult> {
+		return createCompletionApi(this.transport).inline(request, signal);
+	}
+
+	/** Run one tool on a connected platform. Approval happens before this. */
+	async callPlatformTool(
+		serverId: string,
+		tool: string,
+		args: Record<string, unknown>
+	): Promise<McpCallResult> {
+		return createMcpApi(this.transport).callTool(serverId, tool, args);
+	}
+
 	async listMcpServers(): Promise<McpServerRow[]> {
 		return createMcpApi(this.transport).listServers();
 	}
@@ -426,10 +472,6 @@ export class BackendClient {
 
 	async disconnectMcpServer(serverId: string): Promise<{ disconnected: boolean; error?: string }> {
 		return createMcpApi(this.transport).disconnect(serverId);
-	}
-
-	async getMcpOAuthUrl(provider: string, userId: string = 'default'): Promise<{ authorization_url: string } | null> {
-		return createMcpApi(this.transport).startOAuth(provider, userId);
 	}
 
 	async delegateA2A(
@@ -456,8 +498,8 @@ export class BackendClient {
 	 * @param userId User identifier
 	 * @returns Authorization URL to redirect user to
 	 */
-	async getGitHubAuthUrl(userId: string = 'default'): Promise<{ authorization_url?: string; error?: string } | null> {
-		return createAuthApi(this.transport).getGitHubAuthUrl(userId);
+	async getGitHubAuthUrl(userId: string = 'default', returnUri?: string): Promise<{ authorization_url?: string; error?: string } | null> {
+		return createAuthApi(this.transport).getGitHubAuthUrl(userId, returnUri);
 	}
 
 	/**
@@ -466,8 +508,8 @@ export class BackendClient {
 	 * @param userId User identifier
 	 * @returns Authorization URL to redirect user to
 	 */
-	async getVercelAuthUrl(userId: string = 'default'): Promise<{ authorization_url?: string; error?: string } | null> {
-		return createAuthApi(this.transport).getVercelAuthUrl(userId);
+	async getVercelAuthUrl(userId: string = 'default', returnUri?: string): Promise<{ authorization_url?: string; error?: string } | null> {
+		return createAuthApi(this.transport).getVercelAuthUrl(userId, returnUri);
 	}
 
 	/**
@@ -727,6 +769,19 @@ export class BackendClient {
 
 	async importTemplate(bundle: Record<string, unknown>): Promise<WorkflowTemplate> {
 		return createWorkflowsApi(this.transport).importTemplate(bundle);
+	}
+
+	/** Standing project facts (memory Layer C) injected into every request. */
+	async getProjectFacts(workspaceId: string): Promise<ProjectFactsResponse> {
+		return createMemoryApi(this.transport).getFacts(workspaceId);
+	}
+
+	async saveProjectFact(workspaceId: string, value: string, key = ''): Promise<ProjectFact | null> {
+		return createMemoryApi(this.transport).saveFact(workspaceId, value, key);
+	}
+
+	async forgetProjectFact(workspaceId: string, factId: string): Promise<boolean> {
+		return createMemoryApi(this.transport).forgetFact(workspaceId, factId);
 	}
 
 	async getMemorySuggestions(

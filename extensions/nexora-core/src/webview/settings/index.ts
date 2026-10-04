@@ -5,14 +5,7 @@
 
 import * as vscode from 'vscode';
 
-function getNonce(): string {
-	let text = '';
-	const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	for (let i = 0; i < 32; i++) {
-		text += possible.charAt(Math.floor(Math.random() * possible.length));
-	}
-	return text;
-}
+import { renderWebviewPage } from '../shared/html';
 
 function escapeAttr(value: string): string {
 	return value
@@ -26,30 +19,18 @@ export function getSettingsWebviewHtml(
 	extensionUri: vscode.Uri,
 	section?: string
 ): string {
-	const nonce = getNonce();
-	const initialSection = escapeAttr(section || '');
-
-	const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'settings', 'settings.css'));
-	const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'settings', 'settings.js'));
-
-	const csp = [
-		`default-src 'none'`,
-		`img-src ${webview.cspSource} https: data:`,
-		`style-src ${webview.cspSource} 'unsafe-inline'`,
-		`script-src 'nonce-${nonce}'`,
-	].join('; ');
-
-	return /* html */ `<!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta charset="UTF-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<meta http-equiv="Content-Security-Policy" content="${csp}">
-	<link rel="stylesheet" href="${cssUri}">
-	<title>Nexora Settings</title>
-</head>
-<body data-section="${initialSection}">
-	<div id="settings-root" role="main" aria-label="Nexora Settings">
+	return renderWebviewPage({
+		webview,
+		extensionUri,
+		folder: 'settings',
+		title: 'Nexora Settings',
+		styles: ['settings.css'],
+		scripts: ['settings.js'],
+		// This panel writes style attributes from script (meter widths).
+		allowInlineStyles: true,
+		// settings.js reads the section to open before its first render.
+		bodyAttributes: `data-section="${escapeAttr(section || '')}"`,
+		body: /* html */ `	<div id="settings-root" role="main" aria-label="Nexora Settings">
 		<nav class="nx-settings-nav" aria-label="Settings sections">
 			<div class="nx-settings-nav-title">Settings</div>
 			<button type="button" class="nx-nav-item selected" data-section="keys" aria-current="page" title="LLM Keys" aria-label="LLM Keys">
@@ -59,6 +40,10 @@ export function getSettingsWebviewHtml(
 			<button type="button" class="nx-nav-item" data-section="models" title="Models" aria-label="Models">
 				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M2 3h5v2H2V3zm7 0h5v2H9V3zM2 7h12v2H2V7zm0 4h8v2H2v-2z"/></svg></span>
 				<span class="nx-nav-label">Models</span>
+			</button>
+			<button type="button" class="nx-nav-item" data-section="memory" title="Project Memory" aria-label="Project Memory">
+				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M4 2h6l3 3v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm5 1.5V6h2.5L9 3.5zM5 8h6v1.5H5V8zm0 3h6v1.5H5V11z"/></svg></span>
+				<span class="nx-nav-label">Project Memory</span>
 			</button>
 			<button type="button" class="nx-nav-item" data-section="saas" title="SaaS Connectors" aria-label="SaaS Connectors">
 				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M2 3h5v5H2V3zm7 0h5v5H9V3zM2 10h5v5H2v-5zm7 0h5v5H9v-5z"/></svg></span>
@@ -109,6 +94,19 @@ export function getSettingsWebviewHtml(
 				</div>
 				<p class="nx-hint">Toggle which models appear in the chat picker. Auto is always available.</p>
 				<div id="models-root" class="nx-stack" aria-live="polite"></div>
+			</section>
+
+			<section class="nx-section" data-section="memory" aria-labelledby="memory-facts-heading" hidden>
+				<div class="nx-section-head">
+					<h2 id="memory-facts-heading">Project Memory</h2>
+					<button type="button" class="nx-btn nx-btn-secondary" id="facts-refresh" aria-label="Refresh project memory">Refresh</button>
+				</div>
+				<p class="nx-hint">
+					Standing facts about this project. Nexora adds a fact when you say
+					<em>&ldquo;remember &hellip;&rdquo;</em> in chat or state a lasting preference in Ask / Agent,
+					and sends them with every Chat, Ask, Agent and Plan request. Delete anything that is wrong.
+				</p>
+				<div id="project-memory" class="nx-stack"></div>
 			</section>
 
 			<section class="nx-section" data-section="saas" aria-labelledby="saas-keys-heading" hidden>
@@ -186,9 +184,6 @@ export function getSettingsWebviewHtml(
 		</div>
 	</div>
 
-	<div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
-
-	<script nonce="${nonce}" src="${jsUri}"></script>
-</body>
-</html>`;
+	<div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>`
+	});
 }

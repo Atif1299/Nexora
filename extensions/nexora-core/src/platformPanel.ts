@@ -10,7 +10,6 @@ import { getEngineState, onDidChangeEngineState } from './services/engineProcess
 import {
 	capabilityReason,
 	getCachedCapabilities,
-	isLivePlatform,
 	onDidChangeCapabilities,
 	platformCapabilityStatus,
 	refreshCapabilities,
@@ -18,7 +17,58 @@ import {
 	type CapabilityStatus
 } from './services/backend/capabilities';
 import { getNotificationService } from './services/notificationService';
+import { getSettingsService, type ApiKeyProvider } from './services/settingsService';
+import {
+	connectMcpServer,
+	disconnectMcpServer,
+	getMcpConnections,
+	mcpServerLabel,
+	onDidConnectMcpServer
+} from './services/mcpConnect';
+import {
+	isOAuthAppConfigured,
+	oauthProviderLabel,
+	oauthSetupStep,
+	onDidCompleteOAuth,
+	startOAuthConnect,
+	type OAuthProvider
+} from './services/oauthConnect';
+import {
+	clearLocalAgentProbes,
+	localAgentSpec,
+	offerInstall,
+	probeAllLocalAgents,
+	type LocalAgentProbe
+} from './services/agents/localAgents';
 import type { SaasConnector } from './services/backend/auth';
+
+/**
+ * Catalogue rows whose credential is the Settings > LLM API Keys entry in SecretStorage.
+ * The sidebar never stores its own key: READY means that SecretStorage key exists.
+ */
+const LLM_KEY_ROWS: Record<string, ApiKeyProvider> = {
+	openai: 'openai',
+	claude: 'anthropic',
+	gemini: 'gemini',
+	openrouter: 'openrouter'
+};
+
+/** Rows with a real card in Settings, so Configure has somewhere to go. */
+const SETTINGS_BACKED_PLATFORMS = new Set([
+	'github', 'vercel', 'supabase', 'stripe', 'v0-dev', 'elevenlabs', 'tavily'
+]);
+
+/** platforms.json has no OpenRouter row, but its key is a first-class LLM key in Settings. */
+const OPENROUTER_ROW: PlatformApiRow = {
+	id: 'openrouter',
+	name: 'OpenRouter',
+	category: 'LLM',
+	description: 'Model router for many LLM providers through one API key'
+};
+
+function llmKeyProvider(platformId: string): ApiKeyProvider | undefined {
+	return LLM_KEY_ROWS[(platformId || '').trim().toLowerCase()];
+}
 
 interface Platform {
 	id: string;
@@ -28,11 +78,23 @@ interface Platform {
 	capabilities?: string[];
 	api_type?: string;
 	auth_type?: string;
-	has_active_connector?: boolean;
+	/** How the engine reaches it: remote_mcp | rest | local_cli | catalogue. */
+	integration?: string;
+	/** Shell line that installs a local agent; absent for every other kind. */
+	install_hint?: string;
 	is_enabled?: boolean;
 	capabilityStatus?: CapabilityStatus;
 	capabilityReason?: string;
 	live?: boolean;
+	keyProvider?: ApiKeyProvider;
+	/** One-time OAuth app setup step; set while the client id/secret are missing. */
+	setupHint?: string;
+	/** Engine-side MCP server id when this row connects by remote MCP sign-in. */
+	mcpServerId?: string;
+	/** Settings has a card for this row, so Configure is not a no-op. */
+	configurable?: boolean;
+	/** Holds a credential that Disconnect can clear. */
+	disconnectable?: boolean;
 }
 
 interface PlatformApiRow {
@@ -43,7 +105,9 @@ interface PlatformApiRow {
 	capabilities?: string[];
 	api_type?: string;
 	auth_type?: string;
-	has_active_connector?: boolean;
+	integration?: string;
+	install_hint?: string;
+	mcp_server_id?: string;
 	is_enabled?: boolean;
 }
 
@@ -63,9 +127,27 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	private error: string | null = null;
 	private backendConnected = false;
 	private embeddingInProgress = false;
+	private llmKeys: Partial<Record<ApiKeyProvider, boolean>> = {};
+	private oauthApps: Partial<Record<OAuthProvider, boolean>> = {};
+	private mcpConnections: Record<string, boolean> = {};
+	private mcpClientIds: Record<string, boolean> = {};
+	/** Local coding agents found on PATH, keyed by platform id. */
+	private localAgents: Record<string, LocalAgentProbe> = {};
 
 	constructor(extensionUri: vscode.Uri) {
 		this._extensionUri = extensionUri;
+		getSettingsService().onDidChangeApiKeys(() => {
+			void this._syncLlmKeys().then(() => this._pushState());
+		});
+		onDidCompleteOAuth((provider) => {
+			void getNotificationService().showSuccess(`${oauthProviderLabel(provider)} connected`);
+			void this._afterChange();
+		});
+		onDidConnectMcpServer((serverId) => {
+			this.mcpConnections = { ...this.mcpConnections, [serverId]: true };
+			this._applyCapabilities(getCachedCapabilities());
+			this._pushState();
+		});
 		onDidChangeEngineState((state) => {
 			if (state === 'ready') {
 				void this.loadPlatforms();
@@ -125,7 +207,14 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			const report = getCachedCapabilities() || await refreshCapabilities();
 			this.embeddingInProgress = !!report?.vectors.embedding_in_progress;
 
+			await this._syncLlmKeys();
+			await this._syncOAuthApps();
+			await this._syncMcpConnections();
+			await this._syncLocalAgents();
 			const platformsData = await client.getPlatforms() as PlatformApiRow[];
+			if (!platformsData.some(p => (p.id || '').toLowerCase() === OPENROUTER_ROW.id)) {
+				platformsData.push(OPENROUTER_ROW);
+			}
 			this.platforms = platformsData.map((p) => this._mapPlatform(p, report));
 
 			if (!this.backendConnected && this.platforms.length > 0) {
@@ -195,7 +284,9 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			}),
 			view.onDidChangeVisibility(() => {
 				if (view.visible && this._attached) {
-					this._pushState();
+					// A key or sign-in may have landed in Settings meanwhile.
+					void Promise.all([this._syncOAuthApps(), this._syncMcpConnections()])
+						.then(() => this._pushState());
 				}
 			}),
 			view.onDidDispose(() => {
@@ -231,9 +322,6 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 
 	private _mapPlatform(p: PlatformApiRow, report: CapabilitiesReport | undefined): Platform {
 		const id = String(p.id || '');
-		const live = isLivePlatform(id);
-		const status = live ? platformCapabilityStatus(id, report) : undefined;
-		const blocked = live && isBlockedStatus(status);
 		return {
 			id,
 			name: p.name || id,
@@ -242,29 +330,222 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			capabilities: p.capabilities,
 			api_type: p.api_type,
 			auth_type: p.auth_type,
-			has_active_connector: live && status === 'ready',
-			is_enabled: blocked ? false : p.is_enabled !== false,
-			capabilityStatus: status,
-			capabilityReason: status ? capabilityReason(status) : undefined,
-			live
+			integration: p.integration,
+			install_hint: p.install_hint,
+			...this._statusFields(
+				{ id, integration: p.integration, mcpServerId: p.mcp_server_id, isEnabled: p.is_enabled },
+				report
+			)
 		};
 	}
 
 	private _applyCapabilities(report: CapabilitiesReport | undefined): void {
 		this.embeddingInProgress = !!report?.vectors.embedding_in_progress;
-		this.platforms = this.platforms.map(p => {
-			const live = isLivePlatform(p.id);
-			const status = live ? platformCapabilityStatus(p.id, report) : undefined;
-			const blocked = live && isBlockedStatus(status);
+		this.platforms = this.platforms.map(p => ({
+			...p,
+			...this._statusFields(
+				{ id: p.id, integration: p.integration, mcpServerId: p.mcpServerId, isEnabled: p.is_enabled },
+				report
+			)
+		}));
+	}
+
+	/**
+	 * What a row's badge and buttons should say.
+	 *
+	 * The engine decides how a platform is reached and says so in the row's
+	 * `integration` field; this only decides how to show it. The panel used to
+	 * answer "is this reachable" from its own hard-coded lists, which meant
+	 * every new platform had to be added in both repositories and the two
+	 * copies could disagree about the same row.
+	 *
+	 * LLM rows are the exception, and stay local: their credential is a
+	 * SecretStorage key the engine never sees, so only the IDE can say whether
+	 * one is present.
+	 */
+	private _statusFields(
+		row: { id: string; integration?: string; mcpServerId?: string; isEnabled?: boolean },
+		report: CapabilitiesReport | undefined
+	): Pick<Platform, 'live' | 'capabilityStatus' | 'capabilityReason' | 'is_enabled' | 'keyProvider' | 'setupHint' | 'mcpServerId' | 'configurable' | 'disconnectable'> {
+		const { id, isEnabled } = row;
+		const keyProvider = llmKeyProvider(id);
+		if (keyProvider) {
+			const ready = !!this.llmKeys[keyProvider];
 			return {
-				...p,
-				live,
-				capabilityStatus: status,
-				capabilityReason: status ? capabilityReason(status) : undefined,
-				has_active_connector: live && status === 'ready',
-				is_enabled: blocked ? false : p.is_enabled !== false
+				live: ready,
+				capabilityStatus: ready ? 'ready' : undefined,
+				capabilityReason: undefined,
+				is_enabled: isEnabled !== false,
+				keyProvider,
+				setupHint: undefined
 			};
-		});
+		}
+		if (row.mcpServerId) {
+			return this._mcpStatusFields(id, row.mcpServerId, isEnabled, report);
+		}
+
+		if (row.integration === 'local_cli') {
+			return this._localAgentStatusFields(id, isEnabled);
+		}
+
+		const live = row.integration === 'rest';
+		const status = live ? platformCapabilityStatus(id, report) : undefined;
+		const blocked = live && isBlockedStatus(status);
+		return {
+			live,
+			capabilityStatus: status,
+			capabilityReason: status ? capabilityReason(status) : undefined,
+			is_enabled: blocked ? false : isEnabled !== false,
+			keyProvider: undefined,
+			setupHint: undefined,
+			mcpServerId: undefined,
+			configurable: SETTINGS_BACKED_PLATFORMS.has(id),
+			disconnectable: live && status === 'ready' && SETTINGS_BACKED_PLATFORMS.has(id)
+		};
+	}
+
+	/** The loaded row for a platform, so handlers read the engine's answer. */
+	private _row(platformId: string): Platform | undefined {
+		const id = (platformId || '').trim().toLowerCase();
+		return this.platforms.find(p => p.id.toLowerCase() === id);
+	}
+
+	/**
+	 * Rows Nexora runs as a local command: Claude Code, Cursor, Cline.
+	 *
+	 * There is no token and no endpoint here, so "ready" means the binary is on
+	 * PATH. The agent carries its own vendor login, which is why Nexora neither
+	 * asks for a key nor offers Disconnect: taking away something it never gave
+	 * would just be a button that lies.
+	 */
+	private _localAgentStatusFields(
+		platformId: string,
+		isEnabled: boolean | undefined
+	): Pick<Platform, 'live' | 'capabilityStatus' | 'capabilityReason' | 'is_enabled' | 'keyProvider' | 'setupHint' | 'mcpServerId' | 'configurable' | 'disconnectable'> {
+		const probe = this.localAgents[platformId];
+		const spec = localAgentSpec(platformId);
+		const installed = probe?.installed === true;
+		// Undetected is not the same as missing: say nothing until the probe
+		// has actually run, rather than claiming an install is absent.
+		const reason = installed
+			? probe?.version
+			: probe
+				? `Not installed - run ${spec?.installHint || ''} then Refresh`
+				: 'Checking for the command...';
+
+		return {
+			live: true,
+			capabilityStatus: installed ? 'ready' : 'not_configured',
+			capabilityReason: reason,
+			is_enabled: isEnabled !== false,
+			keyProvider: undefined,
+			setupHint: installed ? undefined : spec?.installHint,
+			mcpServerId: undefined,
+			configurable: false,
+			disconnectable: false
+		};
+	}
+
+	/**
+	 * Rows that connect by remote MCP sign-in. Ready means the engine holds a
+	 * login: either an MCP token, or the older per-connector OAuth token that
+	 * still drives orchestration for GitHub and Vercel.
+	 */
+	private _mcpStatusFields(
+		platformId: string,
+		mcpServerId: string,
+		isEnabled: boolean | undefined,
+		report: CapabilitiesReport | undefined
+	): Pick<Platform, 'live' | 'capabilityStatus' | 'capabilityReason' | 'is_enabled' | 'keyProvider' | 'setupHint' | 'mcpServerId' | 'configurable' | 'disconnectable'> {
+		const capability = platformCapabilityStatus(platformId, report);
+		if (capability === 'unavailable') {
+			return {
+				live: true,
+				capabilityStatus: 'unavailable',
+				capabilityReason: capabilityReason('unavailable'),
+				is_enabled: false,
+				keyProvider: undefined,
+				setupHint: undefined,
+				mcpServerId,
+				configurable: false,
+				disconnectable: false
+			};
+		}
+
+		const connected = this.mcpConnections[mcpServerId] === true || capability === 'ready';
+		// GitHub cannot register Nexora automatically, so it needs its client ID once.
+		const needsClientId =
+			!connected && mcpServerId === 'github' && this.mcpClientIds.github === false;
+		const setupHint = needsClientId
+			? 'One-time setup: paste your GitHub OAuth app client ID in Settings → Connections. '
+			+ 'No client secret is needed. Every later Connect is browser sign-in only.'
+			: undefined;
+
+		return {
+			live: true,
+			capabilityStatus: connected ? 'ready' : 'not_configured',
+			capabilityReason: connected
+				? undefined
+				: (setupHint || 'Not connected - Connect opens sign-in in your browser'),
+			is_enabled: isEnabled !== false,
+			keyProvider: undefined,
+			setupHint,
+			mcpServerId,
+			// Clerk has nothing to set in Settings; GitHub and Vercel keep
+			// orchestration credentials there.
+			configurable: SETTINGS_BACKED_PLATFORMS.has(platformId),
+			disconnectable: connected
+		};
+	}
+
+	/**
+	 * Look for the local agent binaries.
+	 *
+	 * Runs on the IDE's own machine and touches no engine route: PATH is the
+	 * developer's, and the engine may not even be on the same host.
+	 */
+	private async _syncLocalAgents(force = false): Promise<void> {
+		try {
+			this.localAgents = await probeAllLocalAgents(force);
+		} catch {
+			// Leave the previous answer rather than reporting every agent gone.
+		}
+	}
+
+	private async _syncMcpConnections(): Promise<void> {
+		try {
+			const rows = await getBackendClient().getMcpConnectStatus();
+			this.mcpConnections = Object.fromEntries(rows.map(r => [r.id, r.connected]));
+			this.mcpClientIds = Object.fromEntries(rows.map(r => [r.id, r.has_client_id]));
+		} catch {
+			// Unknown: do not claim a setup is missing when the engine is unreachable.
+			this.mcpConnections = {};
+			this.mcpClientIds = {};
+		}
+		this._applyCapabilities(getCachedCapabilities());
+	}
+
+	private async _syncOAuthApps(): Promise<void> {
+		try {
+			const [github, vercel] = await Promise.all([
+				isOAuthAppConfigured('github'),
+				isOAuthAppConfigured('vercel')
+			]);
+			this.oauthApps = { github, vercel };
+		} catch {
+			// Unknown: do not claim setup is missing when the engine is unreachable.
+			this.oauthApps = {};
+		}
+		this._applyCapabilities(getCachedCapabilities());
+	}
+
+	private async _syncLlmKeys(): Promise<void> {
+		try {
+			this.llmKeys = await getSettingsService().getConfiguredKeyProviders();
+		} catch {
+			this.llmKeys = {};
+		}
+		this._applyCapabilities(getCachedCapabilities());
 	}
 
 	private _saasId(platformId: string): SaasConnector | undefined {
@@ -288,11 +569,13 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleConfigure(platformId: string): Promise<void> {
-		if (!isLivePlatform(platformId)) {
+		const keyProvider = llmKeyProvider(platformId);
+		if (keyProvider) {
+			// Settings resolves the provider id to LLM API Keys and scrolls to that card.
+			await this._openSettings(keyProvider);
 			return;
 		}
-		if (platformId === 'openai' || platformId === 'claude') {
-			await this._openSettings(platformId === 'claude' ? 'anthropic' : 'openai');
+		if (this._row(platformId)?.integration === 'catalogue') {
 			return;
 		}
 		if (platformId === 'github' || platformId === 'vercel') {
@@ -307,8 +590,76 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		await this._openSettings('keys');
 	}
 
+	/**
+	 * "Connect" for a local coding agent is a re-check, not a sign-in.
+	 *
+	 * The user may have installed it since the panel last looked, so drop the
+	 * cached probe and ask PATH again. If it is still missing, hand over the
+	 * install line instead of pretending there is an account to connect.
+	 */
+	private async _connectLocalAgent(platformId: string): Promise<void> {
+		const spec = localAgentSpec(platformId);
+		if (!spec) {
+			return;
+		}
+		clearLocalAgentProbes();
+		await this._syncLocalAgents(true);
+		this._applyCapabilities(getCachedCapabilities());
+		this._pushState();
+
+		const probe = this.localAgents[platformId];
+		if (probe?.installed) {
+			void getNotificationService().showSuccess(
+				`${spec.name} is ready${probe.version ? ` (${probe.version})` : ''}`
+			);
+			return;
+		}
+		await offerInstall(spec.id);
+	}
+
+	/**
+	 * Remote MCP sign-in: the engine answers with a browser URL, a device code,
+	 * or a one-time setup step. Nothing opens until the engine says it can.
+	 */
+	private async _connectMcp(mcpServerId: string): Promise<void> {
+		const notifications = getNotificationService();
+		const label = mcpServerLabel(mcpServerId);
+		const result = await connectMcpServer(mcpServerId);
+
+		switch (result.status) {
+			case 'connected':
+				this.mcpConnections = { ...this.mcpConnections, [mcpServerId]: true };
+				void notifications.showSuccess(`${label} connected`);
+				await this._afterChange();
+				return;
+			case 'started':
+				this.mcpClientIds = { ...this.mcpClientIds, [mcpServerId]: true };
+				this._pushState();
+				return;
+			case 'needs_setup':
+				this.mcpClientIds = { ...this.mcpClientIds, [mcpServerId]: false };
+				this._applyCapabilities(getCachedCapabilities());
+				this._pushState();
+				void notifications.showWarning(result.message);
+				await this._openSettings(mcpServerId === 'github' ? 'github' : mcpServerId);
+				return;
+			case 'cancelled':
+				return;
+			default:
+				void notifications.showError(result.message);
+		}
+	}
+
 	private async _handleConnect(platformId: string): Promise<void> {
-		if (!isLivePlatform(platformId)) {
+		if (llmKeyProvider(platformId)) {
+			await this._handleConfigure(platformId);
+			return;
+		}
+		if (this._row(platformId)?.integration === 'local_cli') {
+			await this._connectLocalAgent(platformId);
+			return;
+		}
+		if (!this._row(platformId)?.live) {
 			return;
 		}
 		const notifications = getNotificationService();
@@ -317,12 +668,13 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			void notifications.showWarning(`${platformId} is unavailable in this build`);
 			return;
 		}
-		if (platformId === 'openai' || platformId === 'claude' || platformId === 'crewai' || platformId === 'gpt-researcher') {
+		if (platformId === 'crewai' || platformId === 'gpt-researcher') {
 			await this._handleConfigure(platformId);
 			return;
 		}
-		if (platformId === 'github' || platformId === 'vercel') {
-			await this._connectOAuth(platformId);
+		const mcpServerId = this._row(platformId)?.mcpServerId;
+		if (mcpServerId) {
+			await this._connectMcp(mcpServerId);
 			return;
 		}
 		const saas = this._saasId(platformId);
@@ -342,17 +694,28 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleDisconnect(platformId: string): Promise<void> {
-		if (!isLivePlatform(platformId)) {
+		if (llmKeyProvider(platformId)) {
+			await this._handleConfigure(platformId);
+			return;
+		}
+		const mcpServerId = this._row(platformId)?.mcpServerId;
+		if (!this._row(platformId)?.live) {
 			return;
 		}
 		const notifications = getNotificationService();
 		const client = getBackendClient();
 		try {
+			// Clear the MCP sign-in first; GitHub and Vercel also keep an older
+			// per-connector token that orchestration uses, so drop both.
+			if (mcpServerId) {
+				await disconnectMcpServer(mcpServerId);
+				this.mcpConnections = { ...this.mcpConnections, [mcpServerId]: false };
+			}
 			if (platformId === 'github') {
 				await client.disconnectGitHub('default');
 			} else if (platformId === 'vercel') {
 				await client.disconnectVercel('default');
-			} else {
+			} else if (!mcpServerId) {
 				const saas = this._saasId(platformId);
 				if (!saas) {
 					await this._handleConfigure(platformId);
@@ -369,27 +732,25 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	private async _connectOAuth(provider: 'github' | 'vercel'): Promise<void> {
-		const client = getBackendClient();
+	private async _connectOAuth(provider: OAuthProvider): Promise<void> {
 		const notifications = getNotificationService();
-		try {
-			const result = provider === 'github'
-				? await client.getGitHubAuthUrl('default')
-				: await client.getVercelAuthUrl('default');
-			if (!result?.authorization_url) {
-				void notifications.showError(`Could not start ${provider} OAuth. Check backend .env client IDs.`);
-				return;
-			}
-			await vscode.env.openExternal(vscode.Uri.parse(result.authorization_url));
-			void notifications.showInfo(`Complete ${provider} login in the browser, then Refresh`);
-			setTimeout(() => {
-				void this._afterChange();
-			}, 8000);
-		} catch (error) {
-			void notifications.showError(
-				`OAuth failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-			);
+		const outcome = await startOAuthConnect(provider);
+		if (outcome.status === 'needs_setup') {
+			// Never open the vendor page without a client id: show the one-time step instead.
+			this.oauthApps = { ...this.oauthApps, [provider]: false };
+			this._applyCapabilities(getCachedCapabilities());
+			this._pushState();
+			await this._openSettings(provider);
+			return;
 		}
+		if (outcome.status === 'error') {
+			void notifications.showError(outcome.message);
+			return;
+		}
+		this.oauthApps = { ...this.oauthApps, [provider]: true };
+		void notifications.showInfo(
+			`Finish ${oauthProviderLabel(provider)} sign-in in your browser. This row updates when it completes.`
+		);
 	}
 
 	private _groupByCategory(): Record<string, Platform[]> {

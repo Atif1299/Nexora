@@ -35,7 +35,21 @@ const MAX_RECOMMENDED_PER_PROVIDER = 3;
  * - Runtime: extension sends keys as X-Nexora-*-Key headers; backend .env is fallback
  */
 export class SettingsService {
-	constructor(private readonly context: vscode.ExtensionContext) { }
+	private readonly _onDidChangeApiKeys = new vscode.EventEmitter<ApiKeyProvider>();
+	/** Fires with the provider whose SecretStorage key was stored or deleted. Never carries the value. */
+	readonly onDidChangeApiKeys = this._onDidChangeApiKeys.event;
+
+	constructor(private readonly context: vscode.ExtensionContext) {
+		context.subscriptions.push(
+			this._onDidChangeApiKeys,
+			context.secrets.onDidChange((e) => {
+				const provider = PROVIDERS.find(p => this.secretKey(p) === e.key);
+				if (provider) {
+					this._onDidChangeApiKeys.fire(provider);
+				}
+			})
+		);
+	}
 
 	private secretKey(provider: ApiKeyProvider): string {
 		return `nexora.${provider}.key`;

@@ -101,6 +101,53 @@ export function getAgentMaxTurns(): number {
 	return (MAX_TURNS as readonly number[]).includes(n) ? n : 25;
 }
 
+/** 'nexora' means the built-in loop; anything else is a local agent id. */
+export type CodeExecutor = 'nexora' | 'claude-code' | 'cursor' | 'cline';
+
+const CODE_EXECUTORS: readonly CodeExecutor[] = ['nexora', 'claude-code', 'cursor', 'cline'];
+
+/**
+ * Who runs a workspace step.
+ *
+ * A plan step may name an executor, and that wins: the plan knows what the
+ * task needs. Otherwise the user's setting decides, and an unrecognised value
+ * from either falls back to Nexora's own loop rather than silently handing the
+ * user's workspace to something they did not choose.
+ */
+export function getCodeExecutor(override?: string): CodeExecutor {
+	const requested = (override || '').trim().toLowerCase();
+	if ((CODE_EXECUTORS as readonly string[]).includes(requested)) {
+		return requested as CodeExecutor;
+	}
+	const configured = (agentCfg().get<string>('agent.codeExecutor', 'nexora') || '').trim().toLowerCase();
+	return (CODE_EXECUTORS as readonly string[]).includes(configured)
+		? (configured as CodeExecutor)
+		: 'nexora';
+}
+
+/** How much the user is asked before the agent calls a connected platform. */
+export type PlatformToolApproval = 'ask' | 'trust-read-only' | 'never-ask';
+
+const PLATFORM_APPROVALS: readonly PlatformToolApproval[] = ['ask', 'trust-read-only', 'never-ask'];
+
+/**
+ * Platform calls leave the machine and change things the user owns, so the
+ * default asks every time. An unrecognised value falls back to asking rather
+ * than to the permissive end.
+ */
+export function getPlatformToolApproval(): PlatformToolApproval {
+	const value = (agentCfg().get<string>('agent.platformToolApproval', 'ask') || '').trim();
+	return (PLATFORM_APPROVALS as readonly string[]).includes(value)
+		? (value as PlatformToolApproval)
+		: 'ask';
+}
+
+/** Spend cap per third-party agent step, in USD. 0 means no cap. */
+export function getAgentMaxBudgetUsd(): number {
+	const n = agentCfg().get<number>('agent.maxBudgetUsd', 0);
+	return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 export function getAgentFlag(
 	name: 'includeOpenEditors' | 'inlineDiffs' | 'autoFormat' | 'autoApproveModeSwitch' | 'autoCloseTerminal'
 ): boolean {

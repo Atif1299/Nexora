@@ -40,25 +40,6 @@ export interface CapabilitiesReport {
 	mcp: { configured: number; connected: number };
 }
 
-/** Named DAG adapters. Catalogue rows in platforms.json are not in this set. */
-const LIVE_PLATFORM_IDS = new Set([
-	'openai',
-	'claude',
-	'v0-dev',
-	'crewai',
-	'github',
-	'vercel',
-	'supabase',
-	'stripe',
-	'gpt-researcher',
-	'tavily',
-	'elevenlabs'
-]);
-
-export function isLivePlatform(platformId: string): boolean {
-	return LIVE_PLATFORM_IDS.has((platformId || '').trim().toLowerCase());
-}
-
 const STATUSES: CapabilityStatus[] = ['ready', 'not_configured', 'unavailable', 'failed'];
 const EMBEDDING_POLL_MS = 3000;
 const FETCH_RETRY_MS = 400;
@@ -84,7 +65,7 @@ function asString(value: unknown, fallback = ''): string {
 }
 
 /** Normalize live JSON so missing fields cannot crash the UI. */
-export function normalizeCapabilities(raw: unknown): CapabilitiesReport {
+function normalizeCapabilities(raw: unknown): CapabilitiesReport {
 	const r = (raw && typeof raw === 'object') ? raw as Record<string, any> : {};
 	const engine = r.engine || {};
 	const database = r.database || {};
@@ -169,19 +150,6 @@ export function allLlmNotConfigured(report: CapabilitiesReport | undefined): boo
 		&& report.llm.openrouter === 'not_configured';
 }
 
-export function capabilityLabel(status: CapabilityStatus): string {
-	switch (status) {
-		case 'ready':
-			return 'Ready';
-		case 'not_configured':
-			return 'Not configured';
-		case 'unavailable':
-			return 'Unavailable';
-		case 'failed':
-			return 'Failed';
-	}
-}
-
 export function capabilityReason(status: CapabilityStatus): string {
 	switch (status) {
 		case 'not_configured':
@@ -195,7 +163,14 @@ export function capabilityReason(status: CapabilityStatus): string {
 	}
 }
 
-/** Map a live platform id to llm.* or connectors.* . Catalogue ids stay undefined. */
+/**
+ * Map a platform id to llm.* or connectors.* in the capability report.
+ *
+ * The two maps below are the whole answer: an id in neither has no capability
+ * to report and returns undefined. A separate list of "live" ids used to guard
+ * this function, holding exactly the keys of these two maps, so it could only
+ * ever go out of step with them.
+ */
 export function platformCapabilityStatus(
 	platformId: string,
 	report: CapabilitiesReport | undefined
@@ -204,9 +179,6 @@ export function platformCapabilityStatus(
 		return undefined;
 	}
 	const id = (platformId || '').trim().toLowerCase();
-	if (!isLivePlatform(id)) {
-		return undefined;
-	}
 	const llmKeys: Record<string, keyof CapabilitiesReport['llm']> = {
 		openai: 'openai',
 		claude: 'anthropic'

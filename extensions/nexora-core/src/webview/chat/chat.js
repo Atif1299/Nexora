@@ -1301,6 +1301,15 @@
 		let html = escapeHtml(String(content || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
 		html = extractMarkdownFences(html, blocks);
 
+		// Every newline below becomes a <br/>, so runs of them become empty
+		// screen. Models pad their replies with trailing newlines, and a turn
+		// that ends in a tool call often adds several more, which is what put
+		// a wall of blank space between one agent turn and the next.
+		//
+		// This runs after the fences are stashed, so whitespace inside a code
+		// block is untouched: there, blank lines are content.
+		html = html.replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '');
+
 		html = html.replace(/^#{1,6}\s+(.+)$/gm, '<strong class="nx-mdH">$1</strong>');
 		html = html.replace(/^#{1,6}\s*/gm, '');
 		html = applyMarkdownLists(html);
@@ -1739,6 +1748,35 @@
 		}
 	}
 
+	/**
+	 * A "remember ..." message saved a project fact. Show it inline with a way
+	 * to review it -- memory written silently is memory the user cannot trust.
+	 */
+	function addMemoryNote(value) {
+		const text = String(value || '').trim();
+		if (!text || !messages) {
+			return;
+		}
+		if (welcome) {
+			welcome.style.display = 'none';
+		}
+		const row = document.createElement('div');
+		row.className = 'nx-memoryNote';
+		row.innerHTML = '<span class="nx-memoryNoteIcon" aria-hidden="true"></span>'
+			+ '<span class="nx-memoryNoteText">Remembered: ' + escapeHtml(text) + '</span>'
+			+ '<button type="button" class="nx-memoryNoteLink">Manage</button>';
+		row.querySelector('.nx-memoryNoteLink').addEventListener('click', function () {
+			vscode.postMessage({ type: 'openSettings', section: 'memory' });
+		});
+		// Sit above the in-flight reply bubble so the reply stays last.
+		if (lastLoadingMessage && lastLoadingMessage.parentNode === messages) {
+			messages.insertBefore(row, lastLoadingMessage);
+		} else {
+			messages.appendChild(row);
+		}
+		messages.scrollTop = messages.scrollHeight;
+	}
+
 	function appendToken(content) {
 		const chunk = String(content || '');
 		if (!chunk) {
@@ -2088,7 +2126,10 @@
 				: typeof plan.actual_total_cost === 'number'
 					? plan.actual_total_cost
 					: tasks.reduce((sum, t) => sum + (Number(t.actual_cost) || 0), 0);
-			showPlanComplete(planId, status, tasks, actual);
+			showPlanComplete(planId, status, tasks, actual, {
+				repo_url: plan.repo_url,
+				deployment_url: plan.deployment_url
+			});
 		}
 	}
 
@@ -2109,7 +2150,25 @@
 		}
 	}
 
-	function showPlanComplete(planId, status, tasks, actualCost) {
+	/** Links to what the run produced. The engine reads these off the task results. */
+	function planArtifactLinks(artifacts) {
+		if (!artifacts) {
+			return '';
+		}
+		const rows = [
+			{ label: 'Repository', url: artifacts.repo_url },
+			{ label: 'Live URL', url: artifacts.deployment_url }
+		].filter(row => typeof row.url === 'string' && /^https?:\/\//i.test(row.url));
+		if (!rows.length) {
+			return '';
+		}
+		return '<div class="nx-planArtifacts">' + rows.map(row =>
+			`<a class="nx-planArtifactLink" href="${escapeHtml(row.url)}" title="${escapeHtml(row.url)}">`
+			+ `${escapeHtml(row.label)}</a>`
+		).join('') + '</div>';
+	}
+
+	function showPlanComplete(planId, status, tasks, actualCost, artifacts) {
 		const actionsEl = document.getElementById('plan-actions-' + planId);
 		const resolvedTasks = tasks || (currentPlan && currentPlan.plan_id === planId ? currentPlan.tasks : null);
 		if (actionsEl) {
@@ -2127,6 +2186,7 @@
 					</span>
 					<span class="nx-resultCost">$${(actualCost || 0).toFixed(4)}</span>
 				</div>
+				${planArtifactLinks(artifacts)}
 			`;
 		}
 
@@ -2695,7 +2755,7 @@
 				break;
 
 			case 'planExecutionComplete':
-				showPlanComplete(data.planId, data.status, data.tasks, data.actualCost);
+				showPlanComplete(data.planId, data.status, data.tasks, data.actualCost, data.artifacts);
 				break;
 
 			case 'planCompleted':
@@ -2727,6 +2787,10 @@
 
 			case 'costUpdate':
 				updateCostTicker(data.cost_usd, data.tokens_in, data.tokens_out);
+				break;
+
+			case 'memoryNote':
+				addMemoryNote(data.value);
 				break;
 
 			case 'composerSettings':

@@ -3,24 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root
-{
-	--nx-bg: var(--vscode-editor-background);
-	--nx-fg: var(--vscode-editor-foreground);
-	--nx-muted: var(--vscode-descriptionForeground);
-	--nx-border: var(--vscode-panel-border);
-	--nx-surface: var(--vscode-input-background);
-	--nx-focus: var(--vscode-focusBorder);
-	--nx-btn-bg: var(--vscode-button-background);
-	--nx-btn-fg: var(--vscode-button-foreground);
-	--nx-btn-hover: var(--vscode-button-hoverBackground);
-	--nx-btn2-bg: var(--vscode-button-secondaryBackground);
-	--nx-btn2-fg: var(--vscode-button-secondaryForeground);
-	--nx-ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
-	--nx-err: var(--vscode-testing-iconFailed, var(--vscode-errorForeground));
-	--nx-warn: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
-	--nx-bar: var(--vscode-charts-blue, var(--vscode-button-background));
-}
 
 *
 {
@@ -774,7 +756,7 @@ body
 .nx-analytics-barFill
 {
 	height: 100%;
-	background: var(--nx-bar);
+	background: var(--nx-accent);
 	border-radius: 4px;
 }
 
@@ -839,4 +821,44 @@ body
 	overflow: hidden;
 	clip: rect(0, 0, 0, 0);
 	border: 0;
+}
+/* Project Memory (facts) */
+
+.nx-fact-injected
+{
+	margin: 8px 0 0;
+	padding: 10px 12px;
+	border: 1px solid var(--nx-border);
+	border-radius: 4px;
+	background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.1));
+	color: var(--nx-fg, var(--vscode-foreground));
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11px;
+	line-height: 1.6;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.nx-fact-error
+{
+	margin: 8px 0 0;
+	font-size: 12px;
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.nx-model-row .nx-fact-forget
+{
+	flex-shrink: 0;
+	/* Routine, and the fact can be added back -- keep red for the hover only. */
+	color: var(--nx-muted, var(--vscode-descriptionForeground));
+}
+
+.nx-model-row .nx-fact-forget:hover
+{
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.nx-model-row .nx-model-name
+{
+	overflow-wrap: anywhere;
 }

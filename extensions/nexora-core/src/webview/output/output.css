@@ -3,22 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root {
-	--out-bg: var(--vscode-editor-background);
-	--out-fg: var(--vscode-editor-foreground);
-	--out-muted: var(--vscode-descriptionForeground, #888);
-	--out-border: var(--vscode-panel-border, #3c3c3c);
-	--out-surface: var(--vscode-input-background, #3c3c3c);
-	--out-surface-2: var(--vscode-sideBar-background, #252526);
-	--out-radius: 6px;
-	--out-space: 8px;
-
-	--out-success: var(--vscode-testing-iconPassed, var(--vscode-charts-green, #10b981));
-	--out-failed: var(--vscode-testing-iconFailed, var(--vscode-errorForeground, #ef4444));
-	--out-running: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #f59e0b));
-	--out-info: var(--vscode-charts-blue, #3b82f6);
-	--out-warn: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow, #f59e0b));
-}
 
 * {
 	box-sizing: border-box;
@@ -35,8 +19,8 @@ body {
 	padding: 0;
 	font-family: var(--vscode-font-family);
 	font-size: var(--vscode-font-size, 13px);
-	color: var(--out-fg);
-	background: var(--out-bg);
+	color: var(--nx-fg);
+	background: var(--nx-bg);
 }
 
 #output-root {
@@ -48,7 +32,7 @@ body {
 .out-sidebar {
 	width: 180px;
 	min-width: 150px;
-	border-right: 1px solid var(--out-border);
+	border-right: 1px solid var(--nx-border);
 	overflow-y: auto;
 	flex-shrink: 0;
 }
@@ -59,7 +43,7 @@ body {
 	justify-content: center;
 	height: 100%;
 	padding: 16px;
-	color: var(--out-muted);
+	color: var(--nx-muted);
 	font-size: 12px;
 	text-align: center;
 }
@@ -71,7 +55,7 @@ body {
 	gap: 8px;
 	padding: 10px 12px;
 	cursor: pointer;
-	border-bottom: 1px solid var(--out-border);
+	border-bottom: 1px solid var(--nx-border);
 	transition: background 0.1s ease;
 }
 
@@ -89,9 +73,9 @@ body {
 	font-size: 14px;
 }
 
-.out-task-success .out-taskIcon { color: var(--out-success); }
-.out-task-failed .out-taskIcon { color: var(--out-failed); }
-.out-task-running .out-taskIcon { color: var(--out-running); }
+.out-task-success .out-taskIcon { color: var(--nx-ok); }
+.out-task-failed .out-taskIcon { color: var(--nx-err); }
+.out-task-running .out-taskIcon { color: var(--nx-warn); }
 
 .out-taskInfo {
 	flex: 1;
@@ -110,7 +94,7 @@ body {
 
 .out-taskPlatform {
 	font-size: 10px;
-	color: var(--out-muted);
+	color: var(--nx-muted);
 }
 
 .out-taskSelected .out-taskPlatform {
@@ -120,7 +104,7 @@ body {
 
 .out-taskDuration {
 	font-size: 10px;
-	color: var(--out-muted);
+	color: var(--nx-muted);
 	flex-shrink: 0;
 }
 
@@ -137,7 +121,7 @@ body {
 	justify-content: space-between;
 	margin-bottom: 16px;
 	padding-bottom: 12px;
-	border-bottom: 1px solid var(--out-border);
+	border-bottom: 1px solid var(--nx-border);
 }
 
 .out-headerLeft {
@@ -158,15 +142,15 @@ body {
 
 .out-headerStatus {
 	padding: 2px 8px;
-	border-radius: var(--out-radius);
+	border-radius: var(--nx-radius-lg);
 	font-size: 10px;
 	font-weight: 600;
 	text-transform: uppercase;
 }
 
-.out-status-success { background: var(--out-success); color: white; }
-.out-status-failed { background: var(--out-failed); color: white; }
-.out-status-running { background: var(--out-running); color: white; }
+.out-status-success { background: var(--nx-ok); color: white; }
+.out-status-failed { background: var(--nx-err); color: white; }
+.out-status-running { background: var(--nx-warn); color: white; }
 .out-status-pending { background: var(--vscode-descriptionForeground, #6b7280); color: var(--vscode-button-foreground, white); }
 .out-status-skipped { background: var(--vscode-disabledForeground, #9ca3af); color: var(--vscode-button-foreground, white); }
 
@@ -178,9 +162,9 @@ body {
 
 /* Meta info */
 .out-meta {
-	background: var(--out-surface);
+	background: var(--nx-surface);
 	padding: 12px;
-	border-radius: var(--out-radius);
+	border-radius: var(--nx-radius-lg);
 	margin-bottom: 16px;
 }
 
@@ -196,7 +180,7 @@ body {
 }
 
 .out-metaLabel {
-	color: var(--out-muted);
+	color: var(--nx-muted);
 }
 
 .out-metaValue {
@@ -219,7 +203,7 @@ body {
 	margin: 0 0 8px 0;
 	font-size: 11px;
 	text-transform: uppercase;
-	color: var(--out-muted);
+	color: var(--nx-muted);
 	letter-spacing: 0.5px;
 }
 
@@ -232,7 +216,7 @@ body {
 	color: var(--vscode-button-secondaryForeground, #fff);
 	border: none;
 	padding: 4px 10px;
-	border-radius: var(--out-radius);
+	border-radius: var(--nx-radius-lg);
 	cursor: pointer;
 	font-size: 11px;
 	transition: background 0.1s ease;
@@ -246,19 +230,19 @@ body {
 .out-errorText {
 	background: rgba(239, 68, 68, 0.1);
 	border: 1px solid rgba(239, 68, 68, 0.3);
-	border-radius: var(--out-radius);
+	border-radius: var(--nx-radius-lg);
 	padding: 12px;
 	margin: 0;
 	white-space: pre-wrap;
 	font-size: 12px;
 	font-family: var(--vscode-editor-font-family, monospace);
-	color: var(--out-failed);
+	color: var(--nx-err);
 }
 
 /* Result JSON */
 .out-resultJson {
-	background: var(--out-surface);
-	border-radius: var(--out-radius);
+	background: var(--nx-surface);
+	border-radius: var(--nx-radius-lg);
 	padding: 12px;
 	margin: 0;
 	white-space: pre-wrap;
@@ -271,8 +255,8 @@ body {
 
 /* Logs */
 .out-logsContainer {
-	background: var(--out-surface);
-	border-radius: var(--out-radius);
+	background: var(--nx-surface);
+	border-radius: var(--nx-radius-lg);
 	max-height: 200px;
 	overflow-y: auto;
 }
@@ -280,7 +264,7 @@ body {
 .out-noLogs {
 	padding: 20px;
 	text-align: center;
-	color: var(--out-muted);
+	color: var(--nx-muted);
 	font-size: 12px;
 }
 
@@ -290,7 +274,7 @@ body {
 	padding: 6px 10px;
 	font-size: 11px;
 	font-family: var(--vscode-editor-font-family, monospace);
-	border-bottom: 1px solid var(--out-border);
+	border-bottom: 1px solid var(--nx-border);
 }
 
 .out-logEntry:last-child {
@@ -306,7 +290,7 @@ body {
 }
 
 .out-logTime {
-	color: var(--out-muted);
+	color: var(--nx-muted);
 	white-space: nowrap;
 	flex-shrink: 0;
 }
@@ -317,10 +301,10 @@ body {
 	font-weight: 600;
 }
 
-.out-log-error .out-logLevel { color: var(--out-failed); }
-.out-log-warn .out-logLevel { color: var(--out-warn); }
-.out-log-info .out-logLevel { color: var(--out-info); }
-.out-log-debug .out-logLevel { color: var(--out-muted); }
+.out-log-error .out-logLevel { color: var(--nx-err); }
+.out-log-warn .out-logLevel { color: var(--nx-warn); }
+.out-log-info .out-logLevel { color: var(--nx-info); }
+.out-log-debug .out-logLevel { color: var(--nx-muted); }
 
 .out-logMessage {
 	flex: 1;

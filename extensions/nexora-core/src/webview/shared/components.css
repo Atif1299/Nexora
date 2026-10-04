@@ -1,0 +1,303 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+* The parts every Nexora panel is built from: buttons, rows, cards, inputs,
+* badges and empty states.
+*
+* Six of the eight panels defined their own version of these, which is why a
+* button in Settings did not behave quite like a button in Platforms. Defining
+* them once means a fix to how a row highlights reaches the whole product.
+*
+* Interaction follows the workbench: hover uses the list and button hover
+* colours the theme already provides, pressed states shift by opacity rather
+* than by moving anything, and only colour transitions -- nothing here changes
+* size on hover, because that reflows the panel under the cursor.
+*/
+
+/* ---------- buttons ---------- */
+
+.nx-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--nx-space-1);
+	padding: 4px 11px;
+	border: 1px solid transparent;
+	border-radius: var(--nx-radius);
+	font-family: inherit;
+	font-size: 12px;
+	line-height: 18px;
+	white-space: nowrap;
+	cursor: pointer;
+	background: var(--nx-btn-bg);
+	color: var(--nx-btn-fg);
+	transition: background-color var(--nx-transition), color var(--nx-transition);
+}
+
+.nx-btn:hover {
+	background: var(--nx-btn-hover);
+}
+
+/* Pressed feedback without movement: a button that shifts position under the
+cursor makes a click feel like it slipped. */
+.nx-btn:active {
+	opacity: 0.85;
+}
+
+.nx-btn:disabled,
+.nx-btn[aria-disabled='true'] {
+	opacity: 0.5;
+	cursor: default;
+	pointer-events: none;
+}
+
+.nx-btn-secondary {
+	background: var(--nx-btn2-bg);
+	color: var(--nx-btn2-fg);
+}
+
+.nx-btn-secondary:hover {
+	/* Its own hover colour. Reusing the primary one turned a secondary button
+	primary-coloured under the cursor, which read as the wrong button. */
+	background: var(--nx-btn2-hover);
+	color: var(--nx-btn2-fg);
+}
+
+/* A button that only shows its shape on hover, for row actions and toolbars. */
+.nx-btn-ghost {
+	background: transparent;
+	color: var(--nx-fg);
+}
+
+.nx-btn-ghost:hover {
+	background: var(--nx-surface-hover);
+}
+
+.nx-btn-danger {
+	background: transparent;
+	color: var(--nx-err);
+	border-color: var(--nx-err);
+}
+
+.nx-btn-danger:hover {
+	background: var(--nx-err);
+	color: var(--nx-btn-fg);
+}
+
+/* ---------- rows and cards ---------- */
+
+.nx-row {
+	display: flex;
+	align-items: center;
+	gap: var(--nx-space-2);
+	padding: var(--nx-space-2) var(--nx-space-3);
+	border-radius: var(--nx-radius);
+	transition: background-color var(--nx-transition);
+}
+
+.nx-row:hover {
+	background: var(--nx-surface-hover);
+}
+
+.nx-row[aria-selected='true'] {
+	background: var(--nx-surface-active);
+}
+
+.nx-card {
+	padding: var(--nx-space-3);
+	border: 1px solid var(--nx-border);
+	border-radius: var(--nx-radius-lg);
+	background: var(--nx-surface);
+	transition: border-color var(--nx-transition), background-color var(--nx-transition);
+}
+
+.nx-card:hover {
+	border-color: var(--nx-focus);
+}
+
+.nx-section-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--nx-space-2);
+	margin-bottom: var(--nx-space-2);
+}
+
+.nx-stack {
+	display: flex;
+	flex-direction: column;
+	gap: var(--nx-space-2);
+}
+
+/* ---------- inputs ---------- */
+
+.nx-input,
+.nx-textarea,
+.nx-select {
+	width: 100%;
+	padding: 4px 8px;
+	border: 1px solid var(--nx-input-border);
+	border-radius: var(--nx-radius);
+	background: var(--nx-input-bg);
+	color: var(--nx-input-fg);
+	font-family: inherit;
+	font-size: 12px;
+	line-height: 18px;
+	transition: border-color var(--nx-transition);
+}
+
+.nx-input::placeholder,
+.nx-textarea::placeholder {
+	color: var(--nx-input-placeholder);
+}
+
+.nx-input:focus-visible,
+.nx-textarea:focus-visible,
+.nx-select:focus-visible {
+	/* The border is the ring for inputs, which is how VS Code draws them. */
+	outline: none;
+	border-color: var(--nx-focus);
+}
+
+.nx-textarea {
+	resize: vertical;
+	min-height: 60px;
+}
+
+/* ---------- status ---------- */
+
+.nx-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--nx-space-1);
+	padding: 1px 6px;
+	border-radius: 10px;
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.03em;
+	text-transform: uppercase;
+	white-space: nowrap;
+	color: var(--nx-muted);
+	border: 1px solid var(--nx-border);
+}
+
+.nx-badge-ok {
+	color: var(--nx-ok);
+	border-color: var(--nx-ok);
+}
+
+.nx-badge-err {
+	color: var(--nx-err);
+	border-color: var(--nx-err);
+}
+
+.nx-badge-warn {
+	color: var(--nx-warn);
+	border-color: var(--nx-warn);
+}
+
+/* A dot carries status where a full badge would crowd the row. */
+.nx-dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--nx-disabled);
+}
+
+.nx-dot-ok {
+	background: var(--nx-ok);
+}
+
+.nx-dot-err {
+	background: var(--nx-err);
+}
+
+.nx-hint {
+	margin: 0 0 var(--nx-space-3);
+	color: var(--nx-muted);
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.nx-banner {
+	padding: var(--nx-space-2) var(--nx-space-3);
+	margin-bottom: var(--nx-space-2);
+	border-left: 2px solid var(--nx-warn);
+	border-radius: 0 var(--nx-radius) var(--nx-radius) 0;
+	background: var(--nx-surface);
+	font-size: 12px;
+}
+
+.nx-banner-info {
+	border-left-color: var(--nx-info);
+}
+
+/* ---------- empty states ---------- */
+
+/*
+* What a panel shows before it has anything to show. An empty panel that says
+* nothing reads as broken; one that names the next step is the difference
+* between "this is not working" and "I have not set this up yet".
+*/
+.nx-empty {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--nx-space-2);
+	padding: var(--nx-space-4) var(--nx-space-3);
+	text-align: center;
+	color: var(--nx-muted);
+	font-size: 12px;
+	line-height: 1.5;
+}
+
+.nx-empty-title {
+	color: var(--nx-fg);
+	font-weight: 600;
+}
+
+/* ---------- loading ---------- */
+
+/*
+* A spinner animates transform only, so it never triggers layout while the
+* panel beside it is still rendering.
+*/
+.nx-spinner {
+	display: inline-block;
+	width: 12px;
+	height: 12px;
+	border: 1.5px solid var(--nx-border);
+	border-top-color: var(--nx-accent);
+	border-radius: 50%;
+	animation: nx-spin 700ms linear infinite;
+}
+
+@keyframes nx-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* A skeleton says "content is coming" without pushing the layout around when
+it arrives, because it occupies the space the content will take. */
+.nx-skeleton {
+	border-radius: var(--nx-radius);
+	background: var(--nx-surface);
+	opacity: 0.6;
+	animation: nx-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes nx-pulse {
+	0%,
+	100% {
+		opacity: 0.35;
+	}
+
+	50% {
+		opacity: 0.7;
+	}
+}

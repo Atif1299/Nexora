@@ -3,23 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root
-{
-	--nx-bg: var(--vscode-editor-background);
-	--nx-fg: var(--vscode-editor-foreground);
-	--nx-muted: var(--vscode-descriptionForeground);
-	--nx-border: var(--vscode-panel-border);
-	--nx-surface: var(--vscode-input-background);
-	--nx-btn-bg: var(--vscode-button-background);
-	--nx-btn-fg: var(--vscode-button-foreground);
-	--nx-btn-hover: var(--vscode-button-hoverBackground);
-	--nx-btn2-bg: var(--vscode-button-secondaryBackground);
-	--nx-btn2-fg: var(--vscode-button-secondaryForeground);
-	--nx-focus: var(--vscode-focusBorder);
-	--nx-input-bg: var(--vscode-input-background);
-	--nx-input-fg: var(--vscode-input-foreground);
-	--nx-input-border: var(--vscode-input-border);
-}
 
 *
 {

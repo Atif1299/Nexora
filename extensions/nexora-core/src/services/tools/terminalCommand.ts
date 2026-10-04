@@ -89,6 +89,16 @@ type AgentTerminalSession = {
 type CommandRunResult = {
 	output: string;
 	exitCode: number;
+	/**
+	 * False when the shell never reported a status.
+	 *
+	 * A PowerShell parser error -- `&&` used as a separator, for instance --
+	 * rejects the line without running anything, so no exit code is ever
+	 * emitted. Treating that silence as 0 told the agent its command had
+	 * succeeded, and it reran the identical broken line instead of changing
+	 * approach.
+	 */
+	exitKnown: boolean;
 	timedOut: boolean;
 	cancelled: boolean;
 	captured: boolean;
@@ -385,7 +395,7 @@ async function collectExecution(
 
 	return await new Promise<CommandRunResult>((resolve) => {
 		let settled = false;
-		const finish = (exitCode: number) => {
+		const finish = (exitCode: number, exitKnown = true) => {
 			if (settled) {
 				return;
 			}
@@ -396,6 +406,7 @@ async function collectExecution(
 			resolve({
 				output: reader.output(),
 				exitCode,
+				exitKnown,
 				timedOut,
 				cancelled,
 				captured: true,
@@ -404,10 +415,15 @@ async function collectExecution(
 		};
 
 		void endWait.promise.then((code) => {
-			finish(typeof code === 'number' ? code : (cancelled || timedOut ? -1 : 0));
+			if (typeof code === 'number') {
+				finish(code);
+			} else {
+				finish(cancelled || timedOut ? -1 : 0, cancelled || timedOut);
+			}
 		});
 		void reader.done.then(() => {
-			setTimeout(() => finish(cancelled || timedOut ? -1 : 0), 200);
+			// Output ended before any status arrived, so the status is a guess.
+			setTimeout(() => finish(cancelled || timedOut ? -1 : 0, cancelled || timedOut), 200);
 		});
 
 		const timeoutHandle = setTimeout(() => {
@@ -463,6 +479,7 @@ function uncapturedResult(onOutput: (combined: string) => void, cancelled: boole
 	return {
 		output: note,
 		exitCode: 0,
+		exitKnown: false,
 		timedOut: false,
 		cancelled,
 		captured: false,
@@ -677,7 +694,8 @@ export async function runTerminalCommandTool(
 				data: {
 					stdout: stdoutResult.text,
 					stderr: '',
-					exitCode: result.exitCode
+					exitCode: result.exitCode,
+					exitKnown: result.exitKnown
 				},
 				truncated: isTruncated
 			};
@@ -704,26 +722,37 @@ export async function runTerminalCommandTool(
 				data: {
 					stdout: stdoutResult.text,
 					stderr: '',
-					exitCode: result.exitCode
+					exitCode: result.exitCode,
+					exitKnown: result.exitKnown
 				},
 				truncated: isTruncated
 			};
 		}
 
-		const ok = result.exitCode === 0;
+		// An unknown status is not a pass. The shell rejecting a line before it
+		// runs -- the usual cause on Windows -- produces no exit code at all,
+		// and reporting that as success is what let the agent repeat a command
+		// the shell had already refused.
+		const ok = result.exitKnown && result.exitCode === 0;
 		emit(ok ? 'succeeded' : 'failed', lastPreview, result.exitCode);
 		const empty = !stdoutResult.text.trim();
 		return {
 			success: ok,
 			error: ok ? undefined : (
-				empty
-					? `Command exited ${result.exitCode} with no output. Retry the same command; do not ask the user to run it.`
-					: `Command exited ${result.exitCode}`
+				!result.exitKnown
+					? 'The shell reported no exit status, which usually means it rejected the '
+					+ 'command before running it. Read the output above for the reason. Do not '
+					+ 'repeat the same command: fix it first. On Windows PowerShell, `&&` is not '
+					+ 'a separator -- pass the directory as the cwd argument instead of using `cd`.'
+					: empty
+						? `Command exited ${result.exitCode} with no output. Retry the same command; do not ask the user to run it.`
+						: `Command exited ${result.exitCode}`
 			),
 			data: {
 				stdout: stdoutResult.text,
 				stderr: '',
-				exitCode: result.exitCode
+				exitCode: result.exitCode,
+				exitKnown: result.exitKnown
 			},
 			truncated: isTruncated
 		};

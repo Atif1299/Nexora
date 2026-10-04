@@ -27,6 +27,11 @@ export interface AuthStatus {
 	v0_enabled?: boolean;
 	elevenlabs_enabled?: boolean;
 	tavily_enabled?: boolean;
+	/** A sign-in can identify the user without granting API access. */
+	github_can_execute?: boolean;
+	vercel_can_execute?: boolean;
+	github_limitation?: string | null;
+	vercel_limitation?: string | null;
 	github_oauth_configured?: boolean;
 	vercel_oauth_configured?: boolean;
 	github_callback_url?: string;
@@ -59,17 +64,19 @@ export function createAuthApi(transport: Transport) {
 			}
 		},
 
-		getGitHubAuthUrl: async (userId: string = 'default'): Promise<OAuthStartResult | null> => {
+		getGitHubAuthUrl: async (userId: string = 'default', returnUri?: string): Promise<OAuthStartResult | null> => {
+			const ret = returnUri ? `&return_uri=${encodeURIComponent(returnUri)}` : '';
 			try {
-				return await transport.get(`/api/auth/github/connect?user_id=${userId}`);
+				return await transport.get(`/api/auth/github/connect?user_id=${encodeURIComponent(userId)}${ret}`);
 			} catch (error) {
 				return { error: error instanceof Error ? error.message : 'GitHub OAuth is not configured' };
 			}
 		},
 
-		getVercelAuthUrl: async (userId: string = 'default'): Promise<OAuthStartResult | null> => {
+		getVercelAuthUrl: async (userId: string = 'default', returnUri?: string): Promise<OAuthStartResult | null> => {
+			const ret = returnUri ? `&return_uri=${encodeURIComponent(returnUri)}` : '';
 			try {
-				return await transport.get(`/api/auth/vercel/connect?user_id=${userId}`);
+				return await transport.get(`/api/auth/vercel/connect?user_id=${encodeURIComponent(userId)}${ret}`);
 			} catch (error) {
 				return { error: error instanceof Error ? error.message : 'Vercel OAuth is not configured' };
 			}

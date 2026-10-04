@@ -5,42 +5,20 @@
 
 import * as vscode from 'vscode';
 
-function getNonce(): string {
-	let text = '';
-	const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	for (let i = 0; i < 32; i++) {
-		text += possible.charAt(Math.floor(Math.random() * possible.length));
-	}
-	return text;
-}
+import { renderWebviewPage } from '../shared/html';
 
 export function getWorkflowWebviewHtml(
 	webview: vscode.Webview,
 	extensionUri: vscode.Uri
 ): string {
-	const nonce = getNonce();
-
-	const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'workflow', 'workflow.css'));
-	const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'workflow', 'workflow.js'));
-
-	const csp = [
-		`default-src 'none'`,
-		`img-src ${webview.cspSource} https: data:`,
-		`style-src ${webview.cspSource} 'unsafe-inline'`,
-		`script-src 'nonce-${nonce}'`,
-	].join('; ');
-
-	return /* html */ `<!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta charset="UTF-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<meta http-equiv="Content-Security-Policy" content="${csp}">
-	<link rel="stylesheet" href="${cssUri}">
-	<title>Workflow Viewer</title>
-</head>
-<body>
-	<div id="workflow-root">
+	return renderWebviewPage({
+		webview,
+		extensionUri,
+		folder: 'workflow',
+		title: 'Workflow Viewer',
+		styles: ['workflow.css'],
+		scripts: ['workflow.js'],
+		body: /* html */ `	<div id="workflow-root">
 		<div class="wf-empty">
 			<div class="wf-emptyIcon">
 				<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -57,9 +35,6 @@ export function getWorkflowWebviewHtml(
 			<h3 class="wf-emptyTitle">No Active Workflow</h3>
 			<p class="wf-emptyText">Start a new orchestration in Chat to see the workflow graph</p>
 		</div>
-	</div>
-
-	<script nonce="${nonce}" src="${jsUri}"></script>
-</body>
-</html>`;
+	</div>`
+	});
 }
