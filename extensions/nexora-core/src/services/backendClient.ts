@@ -22,7 +22,12 @@ import { createAgentApi, type AgentMessage, type AgentTurnResponse, type ToolCal
 import { createStatusApi, type ConnectionsResponse, type TestResult, type ProviderStatus } from './backend/status';
 import { createCapabilitiesApi, type CapabilitiesReport } from './backend/capabilities';
 import { createModelsApi, type ModelCatalog } from './backend/models';
-import { createMcpApi, type McpServerRow } from './backend/mcp';
+import { createMcpApi, type McpCallResult, type McpServerRow } from './backend/mcp';
+import {
+	createCompletionApi,
+	type InlineCompletionRequest,
+	type InlineCompletionResult
+} from './backend/completion';
 import {
 	createMcpConnectApi,
 	type McpConnectOutcome,
@@ -438,6 +443,23 @@ export class BackendClient {
 
 	async disconnectMcpConnect(serverId: string): Promise<{ had_token: boolean }> {
 		return createMcpConnectApi(this.transport).disconnect(serverId);
+	}
+
+	/** Text that belongs at the cursor. Empty when there is nothing to suggest. */
+	async inlineComplete(
+		request: InlineCompletionRequest,
+		signal?: AbortSignal
+	): Promise<InlineCompletionResult> {
+		return createCompletionApi(this.transport).inline(request, signal);
+	}
+
+	/** Run one tool on a connected platform. Approval happens before this. */
+	async callPlatformTool(
+		serverId: string,
+		tool: string,
+		args: Record<string, unknown>
+	): Promise<McpCallResult> {
+		return createMcpApi(this.transport).callTool(serverId, tool, args);
 	}
 
 	async listMcpServers(): Promise<McpServerRow[]> {

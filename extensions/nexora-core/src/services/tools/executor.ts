@@ -12,6 +12,7 @@ import { listFilesTool } from './listFiles';
 import { writeFileTool } from './writeFile';
 import { applyPatchTool, insertLinesTool } from './applyPatch';
 import { runTerminalCommandTool, type TerminalCommandProgress } from './terminalCommand';
+import { executePlatformTool } from './platformTool';
 import {
 	browserClickTool,
 	browserPressTool,
@@ -54,8 +55,25 @@ export async function executeToolCalls(
 	for (const tc of toolCalls) {
 		const args = tc.arguments;
 
-		// Already run by the engine, because that is where the data or the
-		// credential lives: memory tools, and any connected platform's tools.
+		// A connected platform's tool. The engine deliberately did not run it:
+		// the call leaves the machine, so the user approves it here first and
+		// the engine then makes the call with the credential it holds.
+		if (typeof args._platform === 'string' && typeof args._platform_tool === 'string') {
+			results.push({
+				id: tc.id,
+				name: tc.name,
+				result: await executePlatformTool(
+					args._platform,
+					args._platform_tool,
+					args as Record<string, unknown>,
+					args._read_only_hint === true
+				)
+			});
+			continue;
+		}
+
+		// Already run by the engine, because that is where the data lives:
+		// the memory and codebase-search tools.
 		if (args._executed && args._result) {
 			results.push({
 				id: tc.id,

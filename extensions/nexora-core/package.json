@@ -424,6 +424,45 @@
           "default": "nexora",
           "markdownDescription": "Which coding agent runs the workspace steps of a plan. A plan step may override this. Third-party agents run in a throwaway git worktree, and you review their changes file by file before anything touches your workspace; they use their own sign-in and their own billing, not your Nexora model keys."
         },
+        "nexora.inlineCompletion.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Suggest code ahead of the cursor as grey text. Press Tab to accept."
+        },
+        "nexora.inlineCompletion.model": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Model used for inline completions. Leave empty to use the same resolution as chat. A smaller, faster model is usually the better choice here: a suggestion that arrives after you have typed the next word is of no use, however good it is."
+        },
+        "nexora.inlineCompletion.debounceMs": {
+          "type": "number",
+          "default": 200,
+          "minimum": 0,
+          "maximum": 2000,
+          "markdownDescription": "How long to wait after a keystroke before asking for a suggestion. Lower feels more eager and costs more requests; typing that continues an existing suggestion is answered from cache and never waits."
+        },
+        "nexora.inlineCompletion.maxTokens": {
+          "type": "number",
+          "default": 64,
+          "minimum": 8,
+          "maximum": 256,
+          "markdownDescription": "Longest suggestion to request. This is the main latency control: larger values take proportionally longer to arrive."
+        },
+        "nexora.agent.platformToolApproval": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "trust-read-only",
+            "never-ask"
+          ],
+          "enumDescriptions": [
+            "Confirm every call to a connected platform, showing the tool and its arguments.",
+            "Skip confirmation when the server marks a tool read-only. The MCP specification treats these hints as untrusted, so a server could mark a destructive tool read-only.",
+            "Call connected platforms without asking. Only for platforms and accounts you fully trust."
+          ],
+          "default": "ask",
+          "markdownDescription": "How much Nexora asks before the chat agent calls a connected platform such as GitHub or Stripe. These calls leave your machine and can change data in your accounts, so the default confirms each one; you can also choose 'Always allow' per tool for the current session."
+        },
         "nexora.agent.maxBudgetUsd": {
           "type": "number",
           "default": 0,

@@ -125,6 +125,23 @@ export function getCodeExecutor(override?: string): CodeExecutor {
 		: 'nexora';
 }
 
+/** How much the user is asked before the agent calls a connected platform. */
+export type PlatformToolApproval = 'ask' | 'trust-read-only' | 'never-ask';
+
+const PLATFORM_APPROVALS: readonly PlatformToolApproval[] = ['ask', 'trust-read-only', 'never-ask'];
+
+/**
+ * Platform calls leave the machine and change things the user owns, so the
+ * default asks every time. An unrecognised value falls back to asking rather
+ * than to the permissive end.
+ */
+export function getPlatformToolApproval(): PlatformToolApproval {
+	const value = (agentCfg().get<string>('agent.platformToolApproval', 'ask') || '').trim();
+	return (PLATFORM_APPROVALS as readonly string[]).includes(value)
+		? (value as PlatformToolApproval)
+		: 'ask';
+}
+
 /** Spend cap per third-party agent step, in USD. 0 means no cap. */
 export function getAgentMaxBudgetUsd(): number {
 	const n = agentCfg().get<number>('agent.maxBudgetUsd', 0);

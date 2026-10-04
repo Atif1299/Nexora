@@ -19,8 +19,44 @@ export interface McpServerRow {
 	tools_count: number;
 }
 
+/** Outcome of one approved platform tool call. */
+export interface McpCallResult {
+	success: boolean;
+	data?: unknown;
+	error?: string;
+}
+
 export function createMcpApi(transport: Transport) {
 	return {
+		/**
+		 * Run one tool on a connected server, after the user has approved it.
+		 *
+		 * The engine makes the call because the credential is there and never
+		 * comes here; the IDE's part is asking the user first.
+		 */
+		callTool: async (
+			serverId: string,
+			tool: string,
+			args: Record<string, unknown>
+		): Promise<McpCallResult> => {
+			try {
+				const response = await transport.post(
+					`/api/connectors/mcp/${encodeURIComponent(serverId)}/call`,
+					{ tool, arguments: args }
+				);
+				return {
+					success: response?.success === true,
+					data: response?.data,
+					error: response?.error ? String(response.error) : undefined
+				};
+			} catch (error) {
+				return {
+					success: false,
+					error: error instanceof Error ? error.message : 'Platform call failed'
+				};
+			}
+		},
+
 		listServers: async (): Promise<McpServerRow[]> => {
 			try {
 				const response = await transport.get('/api/connectors/mcp/servers');
