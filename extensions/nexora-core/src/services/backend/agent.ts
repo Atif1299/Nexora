@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import * as vscode from 'vscode';
+
 import type { SSEEvent, Transport } from './transport';
 
 /** Agent turns call LiteLLM with tools; 30s aborts a healthy first completion. */
@@ -35,6 +37,21 @@ export interface AgentTurnResponse {
 
 export type AgentMode = 'ask' | 'agent';
 
+/**
+ * Which shell run_terminal_command will actually use.
+ *
+ * The engine cannot know this -- it may not even be on the same machine -- and
+ * without it the model writes POSIX syntax everywhere. On Windows that makes
+ * `cd x && npm install` a parse error rather than a command.
+ */
+function currentShell(): string {
+	if (process.platform !== 'win32') {
+		const unix = process.env.SHELL || '';
+		return unix ? unix.split(/[\/]/).pop() || 'bash' : 'bash';
+	}
+	return /pwsh/i.test(vscode.env.shell || '') ? 'pwsh' : 'powershell';
+}
+
 export function createAgentApi(transport: Transport) {
 	return {
 		/**
@@ -59,7 +76,8 @@ export function createAgentApi(transport: Transport) {
 				model,
 				mode,
 				max_tokens: 2048,
-				session_id: sessionId
+				session_id: sessionId,
+				shell: currentShell()
 			}, AGENT_TURN_TIMEOUT_MS, signal);
 		},
 
@@ -82,7 +100,8 @@ export function createAgentApi(transport: Transport) {
 				model,
 				mode,
 				max_tokens: 2048,
-				session_id: sessionId
+				session_id: sessionId,
+				shell: currentShell()
 			}, signal, AGENT_TURN_TIMEOUT_MS);
 		},
 
