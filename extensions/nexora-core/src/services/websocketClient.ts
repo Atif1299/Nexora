@@ -31,6 +31,8 @@ export interface WebSocketMessage {
 	model?: string;
 	workspace_path?: string;
 	context?: string;
+	/** Agent the plan wants for this step; absent means the user's setting decides. */
+	executor?: string;
 }
 
 export type MessageCallback = (message: WebSocketMessage) => void;

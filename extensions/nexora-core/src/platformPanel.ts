@@ -10,7 +10,6 @@ import { getEngineState, onDidChangeEngineState } from './services/engineProcess
 import {
 	capabilityReason,
 	getCachedCapabilities,
-	isLivePlatform,
 	onDidChangeCapabilities,
 	platformCapabilityStatus,
 	refreshCapabilities,
@@ -23,7 +22,6 @@ import {
 	connectMcpServer,
 	disconnectMcpServer,
 	getMcpConnections,
-	mcpServerIdForPlatform,
 	mcpServerLabel,
 	onDidConnectMcpServer
 } from './services/mcpConnect';
@@ -35,6 +33,13 @@ import {
 	startOAuthConnect,
 	type OAuthProvider
 } from './services/oauthConnect';
+import {
+	clearLocalAgentProbes,
+	localAgentSpec,
+	offerInstall,
+	probeAllLocalAgents,
+	type LocalAgentProbe
+} from './services/agents/localAgents';
 import type { SaasConnector } from './services/backend/auth';
 
 /**
@@ -73,7 +78,10 @@ interface Platform {
 	capabilities?: string[];
 	api_type?: string;
 	auth_type?: string;
-	has_active_connector?: boolean;
+	/** How the engine reaches it: remote_mcp | rest | local_cli | catalogue. */
+	integration?: string;
+	/** Shell line that installs a local agent; absent for every other kind. */
+	install_hint?: string;
 	is_enabled?: boolean;
 	capabilityStatus?: CapabilityStatus;
 	capabilityReason?: string;
@@ -97,7 +105,9 @@ interface PlatformApiRow {
 	capabilities?: string[];
 	api_type?: string;
 	auth_type?: string;
-	has_active_connector?: boolean;
+	integration?: string;
+	install_hint?: string;
+	mcp_server_id?: string;
 	is_enabled?: boolean;
 }
 
@@ -121,6 +131,8 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	private oauthApps: Partial<Record<OAuthProvider, boolean>> = {};
 	private mcpConnections: Record<string, boolean> = {};
 	private mcpClientIds: Record<string, boolean> = {};
+	/** Local coding agents found on PATH, keyed by platform id. */
+	private localAgents: Record<string, LocalAgentProbe> = {};
 
 	constructor(extensionUri: vscode.Uri) {
 		this._extensionUri = extensionUri;
@@ -198,6 +210,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			await this._syncLlmKeys();
 			await this._syncOAuthApps();
 			await this._syncMcpConnections();
+			await this._syncLocalAgents();
 			const platformsData = await client.getPlatforms() as PlatformApiRow[];
 			if (!platformsData.some(p => (p.id || '').toLowerCase() === OPENROUTER_ROW.id)) {
 				platformsData.push(OPENROUTER_ROW);
@@ -317,7 +330,12 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			capabilities: p.capabilities,
 			api_type: p.api_type,
 			auth_type: p.auth_type,
-			...this._statusFields(id, p.is_enabled, report)
+			integration: p.integration,
+			install_hint: p.install_hint,
+			...this._statusFields(
+				{ id, integration: p.integration, mcpServerId: p.mcp_server_id, isEnabled: p.is_enabled },
+				report
+			)
 		};
 	}
 
@@ -325,19 +343,31 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		this.embeddingInProgress = !!report?.vectors.embedding_in_progress;
 		this.platforms = this.platforms.map(p => ({
 			...p,
-			...this._statusFields(p.id, p.is_enabled, report)
+			...this._statusFields(
+				{ id: p.id, integration: p.integration, mcpServerId: p.mcpServerId, isEnabled: p.is_enabled },
+				report
+			)
 		}));
 	}
 
 	/**
-	 * LLM rows follow SecretStorage only: READY when the Settings key exists, CATALOGUE otherwise.
-	 * Every other live row follows the engine capability report.
+	 * What a row's badge and buttons should say.
+	 *
+	 * The engine decides how a platform is reached and says so in the row's
+	 * `integration` field; this only decides how to show it. The panel used to
+	 * answer "is this reachable" from its own hard-coded lists, which meant
+	 * every new platform had to be added in both repositories and the two
+	 * copies could disagree about the same row.
+	 *
+	 * LLM rows are the exception, and stay local: their credential is a
+	 * SecretStorage key the engine never sees, so only the IDE can say whether
+	 * one is present.
 	 */
 	private _statusFields(
-		id: string,
-		isEnabled: boolean | undefined,
+		row: { id: string; integration?: string; mcpServerId?: string; isEnabled?: boolean },
 		report: CapabilitiesReport | undefined
-	): Pick<Platform, 'live' | 'capabilityStatus' | 'capabilityReason' | 'has_active_connector' | 'is_enabled' | 'keyProvider' | 'setupHint' | 'mcpServerId' | 'configurable' | 'disconnectable'> {
+	): Pick<Platform, 'live' | 'capabilityStatus' | 'capabilityReason' | 'is_enabled' | 'keyProvider' | 'setupHint' | 'mcpServerId' | 'configurable' | 'disconnectable'> {
+		const { id, isEnabled } = row;
 		const keyProvider = llmKeyProvider(id);
 		if (keyProvider) {
 			const ready = !!this.llmKeys[keyProvider];
@@ -345,31 +375,74 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 				live: ready,
 				capabilityStatus: ready ? 'ready' : undefined,
 				capabilityReason: undefined,
-				has_active_connector: ready,
 				is_enabled: isEnabled !== false,
 				keyProvider,
 				setupHint: undefined
 			};
 		}
-		const mcpServerId = mcpServerIdForPlatform(id);
-		if (mcpServerId) {
-			return this._mcpStatusFields(id, mcpServerId, isEnabled, report);
+		if (row.mcpServerId) {
+			return this._mcpStatusFields(id, row.mcpServerId, isEnabled, report);
 		}
 
-		const live = isLivePlatform(id);
+		if (row.integration === 'local_cli') {
+			return this._localAgentStatusFields(id, isEnabled);
+		}
+
+		const live = row.integration === 'rest';
 		const status = live ? platformCapabilityStatus(id, report) : undefined;
 		const blocked = live && isBlockedStatus(status);
 		return {
 			live,
 			capabilityStatus: status,
 			capabilityReason: status ? capabilityReason(status) : undefined,
-			has_active_connector: live && status === 'ready',
 			is_enabled: blocked ? false : isEnabled !== false,
 			keyProvider: undefined,
 			setupHint: undefined,
 			mcpServerId: undefined,
 			configurable: SETTINGS_BACKED_PLATFORMS.has(id),
 			disconnectable: live && status === 'ready' && SETTINGS_BACKED_PLATFORMS.has(id)
+		};
+	}
+
+	/** The loaded row for a platform, so handlers read the engine's answer. */
+	private _row(platformId: string): Platform | undefined {
+		const id = (platformId || '').trim().toLowerCase();
+		return this.platforms.find(p => p.id.toLowerCase() === id);
+	}
+
+	/**
+	 * Rows Nexora runs as a local command: Claude Code, Cursor, Cline.
+	 *
+	 * There is no token and no endpoint here, so "ready" means the binary is on
+	 * PATH. The agent carries its own vendor login, which is why Nexora neither
+	 * asks for a key nor offers Disconnect: taking away something it never gave
+	 * would just be a button that lies.
+	 */
+	private _localAgentStatusFields(
+		platformId: string,
+		isEnabled: boolean | undefined
+	): Pick<Platform, 'live' | 'capabilityStatus' | 'capabilityReason' | 'is_enabled' | 'keyProvider' | 'setupHint' | 'mcpServerId' | 'configurable' | 'disconnectable'> {
+		const probe = this.localAgents[platformId];
+		const spec = localAgentSpec(platformId);
+		const installed = probe?.installed === true;
+		// Undetected is not the same as missing: say nothing until the probe
+		// has actually run, rather than claiming an install is absent.
+		const reason = installed
+			? probe?.version
+			: probe
+				? `Not installed - run ${spec?.installHint || ''} then Refresh`
+				: 'Checking for the command...';
+
+		return {
+			live: true,
+			capabilityStatus: installed ? 'ready' : 'not_configured',
+			capabilityReason: reason,
+			is_enabled: isEnabled !== false,
+			keyProvider: undefined,
+			setupHint: installed ? undefined : spec?.installHint,
+			mcpServerId: undefined,
+			configurable: false,
+			disconnectable: false
 		};
 	}
 
@@ -383,16 +456,13 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		mcpServerId: string,
 		isEnabled: boolean | undefined,
 		report: CapabilitiesReport | undefined
-	): Pick<Platform, 'live' | 'capabilityStatus' | 'capabilityReason' | 'has_active_connector' | 'is_enabled' | 'keyProvider' | 'setupHint' | 'mcpServerId' | 'configurable' | 'disconnectable'> {
-		const capability = isLivePlatform(platformId)
-			? platformCapabilityStatus(platformId, report)
-			: undefined;
+	): Pick<Platform, 'live' | 'capabilityStatus' | 'capabilityReason' | 'is_enabled' | 'keyProvider' | 'setupHint' | 'mcpServerId' | 'configurable' | 'disconnectable'> {
+		const capability = platformCapabilityStatus(platformId, report);
 		if (capability === 'unavailable') {
 			return {
 				live: true,
 				capabilityStatus: 'unavailable',
 				capabilityReason: capabilityReason('unavailable'),
-				has_active_connector: false,
 				is_enabled: false,
 				keyProvider: undefined,
 				setupHint: undefined,
@@ -417,7 +487,6 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			capabilityReason: connected
 				? undefined
 				: (setupHint || 'Not connected - Connect opens sign-in in your browser'),
-			has_active_connector: connected,
 			is_enabled: isEnabled !== false,
 			keyProvider: undefined,
 			setupHint,
@@ -427,6 +496,20 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			configurable: SETTINGS_BACKED_PLATFORMS.has(platformId),
 			disconnectable: connected
 		};
+	}
+
+	/**
+	 * Look for the local agent binaries.
+	 *
+	 * Runs on the IDE's own machine and touches no engine route: PATH is the
+	 * developer's, and the engine may not even be on the same host.
+	 */
+	private async _syncLocalAgents(force = false): Promise<void> {
+		try {
+			this.localAgents = await probeAllLocalAgents(force);
+		} catch {
+			// Leave the previous answer rather than reporting every agent gone.
+		}
 	}
 
 	private async _syncMcpConnections(): Promise<void> {
@@ -492,7 +575,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			await this._openSettings(keyProvider);
 			return;
 		}
-		if (!isLivePlatform(platformId)) {
+		if (this._row(platformId)?.integration === 'catalogue') {
 			return;
 		}
 		if (platformId === 'github' || platformId === 'vercel') {
@@ -505,6 +588,33 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 		await this._openSettings('keys');
+	}
+
+	/**
+	 * "Connect" for a local coding agent is a re-check, not a sign-in.
+	 *
+	 * The user may have installed it since the panel last looked, so drop the
+	 * cached probe and ask PATH again. If it is still missing, hand over the
+	 * install line instead of pretending there is an account to connect.
+	 */
+	private async _connectLocalAgent(platformId: string): Promise<void> {
+		const spec = localAgentSpec(platformId);
+		if (!spec) {
+			return;
+		}
+		clearLocalAgentProbes();
+		await this._syncLocalAgents(true);
+		this._applyCapabilities(getCachedCapabilities());
+		this._pushState();
+
+		const probe = this.localAgents[platformId];
+		if (probe?.installed) {
+			void getNotificationService().showSuccess(
+				`${spec.name} is ready${probe.version ? ` (${probe.version})` : ''}`
+			);
+			return;
+		}
+		await offerInstall(spec.id);
 	}
 
 	/**
@@ -545,7 +655,11 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			await this._handleConfigure(platformId);
 			return;
 		}
-		if (!isLivePlatform(platformId) && !mcpServerIdForPlatform(platformId)) {
+		if (this._row(platformId)?.integration === 'local_cli') {
+			await this._connectLocalAgent(platformId);
+			return;
+		}
+		if (!this._row(platformId)?.live) {
 			return;
 		}
 		const notifications = getNotificationService();
@@ -558,7 +672,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			await this._handleConfigure(platformId);
 			return;
 		}
-		const mcpServerId = mcpServerIdForPlatform(platformId);
+		const mcpServerId = this._row(platformId)?.mcpServerId;
 		if (mcpServerId) {
 			await this._connectMcp(mcpServerId);
 			return;
@@ -584,8 +698,8 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			await this._handleConfigure(platformId);
 			return;
 		}
-		const mcpServerId = mcpServerIdForPlatform(platformId);
-		if (!isLivePlatform(platformId) && !mcpServerId) {
+		const mcpServerId = this._row(platformId)?.mcpServerId;
+		if (!this._row(platformId)?.live) {
 			return;
 		}
 		const notifications = getNotificationService();

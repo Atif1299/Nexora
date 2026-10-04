@@ -16,7 +16,15 @@ import { openUrlFromChat } from './services/browser';
 import type { TerminalCommandProgress } from './services/tools/terminalCommand';
 import { getSettingsService } from './services/settingsService';
 import { oauthProviderLabel, onDidCompleteOAuth, startOAuthConnect, type OAuthProvider } from './services/oauthConnect';
-import { getAgentFlag, getAgentMaxTurns, getSubmitWithCtrlEnter } from './services/agentRunMode';
+import {
+	getAgentFlag,
+	getAgentMaxBudgetUsd,
+	getAgentMaxTurns,
+	getCodeExecutor,
+	getSubmitWithCtrlEnter
+} from './services/agentRunMode';
+import { runWorkspaceTaskWithAgent } from './services/agents/agentTaskRunner';
+import { deriveRunId, localAgentSpec, type LocalAgentId } from './services/agents/localAgents';
 import { getNotificationService } from './services/notificationService';
 import { showEngineOutput } from './services/engineProcess';
 import { acquireEditorPanel, gateEditorPanel } from './services/editorPage';
@@ -2162,8 +2170,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return `search_chat_history: ${args.query || ''}`.slice(0, 60);
 			case 'remember_fact':
 				return `remember: ${args.key ? `${args.key} - ` : ''}${args.value || ''}`.slice(0, 80);
-			default:
+			default: {
+				// A connected platform's tool arrives as <platform>__<tool>.
+				// Show it as "github: search_code" so the activity card names
+				// the vendor the agent just reached out to.
+				const sep = toolName.indexOf('__');
+				if (sep > 0 && sep < toolName.length - 2) {
+					return `${toolName.slice(0, sep)}: ${toolName.slice(sep + 2)}`.slice(0, 60);
+				}
 				return `${toolName}`.slice(0, 60);
+			}
 		}
 	}
 
@@ -3506,6 +3522,67 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	/**
+	 * Hand a workspace step to a third-party coding agent.
+	 *
+	 * The agent works in a throwaway git worktree and its edits reach the user
+	 * only through the normal diff preview, so delegating the work does not
+	 * delegate the approval. Reports the agent's own cost when it gives one:
+	 * that spend is on the user's vendor account, not Nexora's model keys, and
+	 * hiding it would make the cost panel wrong.
+	 */
+	private async _runWorkspaceTaskWithLocalAgent(
+		agentId: LocalAgentId,
+		task: {
+			planId: string;
+			taskId: string;
+			firstLine: string;
+			instruction: string;
+			context: string;
+			workspacePath: string;
+			model?: string;
+		}
+	): Promise<void> {
+		const spec = localAgentSpec(agentId);
+		const label = spec?.name || agentId;
+		const client = getBackendClient();
+
+		this._emitChatActivity([
+			{ id: `ws-task-${task.taskId}`, label: `${label}: ${task.firstLine}`, done: false }
+		]);
+
+		const outcome = await runWorkspaceTaskWithAgent({
+			agentId,
+			instruction: task.context ? `${task.context}\n\n${task.instruction}` : task.instruction,
+			workspacePath: task.workspacePath,
+			runId: deriveRunId(`${task.planId}:${task.taskId}`),
+			context: this._context,
+			model: task.model && task.model !== 'auto' ? task.model : undefined,
+			maxTurns: getAgentMaxTurns(),
+			maxBudgetUsd: getAgentMaxBudgetUsd() || undefined
+		});
+
+		if (typeof outcome.costUsd === 'number' && outcome.costUsd > 0) {
+			this._postToWebviews({
+				type: 'addMessage',
+				role: 'assistant',
+				content: `${label} finished this step. Its own cost: $${outcome.costUsd.toFixed(4)}.`,
+				isLoading: false
+			});
+		}
+
+		await client.submitTaskResult({
+			plan_id: task.planId,
+			task_id: task.taskId,
+			success: outcome.success,
+			summary: (outcome.error ? `${outcome.summary} - ${outcome.error}` : outcome.summary).slice(0, 200),
+			files: outcome.files
+		});
+		this._emitChatActivity([
+			{ id: `ws-task-${task.taskId}`, label: `${label}: ${task.firstLine}`, done: true }
+		]);
+	}
+
+	/**
 	 * Run a single workspace_task from the orchestration DAG via the existing agent tool loop.
 	 * Does not call connectors; posts task-result when the loop finishes.
 	 */
@@ -3544,6 +3621,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 
 			this._emitChatActivity([{ id: `ws-task-${taskId}`, label: firstLine, done: false }]);
+
+			// A plan step may name the agent; otherwise the user's setting does.
+			const executor = getCodeExecutor(message.executor);
+			if (executor !== 'nexora') {
+				await this._runWorkspaceTaskWithLocalAgent(
+					executor,
+					{ planId, taskId, firstLine, instruction, context, workspacePath, model: message.model }
+				);
+				return;
+			}
 
 			const active = this._getActiveSession();
 			const workspaceId = await this._resolveWorkspaceIdForPath(workspacePath, active);

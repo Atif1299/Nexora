@@ -16,23 +16,6 @@ import type { McpConnectOutcome } from './backend/mcpConnect';
  * one-time setup is still missing. No credential ever passes through here.
  */
 
-/** Catalogue rows whose Connect is a remote MCP sign-in, mapped to the engine's server id. */
-const PLATFORM_TO_MCP_SERVER: Record<string, string> = {
-	github: 'github',
-	vercel: 'vercel',
-	stripe: 'stripe',
-	supabase: 'supabase',
-	'v0-dev': 'v0',
-	clerk: 'clerk',
-	linear: 'linear',
-	notion: 'notion',
-	sentry: 'sentry',
-	asana: 'asana',
-	paypal: 'paypal',
-	cloudflare: 'cloudflare',
-	canva: 'canva'
-};
-
 const LABELS: Record<string, string> = {
 	github: 'GitHub',
 	vercel: 'Vercel',
@@ -66,10 +49,6 @@ export const onDidConnectMcpServer = connectedEmitter.event;
 
 let extensionId: string | undefined;
 const browserWatchers = new Map<string, ReturnType<typeof setInterval>>();
-
-export function mcpServerIdForPlatform(platformId: string): string | undefined {
-	return PLATFORM_TO_MCP_SERVER[(platformId || '').trim().toLowerCase()];
-}
 
 export function mcpServerLabel(serverId: string): string {
 	return LABELS[serverId] || serverId;

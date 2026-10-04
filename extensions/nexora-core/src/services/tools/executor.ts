@@ -54,7 +54,8 @@ export async function executeToolCalls(
 	for (const tc of toolCalls) {
 		const args = tc.arguments;
 
-		// Check if already executed on backend (search_codebase)
+		// Already run by the engine, because that is where the data or the
+		// credential lives: memory tools, and any connected platform's tools.
 		if (args._executed && args._result) {
 			results.push({
 				id: tc.id,

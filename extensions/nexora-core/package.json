@@ -407,6 +407,29 @@
           "default": "",
           "description": "Override the engine HTTP URL. Empty uses http://127.0.0.1:<engine port>."
         },
+        "nexora.agent.codeExecutor": {
+          "type": "string",
+          "enum": [
+            "nexora",
+            "claude-code",
+            "cursor",
+            "cline"
+          ],
+          "enumDescriptions": [
+            "Nexora's own agent loop, using the model you selected in chat.",
+            "Claude Code, run as a local command. Requires the claude CLI on PATH.",
+            "Cursor, run as a local command. Requires the cursor-agent CLI on PATH.",
+            "Cline, run as a local command. Requires the cline CLI on PATH."
+          ],
+          "default": "nexora",
+          "markdownDescription": "Which coding agent runs the workspace steps of a plan. A plan step may override this. Third-party agents run in a throwaway git worktree, and you review their changes file by file before anything touches your workspace; they use their own sign-in and their own billing, not your Nexora model keys."
+        },
+        "nexora.agent.maxBudgetUsd": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "Spend cap, in USD, for a single workspace step run by a third-party agent. `0` means no cap. Only applies to agents that support one (currently Claude Code)."
+        },
         "nexora.agent.runMode": {
           "type": "string",
           "enum": [
