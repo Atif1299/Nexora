@@ -23,11 +23,22 @@
 		return status === 'not_configured' || status === 'unavailable' || status === 'failed';
 	}
 
+	/** Rows whose Connect is a browser sign-in (GitHub, Vercel). Key rows open Settings instead. */
+	function isBrowserOAuth(platform) {
+		return platform.id === 'github' || platform.id === 'vercel';
+	}
+
 	function statusLabel(platform) {
 		if (!platform.live) {
 			return 'Catalogue';
 		}
 		const status = platform.capabilityStatus;
+		if (platform.setupHint) {
+			return 'Setup needed';
+		}
+		if (status === 'not_configured' && isBrowserOAuth(platform)) {
+			return 'Not connected';
+		}
 		if (status === 'not_configured') {
 			return 'Not configured';
 		}
@@ -44,22 +55,32 @@
 	}
 
 	function actionButtons(platform) {
+		const id = escapeHtml(platform.id || '');
+		// LLM rows: the key lives in Settings > LLM API Keys, so Configure is the only action.
+		if (platform.keyProvider) {
+			return `<div class="nx-platform-actions"><button type="button" class="nx-btn nx-btn-secondary" data-action="configure" data-id="${id}">Configure</button></div>`;
+		}
 		if (!platform.live) {
 			return '';
 		}
 		const status = platform.capabilityStatus || 'not_configured';
-		const id = escapeHtml(platform.id || '');
 		if (status === 'unavailable') {
 			return '';
 		}
 		const buttons = [];
 		if (status === 'ready') {
-			if (platform.id === 'github' || platform.id === 'vercel' || platform.id === 'supabase' || platform.id === 'stripe' || platform.id === 'v0-dev' || platform.id === 'elevenlabs' || platform.id === 'tavily') {
+			// Anything with a sign-in or a stored credential can be disconnected.
+			if (platform.mcpServerId || platform.disconnectable) {
 				buttons.push(`<button type="button" class="nx-btn nx-btn-secondary" data-action="disconnect" data-id="${id}">Disconnect</button>`);
 			}
-			buttons.push(`<button type="button" class="nx-btn nx-btn-secondary" data-action="configure" data-id="${id}">Configure</button>`);
+			// Configure only where Settings actually has something to show, so the
+			// button is never a no-op (Clerk, for example, has nothing to set).
+			if (platform.configurable) {
+				buttons.push(`<button type="button" class="nx-btn nx-btn-secondary" data-action="configure" data-id="${id}">Configure</button>`);
+			}
 		} else {
-			buttons.push(`<button type="button" class="nx-btn" data-action="connect" data-id="${id}">Connect</button>`);
+			const label = platform.setupHint ? 'Set up' : 'Connect';
+			buttons.push(`<button type="button" class="nx-btn" data-action="connect" data-id="${id}">${label}</button>`);
 		}
 		return `<div class="nx-platform-actions">${buttons.join('')}</div>`;
 	}
