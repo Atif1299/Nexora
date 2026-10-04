@@ -22,7 +22,7 @@
 		{ id: 'tavily', label: 'Tavily API Key', placeholder: 'tvly-...' }
 	];
 
-	const NAV_SECTIONS = ['keys', 'models', 'saas', 'connections', 'analytics', 'approvals', 'browser', 'preferences', 'about'];
+	const NAV_SECTIONS = ['keys', 'models', 'memory', 'saas', 'connections', 'analytics', 'approvals', 'browser', 'preferences', 'about'];
 
 	const SECTION_ALIASES = {
 		llm: 'keys',
@@ -38,6 +38,11 @@
 		models: 'models',
 		'model-catalog': 'models',
 		modelcatalog: 'models',
+		memory: 'memory',
+		facts: 'memory',
+		'project-memory': 'memory',
+		projectmemory: 'memory',
+		remember: 'memory',
 		'saas-connectors': 'saas',
 		saasconnectors: 'saas',
 		connectors: 'saas',
@@ -74,6 +79,29 @@
 
 	let currentSection = 'keys';
 
+	/** Section aliases that also name one card (data-provider) to scroll to. */
+	const KEY_CARD_ALIASES = {
+		openai: 'openai',
+		anthropic: 'anthropic',
+		claude: 'anthropic',
+		gemini: 'gemini',
+		openrouter: 'openrouter',
+		supabase: 'supabase_url',
+		'supabase-url': 'supabase_url',
+		'supabase-key': 'supabase_key',
+		stripe: 'stripe',
+		v0: 'v0',
+		'v0-dev': 'v0',
+		tavily: 'tavily',
+		elevenlabs: 'elevenlabs',
+		github: 'oauth-app',
+		vercel: 'oauth-app'
+	};
+	let pendingKeyCard = '';
+
+	/** Per-provider status line for LLM key cards, kept across re-renders. Never holds key values. */
+	const keyMsgs = {};
+
 	let state = {
 		keyMasks: {},
 		configured: {},
@@ -103,6 +131,8 @@
 		enabledModelIds: [],
 		analytics: null,
 		mcpServers: [],
+		projectFacts: null,
+		factError: '',
 		a2aCardUrl: '',
 		mcpError: {},
 		mcpBusy: '',
@@ -141,8 +171,26 @@
 		return resolveSection(raw);
 	}
 
+	function scrollToPendingKeyCard() {
+		if (!pendingKeyCard) {
+			return;
+		}
+		const card = document.querySelector(`.nx-section.active .nx-card[data-provider="${pendingKeyCard}"]`);
+		if (!card) {
+			return;
+		}
+		pendingKeyCard = '';
+		card.scrollIntoView({ block: 'center' });
+		const input = card.querySelector('input');
+		if (input) {
+			input.focus({ preventScroll: true });
+		}
+	}
+
 	function showSection(raw) {
 		const id = resolveSection(raw);
+		const key = String(raw || '').trim().toLowerCase().replace(/^#/, '');
+		pendingKeyCard = KEY_CARD_ALIASES[key] || '';
 		currentSection = id;
 		document.querySelectorAll('.nx-section').forEach(el => {
 			const active = el.getAttribute('data-section') === id;
@@ -162,6 +210,7 @@
 				el.removeAttribute('aria-current');
 			}
 		});
+		scrollToPendingKeyCard();
 	}
 
 	function announce(msg) {
@@ -386,10 +435,22 @@
 			return;
 		}
 
+		// Background pushes re-render this list; keep unsaved typing. A saved key is never
+		// restored, because saveResult empties its input before any re-render happens.
+		const drafts = {};
+		PROVIDERS.forEach(p => {
+			const input = document.getElementById(`key-${p.id}`);
+			if (input && input.value) {
+				drafts[p.id] = input.value;
+			}
+		});
+
 		root.innerHTML = PROVIDERS.map(p => {
+			// Settings keys live in SecretStorage, so Ready means that key exists.
 			const configured = !!state.configured[p.id];
-			const cap = llmCapability(p.id);
+			const cap = configured ? 'ready' : 'not_configured';
 			const statusText = capabilityLabel(cap);
+			const msg = keyMsgs[p.id] || { text: '', cls: '' };
 			return `
 				<div class="nx-card" data-provider="${p.id}">
 					<div class="nx-row">
@@ -412,10 +473,17 @@
 						<button type="button" class="nx-btn nx-btn-secondary" data-action="replace" data-provider="${p.id}" aria-label="Replace ${escapeHtml(p.label)} key" ${configured ? '' : 'disabled'}>Replace</button>
 						<button type="button" class="nx-btn nx-btn-danger" data-action="clear" data-provider="${p.id}" aria-label="Clear ${escapeHtml(p.label)} key" ${configured ? '' : 'disabled'}>Clear</button>
 					</div>
-					<div class="nx-msg" id="msg-${p.id}" role="status"></div>
+					<div class="nx-msg ${escapeHtml(msg.cls)}" id="msg-${p.id}" role="status">${escapeHtml(msg.text)}</div>
 				</div>
 			`;
 		}).join('');
+
+		Object.keys(drafts).forEach(id => {
+			const input = document.getElementById(`key-${id}`);
+			if (input) {
+				input.value = drafts[id];
+			}
+		});
 
 		root.querySelectorAll('button[data-action]').forEach(btn => {
 			btn.addEventListener('click', () => {
@@ -434,23 +502,31 @@
 
 				if (action === 'test') {
 					if (!key) {
-						setMsg(provider, 'Enter a key to test', 'err');
+						setKeyMsg(provider, 'Enter a key to test', 'err');
 						return;
 					}
-					setMsg(provider, 'Validating...', '');
+					setKeyMsg(provider, 'Validating...', '');
 					vscode.postMessage({ type: 'validateApiKey', provider, key });
 				} else if (action === 'save') {
 					if (!key) {
-						setMsg(provider, 'Enter a key to save', 'err');
+						setKeyMsg(provider, 'Enter a key to save', 'err');
 						return;
 					}
-					setMsg(provider, 'Saving...', '');
+					setKeyMsg(provider, 'Saving...', '');
 					vscode.postMessage({ type: 'saveApiKey', provider, key });
 				} else if (action === 'clear') {
+					setKeyMsg(provider, 'Clearing...', '');
 					vscode.postMessage({ type: 'clearApiKey', provider });
 				}
 			});
 		});
+
+		scrollToPendingKeyCard();
+	}
+
+	function setKeyMsg(provider, text, cls) {
+		keyMsgs[provider] = { text: text || '', cls: cls || '' };
+		setMsg(provider, text, cls);
 	}
 
 	function renderSaasKeys() {
@@ -637,10 +713,31 @@
 		const githubCb = apps.githubCallback || 'http://127.0.0.1:8000/api/auth/github/callback';
 		const vercelCb = apps.vercelCallback || 'http://127.0.0.1:8000/api/auth/vercel/callback';
 		const fields = [
-			{ id: 'github_client_id', label: 'GitHub Client ID', placeholder: 'Ov...' },
-			{ id: 'github_client_secret', label: 'GitHub Client Secret', placeholder: 'Client secret' },
-			{ id: 'vercel_client_id', label: 'Vercel Client ID', placeholder: 'Client ID' },
-			{ id: 'vercel_client_secret', label: 'Vercel Client Secret', placeholder: 'Client secret' }
+			{
+				id: 'github_client_id',
+				label: 'GitHub Client ID',
+				placeholder: 'Ov...',
+				hint: 'Needed once so GitHub sign-in can start. No secret required; '
+					+ 'enable Device Flow on the OAuth app instead.'
+			},
+			{
+				id: 'github_client_secret',
+				label: 'GitHub Client Secret',
+				placeholder: 'Only for push and deploy',
+				hint: 'Optional. Only the orchestration pipeline (push, create repo) uses this.'
+			},
+			{
+				id: 'vercel_client_id',
+				label: 'Vercel Client ID',
+				placeholder: 'Only for deploy',
+				hint: 'Optional. Vercel sign-in registers Nexora on its own and needs nothing here.'
+			},
+			{
+				id: 'vercel_client_secret',
+				label: 'Vercel Client Secret',
+				placeholder: 'Only for deploy',
+				hint: 'Optional. Only the orchestration pipeline uses this.'
+			}
 		];
 		const inputs = fields.map(p => {
 			const configured = !!state.configured[p.id];
@@ -649,6 +746,7 @@
 			return `
 				<div class="nx-field">
 					<label class="nx-label" for="key-${p.id}">${escapeHtml(p.label)}</label>
+					<p class="nx-hint">${escapeHtml(p.hint || '')}</p>
 					<input id="key-${p.id}" class="nx-input" type="password" autocomplete="off" spellcheck="false" aria-label="${escapeHtml(p.label)}" placeholder="${configured ? 'Saved. Enter a new value to replace...' : escapeHtml(p.placeholder)}" value="${escapeHtml(prevVal)}" />
 					<div class="nx-actions">
 						<button type="button" class="nx-btn" data-oauth-app="save" data-provider="${p.id}">Save</button>
@@ -658,11 +756,11 @@
 				</div>
 			`;
 		}).join('');
-		return `<div class="nx-card">
+		return `<div class="nx-card" data-provider="oauth-app">
 			<div class="nx-label">OAuth app credentials</div>
-			<p class="nx-hint">Nexora does not create the GitHub app. GitHub → Settings → Developer settings → OAuth Apps → New. Paste the callback URL below into the GitHub app. Same for Vercel (create an OAuth App, paste its callback).</p>
-			<p class="nx-hint">GitHub callback (exact): <code>${escapeHtml(githubCb)}</code></p>
-			<p class="nx-hint">Vercel callback (exact): <code>${escapeHtml(vercelCb)}</code></p>
+			<p class="nx-hint"><strong>You do not connect platforms here.</strong> Use Connect in the <strong>Platforms</strong> panel &mdash; most platforms register Nexora automatically and need nothing on this page.</p>
+			<p class="nx-hint">Only GitHub asks for something: create an OAuth app (GitHub &rarr; Settings &rarr; Developer settings &rarr; OAuth Apps &rarr; New), tick <strong>Enable Device Flow</strong>, and paste its client ID below. The remaining fields are optional and only affect the orchestration pipeline.</p>
+			<p class="nx-hint">Callback URLs, if you use the orchestration pipeline &mdash; GitHub: <code>${escapeHtml(githubCb)}</code>, Vercel: <code>${escapeHtml(vercelCb)}</code></p>
 			${inputs}
 		</div>`;
 	}
@@ -695,28 +793,38 @@
 				<p class="nx-hint">No MCP servers listed. Engine may be offline.</p>
 			</div>`;
 		}
+		// Vendor-hosted (http) servers are connected from the Platforms panel, so
+		// this card only reports their state. Local stdio servers have no sign-in,
+		// so they keep their Connect button here.
 		const items = rows.map(row => {
-			const status = mcpStatus(row);
 			const id = escapeHtml(row.id || '');
-			const blockedReason = mcpBlockedReason(row);
+			const isRemote = row.transport === 'http';
+			const connected = !!row.connected;
+			const status = connected ? 'ready' : 'not_configured';
 			const busy = state.mcpBusy === row.id;
 			const err = state.mcpError && state.mcpError[row.id];
-			const detail = row.connected
-				? `${row.transport} | ${row.tools_count || 0} tools`
-				: ((row.missing_requires || []).length
-					? `Missing ${row.missing_requires.join(', ')}`
-					: (!row.endpoint && row.transport === 'http'
-						? 'No local MCP endpoint'
-						: (row.description || row.transport || '')));
-			let action;
-			if (row.connected) {
-				action = `<button type="button" class="nx-btn nx-btn-secondary" data-mcp="disconnectMcp" data-server="${id}">Disconnect</button>`;
+
+			let detail;
+			if (connected) {
+				detail = row.tools_count
+					? `Connected | ${row.tools_count} tools`
+					: 'Connected';
+			} else if (isRemote && !row.endpoint) {
+				detail = 'No hosted MCP server published yet';
+			} else if (isRemote) {
+				detail = 'Not connected - use Connect in the Platforms panel';
 			} else {
-				const disabled = blockedReason || busy ? 'disabled' : '';
-				const label = busy ? 'Connecting...' : 'Connect';
-				const title = escapeHtml(blockedReason || (busy ? 'Connecting...' : 'Connect'));
-				action = `<button type="button" class="nx-btn" data-mcp="connectMcp" data-server="${id}" ${disabled} title="${title}">${label}</button>`;
+				detail = row.description || row.transport || '';
 			}
+
+			let action = '';
+			if (!isRemote) {
+				const label = busy ? 'Connecting...' : (connected ? 'Disconnect' : 'Connect');
+				const kind = connected ? 'disconnectMcp' : 'connectMcp';
+				const cls = connected ? 'nx-btn nx-btn-secondary' : 'nx-btn';
+				action = `<button type="button" class="${cls}" data-mcp="${kind}" data-server="${id}" ${busy ? 'disabled' : ''}>${label}</button>`;
+			}
+
 			const errLine = err ? `<div class="nx-msg err">${escapeHtml(err)}</div>` : '';
 			return `
 				<div class="nx-row">
@@ -730,8 +838,8 @@
 			`;
 		}).join('');
 		return `<div class="nx-card">
-			<div class="nx-label">MCP servers (8 registered)</div>
-			<p class="nx-hint">HTTP sockets use LOCAL_ENDPOINTS. Missing keys or endpoints stay Not configured. Filesystem MCP is stdio (npx), not a browser login.</p>
+			<div class="nx-label">MCP servers (${rows.length} registered)</div>
+			<p class="nx-hint">Status only. Connect or disconnect a hosted platform from the <strong>Platforms</strong> panel in the sidebar &mdash; that opens the vendor's sign-in in your browser. Local servers such as Filesystem run as a process here and need no sign-in.</p>
 			${items}
 		</div>`;
 	}
@@ -824,6 +932,14 @@
 		const detail = detailParts.join(' · ') || capabilityLabel(status);
 		const oauthErr = (id === 'github' || id === 'vercel') && state.oauthError && state.oauthError[id];
 		const errLine = oauthErr ? `<div class="nx-msg err">${escapeHtml(oauthErr)}</div>` : '';
+		// Connected, but this sign-in cannot run a step. Saying "Connect" would
+		// be wrong here: the user already did.
+		const limitation = status === 'ready' && state.connections
+			? (state.connections[id + '_limitation'] || '')
+			: '';
+		const limitLine = limitation
+			? `<div class="nx-hint">${escapeHtml(limitation)}</div>`
+			: '';
 
 		let actions = '';
 		if (category === 'deployment' && (id === 'github' || id === 'vercel')) {
@@ -842,6 +958,7 @@
 					<div class="nx-label">${escapeHtml(id)}</div>
 					<div class="nx-status">${statusDot(status)} ${escapeHtml(detail)}</div>
 					${errLine}
+					${limitLine}
 				</div>
 				<div class="nx-actions" style="margin:0">${actions}</div>
 			</div>
@@ -1031,6 +1148,146 @@
 		return n + ' ctx';
 	}
 
+	// ---------- Project Memory (facts Layer C) ----------
+
+	const FACT_SOURCE_LABELS = {
+		agent: 'remembered by Nexora',
+		chat: 'you said "remember"',
+		user: 'added here'
+	};
+
+	function factAge(updatedAt) {
+		const ms = Date.now() - Number(updatedAt || 0);
+		if (!Number.isFinite(ms) || ms < 0) {
+			return '';
+		}
+		const minutes = Math.floor(ms / 60000);
+		if (minutes < 1) {
+			return 'just now';
+		}
+		if (minutes < 60) {
+			return `${minutes}m ago`;
+		}
+		const hours = Math.floor(minutes / 60);
+		if (hours < 24) {
+			return `${hours}h ago`;
+		}
+		const days = Math.floor(hours / 24);
+		return days < 30 ? `${days}d ago` : `${Math.floor(days / 30)}mo ago`;
+	}
+
+	function factRow(fact) {
+		const origin = FACT_SOURCE_LABELS[fact.source] || 'remembered by Nexora';
+		const age = factAge(fact.updated_at);
+		const meta = age ? `${origin} · ${age}` : origin;
+		return `
+			<div class="nx-model-row" data-fact-id="${escapeHtml(fact.id)}">
+				<div class="nx-model-meta">
+					<span class="nx-model-name">${fact.label ? `<strong>${escapeHtml(fact.label)}:</strong> ` : ''}${escapeHtml(fact.value)}</span>
+					<span class="nx-model-tier">${escapeHtml(meta)}</span>
+				</div>
+				<button type="button" class="nx-btn nx-btn-secondary nx-fact-forget"
+					data-fact-id="${escapeHtml(fact.id)}"
+					aria-label="Forget: ${escapeHtml(fact.value)}">Forget</button>
+			</div>
+		`;
+	}
+
+	function renderProjectMemory() {
+		const root = document.getElementById('project-memory');
+		if (!root) {
+			return;
+		}
+		const data = state.projectFacts;
+
+		// No folder open means no project to remember anything about. Say so
+		// instead of showing an add form that would write to nowhere.
+		if (data && data.has_workspace === false) {
+			root.innerHTML = `
+				<div class="nx-card">
+					<p class="nx-hint">Open a folder to give this project its own memory.</p>
+				</div>
+			`;
+			return;
+		}
+
+		const facts = (data && Array.isArray(data.facts)) ? data.facts : [];
+		const injected = (data && data.injected) || '';
+		const error = state.factError
+			? `<p class="nx-fact-error" role="alert">${escapeHtml(state.factError)}</p>`
+			: '';
+
+		root.innerHTML = `
+			<div class="nx-card">
+				<label class="nx-label" for="fact-value">Add a fact</label>
+				<input type="text" class="nx-input" id="fact-value" maxlength="240"
+					placeholder="e.g. we use pnpm, never npm" aria-label="Fact" />
+				<div class="nx-row" style="margin-top:8px; gap:8px">
+					<input type="text" class="nx-input" id="fact-label" maxlength="40"
+						placeholder="Optional label, e.g. stack" aria-label="Optional label" />
+					<button type="button" class="nx-btn" id="fact-add">Remember</button>
+				</div>
+				<p class="nx-hint">
+					A label makes the fact replaceable: saving again under <code>stack</code>
+					overwrites it instead of stacking up.
+				</p>
+				${error}
+			</div>
+
+			<div class="nx-card">
+				<label class="nx-label">${facts.length ? `${facts.length} fact${facts.length === 1 ? '' : 's'}` : 'No facts yet'}</label>
+				${facts.length
+					? `<div class="nx-model-list">${facts.map(factRow).join('')}</div>`
+					: `<p class="nx-hint">Say &ldquo;remember we deploy from the <code>release</code> branch&rdquo; in chat, and it will show up here.</p>`}
+			</div>
+
+			${injected ? `
+				<div class="nx-card">
+					<label class="nx-label">Sent with every request</label>
+					<p class="nx-hint">The exact text added to the prompt, capped at 500 characters.</p>
+					<pre class="nx-fact-injected">${escapeHtml(injected)}</pre>
+				</div>
+			` : ''}
+		`;
+
+		const valueInput = document.getElementById('fact-value');
+		const labelInput = document.getElementById('fact-label');
+		const submit = () => {
+			const value = (valueInput?.value || '').trim();
+			if (!value) {
+				return;
+			}
+			vscode.postMessage({
+				type: 'saveFact',
+				value: value,
+				key: (labelInput?.value || '').trim()
+			});
+			// Clear straight away: the list re-renders from the backend, so a
+			// stale draft left in the box would read like it had not saved.
+			if (valueInput) {
+				valueInput.value = '';
+			}
+			if (labelInput) {
+				labelInput.value = '';
+			}
+		};
+		document.getElementById('fact-add')?.addEventListener('click', submit);
+		for (const input of [valueInput, labelInput]) {
+			input?.addEventListener('keydown', (event) => {
+				if (event.key === 'Enter') {
+					event.preventDefault();
+					submit();
+				}
+			});
+		}
+
+		root.querySelectorAll('.nx-fact-forget').forEach((button) => {
+			button.addEventListener('click', () => {
+				vscode.postMessage({ type: 'forgetFact', factId: button.dataset.factId });
+			});
+		});
+	}
+
 	function renderModels() {
 		const root = document.getElementById('models-root');
 		if (!root) {
@@ -1152,6 +1409,12 @@
 				vscode.postMessage({ type: 'refreshAnalytics' });
 			});
 		}
+		const refreshFacts = document.getElementById('facts-refresh');
+		if (refreshFacts) {
+			refreshFacts.addEventListener('click', () => {
+				vscode.postMessage({ type: 'refreshFacts' });
+			});
+		}
 		const shortcuts = document.getElementById('show-shortcuts');
 		if (shortcuts) {
 			shortcuts.addEventListener('click', () => {
@@ -1183,6 +1446,7 @@
 					analytics: msg.analytics !== undefined ? msg.analytics : state.analytics,
 					mcpServers: msg.mcpServers !== undefined ? msg.mcpServers : state.mcpServers,
 					a2aCardUrl: msg.a2aCardUrl !== undefined ? msg.a2aCardUrl : state.a2aCardUrl,
+					projectFacts: msg.projectFacts !== undefined ? msg.projectFacts : state.projectFacts,
 					oauthApps: msg.oauthApps !== undefined ? msg.oauthApps : state.oauthApps
 				};
 				renderApiKeys();
@@ -1194,6 +1458,18 @@
 				renderPreferences();
 				renderAnalytics();
 				renderA2A();
+				renderProjectMemory();
+				break;
+			case 'factsUpdated':
+				state.projectFacts = msg.projectFacts || state.projectFacts;
+				state.factError = '';
+				renderProjectMemory();
+				announce('Project memory updated');
+				break;
+			case 'factError':
+				state.factError = msg.error || 'Could not save that fact.';
+				renderProjectMemory();
+				announce(state.factError);
 				break;
 			case 'enabledModelsUpdated':
 				if (Array.isArray(msg.enabledModelIds)) {
@@ -1202,19 +1478,36 @@
 				}
 				break;
 			case 'validateResult':
-				setMsg(msg.provider, msg.success ? (msg.details || 'Key is valid') : (msg.error || 'Invalid key'), msg.success ? 'ok' : 'err');
+				setKeyMsg(msg.provider, msg.success ? (msg.details || 'Key is valid') : (msg.error || 'Invalid key'), msg.success ? 'ok' : 'err');
 				break;
 			case 'saveResult':
-				setMsg(msg.provider, msg.success ? 'Saved. This key is now used for Chat / Plan / Agent.' : (msg.error || 'Save failed'), msg.success ? 'ok' : 'err');
+				if (msg.success) {
+					// Empty the field first so no later re-render can carry the saved key back.
+					const input = document.getElementById(`key-${msg.provider}`);
+					if (input) {
+						input.value = '';
+					}
+					state.configured = Object.assign({}, state.configured, { [msg.provider]: true });
+					keyMsgs[msg.provider] = { text: 'Saved. This key is now used for Chat / Plan / Agent.', cls: 'ok' };
+					renderApiKeys();
+					announce(keyMsgs[msg.provider].text);
+				} else {
+					setKeyMsg(msg.provider, msg.error || 'Save failed', 'err');
+				}
+				break;
+			case 'clearResult':
 				if (msg.success) {
 					const input = document.getElementById(`key-${msg.provider}`);
 					if (input) {
 						input.value = '';
 					}
+					state.configured = Object.assign({}, state.configured, { [msg.provider]: false });
+					keyMsgs[msg.provider] = { text: 'Cleared from SecretStorage', cls: 'ok' };
+					renderApiKeys();
+					announce(keyMsgs[msg.provider].text);
+				} else {
+					setKeyMsg(msg.provider, msg.error || 'Clear failed', 'err');
 				}
-				break;
-			case 'clearResult':
-				setMsg(msg.provider, msg.success ? 'Cleared from SecretStorage' : (msg.error || 'Clear failed'), msg.success ? 'ok' : 'err');
 				break;
 			case 'oauthResult':
 				if (!state.oauthError) {

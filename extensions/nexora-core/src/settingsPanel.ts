@@ -11,9 +11,12 @@ import { getAgentUiSettings, type AgentRunMode } from './services/agentRunMode';
 import { getBrowserUiSettings } from './services/browser';
 import { getBackendClient } from './services/backendClient';
 import { getNotificationService } from './services/notificationService';
+import { oauthProviderLabel, onDidCompleteOAuth, startOAuthConnect } from './services/oauthConnect';
 import type { SaasConnector } from './services/backend/auth';
-import { mcpNeedsOAuth, type McpServerRow } from './services/backend/mcp';
+import type { McpServerRow } from './services/backend/mcp';
 import type { ModelCatalog } from './services/backend/models';
+import type { ProjectFactsResponse } from './services/backend/memory';
+import { currentWorkspaceId } from './services/workspaceId';
 import {
 	getCachedCapabilities,
 	onDidChangeCapabilities,
@@ -48,16 +51,6 @@ function isEnvCredential(value: string): boolean {
 	return isSaasProvider(value) || isOAuthAppProvider(value);
 }
 
-function oauthAuthorizeUrlIsUsable(url: string): boolean {
-	try {
-		const id = new URL(url).searchParams.get('client_id') || '';
-		const trimmed = id.trim();
-		return !!trimmed && trimmed.toLowerCase() !== 'none';
-	} catch {
-		return false;
-	}
-}
-
 export class SettingsPanelProvider {
 	public static readonly viewType = 'nexora.settings';
 
@@ -68,6 +61,7 @@ export class SettingsPanelProvider {
 	private _disposables: vscode.Disposable[] = [];
 	private _pushTimer: ReturnType<typeof setTimeout> | undefined;
 	private _pushInflight: Promise<void> | undefined;
+	private _pushQueued: { force: boolean; includeAnalytics: boolean; refreshCatalog: boolean } | undefined;
 	private _mcpBusy?: string;
 
 	constructor(
@@ -197,6 +191,15 @@ export class SettingsPanelProvider {
 					case 'setModelEnabled':
 						await this._setModelEnabled(msg.modelId, !!msg.enabled);
 						break;
+					case 'refreshFacts':
+						await this._pushFacts();
+						break;
+					case 'saveFact':
+						await this._saveFact(msg.value, msg.key);
+						break;
+					case 'forgetFact':
+						await this._forgetFact(msg.factId);
+						break;
 				}
 			}),
 			panel.onDidChangeViewState(() => {
@@ -209,6 +212,20 @@ export class SettingsPanelProvider {
 					return;
 				}
 				this._view.postMessage({ type: 'updateState', capabilities: capabilities || null });
+			}),
+			onDidCompleteOAuth((provider) => {
+				this._view?.postMessage({
+					type: 'oauthResult',
+					provider,
+					message: `${oauthProviderLabel(provider)} connected`
+				});
+				void this._pushState(true, false);
+			}),
+			// Keys saved elsewhere (chat first-run card) must show up here too.
+			getSettingsService(this._context).onDidChangeApiKeys(() => {
+				if (this._panel?.visible) {
+					this._schedulePush(false);
+				}
 			}),
 			vscode.workspace.onDidChangeConfiguration((e) => {
 				if ((e.affectsConfiguration('nexora.agent') || e.affectsConfiguration('nexora.chat') || e.affectsConfiguration('nexora.browser')) && this._panel?.visible) {
@@ -251,6 +268,14 @@ export class SettingsPanelProvider {
 			return;
 		}
 		if (this._pushInflight) {
+			// The in-flight push may have read SecretStorage before a save or clear.
+			// Run once more after it, so the panel cannot settle on stale key state.
+			const queued = this._pushQueued;
+			this._pushQueued = {
+				force: force || !!queued?.force,
+				includeAnalytics: includeAnalytics || !!queued?.includeAnalytics,
+				refreshCatalog: refreshCatalog || !!queued?.refreshCatalog
+			};
 			return this._pushInflight;
 		}
 		this._pushInflight = this._loadAndPost(force, includeAnalytics, refreshCatalog);
@@ -258,6 +283,11 @@ export class SettingsPanelProvider {
 			await this._pushInflight;
 		} finally {
 			this._pushInflight = undefined;
+		}
+		const next = this._pushQueued;
+		if (next) {
+			this._pushQueued = undefined;
+			await this._pushState(next.force, next.includeAnalytics, next.refreshCatalog);
 		}
 	}
 
@@ -306,6 +336,7 @@ export class SettingsPanelProvider {
 		configured['vercel_client_id'] = !!authStatus.vercel_oauth_configured;
 		configured['vercel_client_secret'] = !!authStatus.vercel_oauth_configured;
 
+		const projectFacts = await this._loadFacts();
 		const mcpServers: McpServerRow[] = await client.listMcpServers();
 		const a2aCardUrl = `${client.getBaseUrl()}/.well-known/agent-card.json`;
 
@@ -324,6 +355,7 @@ export class SettingsPanelProvider {
 			enabledModelIds,
 			mcpServers,
 			a2aCardUrl,
+			projectFacts,
 			oauthApps: {
 				githubConfigured: !!authStatus.github_oauth_configured,
 				vercelConfigured: !!authStatus.vercel_oauth_configured,
@@ -335,6 +367,53 @@ export class SettingsPanelProvider {
 			payload.analytics = analytics;
 		}
 		this._view.postMessage(payload);
+	}
+
+	/**
+	 * Project memory lives per workspace folder, under the same id the chat
+	 * transcript uses. With no folder open there is no project to remember
+	 * about, so the section says that rather than showing an empty list.
+	 */
+	private async _loadFacts(): Promise<ProjectFactsResponse & { has_workspace: boolean }> {
+		const workspaceId = currentWorkspaceId();
+		if (!workspaceId) {
+			return { workspace_id: '', facts: [], total: 0, injected: '', has_workspace: false };
+		}
+		const facts = await getBackendClient().getProjectFacts(workspaceId);
+		return { ...facts, has_workspace: true };
+	}
+
+	private async _pushFacts(): Promise<void> {
+		if (!this._view) {
+			return;
+		}
+		this._view.postMessage({ type: 'factsUpdated', projectFacts: await this._loadFacts() });
+	}
+
+	private async _saveFact(value: string, key?: string): Promise<void> {
+		const workspaceId = currentWorkspaceId();
+		const text = String(value || '').trim();
+		if (!this._view || !workspaceId || !text) {
+			return;
+		}
+		const saved = await getBackendClient().saveProjectFact(workspaceId, text, String(key || '').trim());
+		if (!saved) {
+			this._view.postMessage({
+				type: 'factError',
+				error: 'Could not save that fact. Is the Nexora engine running?'
+			});
+			return;
+		}
+		await this._pushFacts();
+	}
+
+	private async _forgetFact(factId: string): Promise<void> {
+		const workspaceId = currentWorkspaceId();
+		if (!workspaceId || !factId) {
+			return;
+		}
+		await getBackendClient().forgetProjectFact(workspaceId, String(factId));
+		await this._pushFacts();
 	}
 
 	private async _validateApiKey(provider: string, key: string): Promise<void> {
@@ -493,40 +572,28 @@ export class SettingsPanelProvider {
 	}
 
 	private async _connectOAuth(provider: string): Promise<void> {
-		const client = getBackendClient();
-		const notifications = getNotificationService();
-		try {
-			const result =
-				provider === 'github'
-					? await client.getGitHubAuthUrl('default')
-					: provider === 'vercel'
-						? await client.getVercelAuthUrl('default')
-						: null;
-
-			const url = result?.authorization_url || '';
-			if (!url || !oauthAuthorizeUrlIsUsable(url)) {
-				const error = result?.error
-					|| `Save ${provider.toUpperCase()}_CLIENT_ID and ${provider.toUpperCase()}_CLIENT_SECRET first. Create an OAuth app and paste the callback URL shown on this card.`;
-				this._view?.postMessage({ type: 'oauthResult', provider, error });
-				void notifications.showError(error);
-				return;
-			}
-
-			await vscode.env.openExternal(vscode.Uri.parse(url));
-			void notifications.showInfo(`Complete ${provider} login in the browser, then Refresh status`);
-			this._view?.postMessage({
-				type: 'oauthResult',
-				provider,
-				message: `${provider} OAuth opened in browser`
-			});
-			setTimeout(() => {
-				void this._pushState(true);
-			}, 8000);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Unknown error';
-			this._view?.postMessage({ type: 'oauthResult', provider, error: message });
-			void notifications.showError(`OAuth failed: ${message}`);
+		if (provider !== 'github' && provider !== 'vercel') {
+			return;
 		}
+		const notifications = getNotificationService();
+		const outcome = await startOAuthConnect(provider);
+		if (outcome.status !== 'opened') {
+			// needs_setup: the OAuth app card on this page is where the one-time paste happens.
+			this._view?.postMessage({ type: 'oauthResult', provider, error: outcome.message });
+			if (outcome.status === 'error') {
+				void notifications.showError(outcome.message);
+			} else {
+				this._revealSection(provider);
+			}
+			return;
+		}
+		const label = oauthProviderLabel(provider);
+		void notifications.showInfo(`Finish ${label} sign-in in your browser. Nexora updates when it completes.`);
+		this._view?.postMessage({
+			type: 'oauthResult',
+			provider,
+			message: `${label} sign-in opened in your browser`
+		});
 	}
 
 	private async _disconnectOAuth(provider: string): Promise<void> {
@@ -727,15 +794,8 @@ export class SettingsPanelProvider {
 			}
 			const missing = row.missing_requires || [];
 			if (missing.length > 0) {
-				if (mcpNeedsOAuth(row)) {
-					const oauth = await client.getMcpOAuthUrl(serverId, 'default');
-					if (oauth?.authorization_url) {
-						await vscode.env.openExternal(vscode.Uri.parse(oauth.authorization_url));
-						this._postMcpResult(serverId, `Complete ${serverId} MCP login in the browser, then Connect again`);
-						void notifications.showInfo(`Complete ${serverId} MCP login in the browser, then Connect again`);
-						return;
-					}
-				}
+				// Hosted servers sign in from the Platforms panel; this path is
+				// only reached by local servers, which need their key up front.
 				const error = `Save ${missing.join(', ')} in SaaS Connectors first`;
 				this._postMcpResult(serverId, error);
 				void notifications.showWarning(error);

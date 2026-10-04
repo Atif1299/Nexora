@@ -4,7 +4,6 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import * as crypto from 'crypto';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import { getBackendClient, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './services/backendClient';
@@ -16,6 +15,7 @@ import { executeToolCalls, formatToolResultsAsMessages } from './services/tools'
 import { openUrlFromChat } from './services/browser';
 import type { TerminalCommandProgress } from './services/tools/terminalCommand';
 import { getSettingsService } from './services/settingsService';
+import { oauthProviderLabel, onDidCompleteOAuth, startOAuthConnect, type OAuthProvider } from './services/oauthConnect';
 import { getAgentFlag, getAgentMaxTurns, getSubmitWithCtrlEnter } from './services/agentRunMode';
 import { getNotificationService } from './services/notificationService';
 import { showEngineOutput } from './services/engineProcess';
@@ -27,6 +27,7 @@ import {
 	refreshCapabilities,
 	type CapabilitiesReport
 } from './services/backend/capabilities';
+import { deriveWorkspaceId } from './services/workspaceId';
 
 type ChatMode = 'chat' | 'ask' | 'plan' | 'execute' | 'agent';
 
@@ -36,14 +37,6 @@ const SESSION_RAIL_WIDTH_KEY = 'nexora.sessionRailWidth';
 const SESSION_RAIL_WIDTH_DEFAULT = 196;
 const SESSION_RAIL_WIDTH_MIN = 140;
 const SESSION_RAIL_WIDTH_MAX = 360;
-
-/** Match backend `app.memory.indexer.get_workspace_id` so jsonl lands in the same project dir. */
-function deriveWorkspaceId(workspacePath: string): string {
-	const pathHash = crypto.createHash('md5').update(workspacePath, 'utf8').digest('hex').slice(0, 8);
-	const base = path.basename(workspacePath).replace(/ /g, '_').toLowerCase();
-	const name = Array.from(base).filter((c) => /[a-z0-9_]/.test(c)).join('');
-	return `${name}_${pathHash}`;
-}
 
 /** Thrown when the selected model returns 401/403/429 and the backend stops without fallback. */
 class ModelUnavailableSignal extends Error {
@@ -128,6 +121,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		this._loadSessions();
 		onDidChangeCapabilities((report) => {
 			void this._pushFirstRunCard(report);
+		});
+		onDidCompleteOAuth(() => {
+			void this._checkAuthStatus();
 		});
 		context.subscriptions.push(
 			vscode.workspace.onDidChangeConfiguration((e) => {
@@ -823,6 +819,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			if (ev.type === 'token' && ev.content) {
 				assembled += ev.content;
 				this._postToWebviews({ type: 'appendToken', content: ev.content });
+			} else if (ev.type === 'remembered') {
+				// Chat mode has no tools, so the engine saved this fact itself.
+				// Show what it stored: a silent write the user cannot see is
+				// a write they cannot correct.
+				this._postToWebviews({ type: 'memoryNote', value: ev.value || '' });
 			} else if (ev.type === 'done') {
 				if (typeof ev.content === 'string' && ev.content.length > 0) {
 					assembled = ev.content;
@@ -2157,6 +2158,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return `browser_select: ${args.option || args.selector || args.text || ''}`.slice(0, 80);
 			case 'browser_press':
 				return `browser_press: ${args.key || ''}`.slice(0, 80);
+			case 'search_chat_history':
+				return `search_chat_history: ${args.query || ''}`.slice(0, 60);
+			case 'remember_fact':
+				return `remember: ${args.key ? `${args.key} - ` : ''}${args.value || ''}`.slice(0, 80);
 			default:
 				return `${toolName}`.slice(0, 60);
 		}
@@ -2377,28 +2382,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		const client = getBackendClient();
-		const result = await client.getGitHubAuthUrl();
+		await this._handleOAuthConnect('github');
+	}
 
-		if (result && result.authorization_url) {
-			vscode.env.openExternal(vscode.Uri.parse(result.authorization_url));
-
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: 'Opening GitHub authorization page in your browser. Please authorize Nexora and then come back here.',
-				isLoading: false
-			});
-
-			// Check status after a delay
-			setTimeout(() => this._checkAuthStatus(), 5000);
-		} else {
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: 'Failed to get GitHub authorization URL. Please check backend configuration.',
-				isLoading: false
-			});
+	/** GitHub/Vercel Connect from chat: same browser flow as the platform sidebar. */
+	private async _handleOAuthConnect(provider: OAuthProvider): Promise<void> {
+		const label = oauthProviderLabel(provider);
+		const outcome = await startOAuthConnect(provider);
+		const content = outcome.status === 'opened'
+			? `Opening ${label} sign-in in your browser. Approve Nexora there; this chat updates when it completes.`
+			: outcome.message;
+		this._postToWebviews({
+			type: 'addMessage',
+			role: 'assistant',
+			content,
+			isLoading: false
+		});
+		if (outcome.status === 'needs_setup') {
+			await vscode.commands.executeCommand('nexora.openSettings', provider);
 		}
 	}
 
@@ -2407,29 +2408,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		const client = getBackendClient();
-		const result = await client.getVercelAuthUrl();
-
-		if (result && result.authorization_url) {
-			vscode.env.openExternal(vscode.Uri.parse(result.authorization_url));
-
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: 'Opening Vercel authorization page in your browser. Please authorize Nexora and then come back here.',
-				isLoading: false
-			});
-
-			// Check status after a delay
-			setTimeout(() => this._checkAuthStatus(), 5000);
-		} else {
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: 'Failed to get Vercel authorization URL. Please check backend configuration.',
-				isLoading: false
-			});
-		}
+		await this._handleOAuthConnect('vercel');
 	}
 
 	private async _handleSaasToggle(provider: 'supabase' | 'stripe' | 'v0' | 'elevenlabs' | 'tavily'): Promise<void> {
@@ -2499,6 +2478,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		if (this._hasChatSurface() && section) {
 			// Show a message about which connector needs configuration
+			const llmNames: Record<string, string> = {
+				'openai': 'OpenAI',
+				'anthropic': 'Anthropic',
+				'claude': 'Anthropic',
+				'gemini': 'Gemini',
+				'openrouter': 'OpenRouter'
+			};
 			const connectorNames: Record<string, string> = {
 				'supabase': 'Supabase',
 				'stripe': 'Stripe',
@@ -2506,12 +2492,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				'elevenlabs': 'ElevenLabs',
 				'tavily': 'Tavily'
 			};
-			const name = connectorNames[section] || section;
+			const llmName = llmNames[section];
+			const connectorName = connectorNames[section];
+			if (!llmName && !connectorName) {
+				// Not every section is a credential. Sections like Project Memory
+				// open on their own; inventing "add your memory credentials" here
+				// would just be wrong.
+				return;
+			}
+			const name = llmName || connectorName;
+			const content = llmName
+				? `**Configure ${name}**\n\nAdd your ${name} key in Settings > LLM API Keys. It is stored in VS Code SecretStorage and used for Chat, Plan, and Agent.`
+				: `**Configure ${name}**\n\nOpen Settings panel and add your ${name} credentials in the SaaS Connectors section.`;
 
 			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
-				content: `**Configure ${name}**\n\nOpen Settings panel and add your ${name} credentials in the API Keys section.`,
+				content,
 				isLoading: false
 			});
 		}
@@ -2871,7 +2868,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				planId: planId,
 				status: result.status,
 				tasks: result.tasks,
-				actualCost: result.actual_cost
+				actualCost: result.actual_cost,
+				// What the run produced, so the finished plan ends with its links.
+				artifacts: {
+					repo_url: result.repo_url,
+					deployment_url: result.deployment_url
+				}
 			});
 			await this._offerSaveAsTemplate(planId, result.status);
 

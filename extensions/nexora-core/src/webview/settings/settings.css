@@ -840,3 +840,43 @@ body
 	clip: rect(0, 0, 0, 0);
 	border: 0;
 }
+/* Project Memory (facts) */
+
+.nx-fact-injected
+{
+	margin: 8px 0 0;
+	padding: 10px 12px;
+	border: 1px solid var(--nx-border);
+	border-radius: 4px;
+	background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.1));
+	color: var(--nx-fg, var(--vscode-foreground));
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11px;
+	line-height: 1.6;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.nx-fact-error
+{
+	margin: 8px 0 0;
+	font-size: 12px;
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.nx-model-row .nx-fact-forget
+{
+	flex-shrink: 0;
+	/* Routine, and the fact can be added back -- keep red for the hover only. */
+	color: var(--nx-muted, var(--vscode-descriptionForeground));
+}
+
+.nx-model-row .nx-fact-forget:hover
+{
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.nx-model-row .nx-model-name
+{
+	overflow-wrap: anywhere;
+}
