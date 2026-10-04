@@ -3,25 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root
-{
-	--nx-space-1: 4px;
-	--nx-space-2: 8px;
-	--nx-space-3: 12px;
-	--nx-space-4: 16px;
+:root {
+	/* Chat overrides the shared recessed surface: its session rail sits
+	beside the transcript, so it blends toward the editor background
+	instead of taking the sidebar's full contrast. */
+	--nx-surface-2: color-mix(in srgb, var(--vscode-editor-background) 85%, var(--vscode-sideBar-background));
 	--nx-space-5: 24px;
 	--nx-space-6: 32px;
 	--nx-radius-1: 6px;
 	--nx-radius-2: 10px;
 	--nx-font-ui: var(--vscode-font-family);
-	--nx-font-mono: var(--vscode-editor-font-family);
-	--nx-border: var(--vscode-panel-border);
-	--nx-fg: var(--vscode-foreground);
-	--nx-muted: color-mix(in srgb, var(--vscode-foreground) 55%, transparent);
-	--nx-bg: var(--vscode-sideBar-background);
-	--nx-surface: var(--vscode-editor-background);
-	--nx-surface-2: color-mix(in srgb, var(--vscode-editor-background) 85%, var(--vscode-sideBar-background));
-	--nx-focus: var(--vscode-focusBorder);
 	--nx-primary: var(--vscode-button-background);
 	--nx-primaryFg: var(--vscode-button-foreground);
 	--nx-primaryHover: var(--vscode-button-hoverBackground);

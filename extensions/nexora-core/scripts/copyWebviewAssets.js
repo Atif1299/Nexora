@@ -35,6 +35,10 @@ function copyWebviewFolder(root, folderName, assets) {
 function main() {
 	const root = path.resolve(__dirname, '..');
 
+	// Shared stylesheets every panel loads before its own. Without these the
+	// panels reference colour and spacing variables that nothing defines.
+	copyWebviewFolder(root, 'shared', ['tokens.css', 'base.css', 'components.css']);
+
 	// Chat panel assets
 	copyWebviewFolder(root, 'chat', ['chat.css', 'chat.js']);
 

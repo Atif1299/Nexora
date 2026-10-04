@@ -6,49 +6,24 @@
 import * as vscode from 'vscode';
 import type { ChatInitialState } from './types';
 
-function getNonce(): string {
-	let text = '';
-	const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	for (let i = 0; i < 32; i++) {
-		text += possible.charAt(Math.floor(Math.random() * possible.length));
-	}
-	return text;
-}
+import { renderWebviewPage } from '../shared/html';
 
 export function getChatWebviewHtml(
 	webview: vscode.Webview,
 	extensionUri: vscode.Uri,
 	initialState: ChatInitialState
 ): string {
-	const nonce = getNonce();
-
-	const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'chat', 'chat.css'));
-	const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'chat', 'chat.js'));
-
-	let sessionRailWidthPx = 196;
-	const rawRailWidth = initialState.sessionRailWidth;
-	if (typeof rawRailWidth === 'number' && Number.isFinite(rawRailWidth)) {
-		sessionRailWidthPx = Math.max(140, Math.min(360, Math.round(rawRailWidth)));
-	}
-
-	const csp = [
-		`default-src 'none'`,
-		`img-src ${webview.cspSource} https: data:`,
-		`style-src ${webview.cspSource}`,
-		`script-src 'nonce-${nonce}'`,
-	].join('; ');
-
-	return /* html */ `<!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta charset="UTF-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<meta http-equiv="Content-Security-Policy" content="${csp}">
-	<link rel="stylesheet" href="${cssUri}">
-	<title>Nexora Chat</title>
-</head>
-<body>
-	<div class="nx-root">
+	return renderWebviewPage({
+		webview,
+		extensionUri,
+		folder: 'chat',
+		title: 'Nexora Chat',
+		styles: ['chat.css'],
+		scripts: ['chat.js'],
+		// chat.js reads this as it initializes; without it the panel renders
+		// as disconnected and signed out until the first push arrives.
+		initialState,
+		body: /* html */ `	<div class="nx-root">
 		<div class="nx-conversation">
 		<header class="nx-header">
 			<div class="nx-status">
@@ -180,7 +155,7 @@ export function getChatWebviewHtml(
 			</div>
 		</footer>
 		</div>
-		<aside class="nx-sessionRail" id="sessionRail" style="--nx-rail-width: ${sessionRailWidthPx}px;" aria-label="Chat sessions">
+		<aside class="nx-sessionRail" id="sessionRail" aria-label="Chat sessions">
 			<div class="nx-railResize" id="railResize" role="separator" aria-orientation="vertical" aria-label="Resize session list"></div>
 			<div class="nx-railTop">
 				<button class="nx-railNew" id="newSessionBtn" type="button" title="New chat">
@@ -190,13 +165,6 @@ export function getChatWebviewHtml(
 			</div>
 			<div class="nx-railList" id="sessionList" role="list"></div>
 		</aside>
-	</div>
-
-	<script nonce="${nonce}">
-		window.__NEXORA_INITIAL_STATE__ = ${JSON.stringify(initialState)};
-	</script>
-	<script nonce="${nonce}" src="${jsUri}"></script>
-</body>
-</html>`;
+	</div>`
+	});
 }
-

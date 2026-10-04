@@ -3,22 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root
-{
-	--nx-bg: var(--vscode-editor-background);
-	--nx-fg: var(--vscode-editor-foreground);
-	--nx-muted: var(--vscode-descriptionForeground);
-	--nx-border: var(--vscode-panel-border);
-	--nx-surface: var(--vscode-input-background);
-	--nx-btn-bg: var(--vscode-button-background);
-	--nx-btn-fg: var(--vscode-button-foreground);
-	--nx-btn-hover: var(--vscode-button-hoverBackground);
-	--nx-btn2-bg: var(--vscode-button-secondaryBackground);
-	--nx-btn2-fg: var(--vscode-button-secondaryForeground);
-	--nx-ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
-	--nx-err: var(--vscode-charts-red);
-	--nx-disabled: var(--vscode-disabledForeground);
-}
 
 *
 {
@@ -152,10 +136,28 @@ h1
 	padding: 10px 12px;
 }
 
-.nx-platform.is-blocked,
-.nx-platform.is-catalogue
+/*
+* A row that is not connected should read as calmer, not as damaged.
+*
+* Both states used to dim the whole card to 55%, which took the status badge
+* and the action button down with it -- the two things a person actually
+* needs to read and click. On the description it compounded, because that
+* text is already muted, leaving it far below a comfortable contrast.
+*
+* A blocked row is the most actionable row on the page: it has a Connect or
+* Set up button waiting. So it is not dimmed at all. Only a catalogue row,
+* which offers nothing to click, steps back -- and it does so by muting its
+* name rather than by fading the whole card, so its state stays readable.
+*/
+.nx-platform.is-catalogue .nx-name
 {
-	opacity: 0.55;
+	color: var(--nx-muted);
+	font-weight: 500;
+}
+
+.nx-platform.is-catalogue .nx-meta
+{
+	opacity: 0.85;
 }
 
 .nx-aside
@@ -245,6 +247,24 @@ h1
 	border-radius: 4px;
 	padding: 1px 6px;
 	white-space: nowrap;
+}
+
+/*
+* The badge repeats what the dot already says, so it should say it the same
+* way. Only the two states worth a colour get one: connected, and failed.
+* "Not set up yet" stays neutral, because it is an ordinary fact about a row
+* the user has not reached yet, not a problem to be warned about.
+*/
+.nx-platform.is-connected .nx-status
+{
+	color: var(--nx-ok);
+	border-color: var(--nx-ok);
+}
+
+.nx-platform.is-failed .nx-status
+{
+	color: var(--nx-err);
+	border-color: var(--nx-err);
 }
 
 .nx-empty

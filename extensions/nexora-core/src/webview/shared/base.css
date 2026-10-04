@@ -1,0 +1,134 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+* Page-level defaults shared by every Nexora webview: the reset, typography,
+* scrollbars and the focus ring.
+*
+* A webview is a browser frame, so without this each panel starts from browser
+* defaults -- Times New Roman, an 8px body margin, and a scrollbar that belongs
+* to a web page rather than to VS Code. Doing it once here is why the panels
+* feel like one application.
+*/
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	padding: var(--nx-space-3);
+	font-family: var(--nx-font);
+	font-size: var(--nx-font-size);
+	color: var(--nx-fg);
+	background: var(--nx-bg);
+	/* VS Code renders its own UI this way; matching it stops Nexora's text
+	from looking subtly heavier than the panel beside it. */
+	-webkit-font-smoothing: antialiased;
+}
+
+/*
+* One focus ring for the whole product, drawn inside the element's own box.
+*
+* :focus-visible rather than :focus, so a mouse click does not leave a ring
+* behind while keyboard users still get one. Only half the panels defined this
+* before, so tabbing through Nexora changed appearance panel by panel.
+*/
+:focus {
+	outline: none;
+}
+
+:focus-visible {
+	outline: 1px solid var(--nx-focus);
+	outline-offset: -1px;
+	border-radius: var(--nx-radius);
+}
+
+/* Scrollbars, matching the workbench rather than the browser. */
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--vscode-scrollbarSlider-background);
+	border-radius: 0;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+::-webkit-scrollbar-thumb:active {
+	background: var(--vscode-scrollbarSlider-activeBackground);
+}
+
+::-webkit-scrollbar-corner {
+	background: transparent;
+}
+
+/* Typography. Panel headings are UI labels, not article titles. */
+h1,
+h2,
+h3 {
+	margin: 0;
+	font-weight: 600;
+	line-height: 1.3;
+}
+
+h1 {
+	font-size: 13px;
+}
+
+h2 {
+	font-size: 12px;
+}
+
+h3 {
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--nx-muted);
+}
+
+p {
+	margin: 0 0 var(--nx-space-2);
+	line-height: 1.5;
+}
+
+a {
+	color: var(--vscode-textLink-foreground);
+	text-decoration: none;
+}
+
+a:hover {
+	color: var(--vscode-textLink-activeForeground);
+	text-decoration: underline;
+}
+
+code,
+kbd {
+	font-family: var(--nx-font-mono);
+	font-size: 0.95em;
+}
+
+/* Visible only to assistive technology. */
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}

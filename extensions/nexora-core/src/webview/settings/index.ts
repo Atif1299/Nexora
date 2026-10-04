@@ -5,14 +5,7 @@
 
 import * as vscode from 'vscode';
 
-function getNonce(): string {
-	let text = '';
-	const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	for (let i = 0; i < 32; i++) {
-		text += possible.charAt(Math.floor(Math.random() * possible.length));
-	}
-	return text;
-}
+import { renderWebviewPage } from '../shared/html';
 
 function escapeAttr(value: string): string {
 	return value
@@ -26,30 +19,18 @@ export function getSettingsWebviewHtml(
 	extensionUri: vscode.Uri,
 	section?: string
 ): string {
-	const nonce = getNonce();
-	const initialSection = escapeAttr(section || '');
-
-	const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'settings', 'settings.css'));
-	const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'settings', 'settings.js'));
-
-	const csp = [
-		`default-src 'none'`,
-		`img-src ${webview.cspSource} https: data:`,
-		`style-src ${webview.cspSource} 'unsafe-inline'`,
-		`script-src 'nonce-${nonce}'`,
-	].join('; ');
-
-	return /* html */ `<!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta charset="UTF-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<meta http-equiv="Content-Security-Policy" content="${csp}">
-	<link rel="stylesheet" href="${cssUri}">
-	<title>Nexora Settings</title>
-</head>
-<body data-section="${initialSection}">
-	<div id="settings-root" role="main" aria-label="Nexora Settings">
+	return renderWebviewPage({
+		webview,
+		extensionUri,
+		folder: 'settings',
+		title: 'Nexora Settings',
+		styles: ['settings.css'],
+		scripts: ['settings.js'],
+		// This panel writes style attributes from script (meter widths).
+		allowInlineStyles: true,
+		// settings.js reads the section to open before its first render.
+		bodyAttributes: `data-section="${escapeAttr(section || '')}"`,
+		body: /* html */ `	<div id="settings-root" role="main" aria-label="Nexora Settings">
 		<nav class="nx-settings-nav" aria-label="Settings sections">
 			<div class="nx-settings-nav-title">Settings</div>
 			<button type="button" class="nx-nav-item selected" data-section="keys" aria-current="page" title="LLM Keys" aria-label="LLM Keys">
@@ -203,9 +184,6 @@ export function getSettingsWebviewHtml(
 		</div>
 	</div>
 
-	<div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
-
-	<script nonce="${nonce}" src="${jsUri}"></script>
-</body>
-</html>`;
+	<div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>`
+	});
 }

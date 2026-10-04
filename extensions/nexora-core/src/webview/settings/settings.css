@@ -3,24 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root
-{
-	--nx-bg: var(--vscode-editor-background);
-	--nx-fg: var(--vscode-editor-foreground);
-	--nx-muted: var(--vscode-descriptionForeground);
-	--nx-border: var(--vscode-panel-border);
-	--nx-surface: var(--vscode-input-background);
-	--nx-focus: var(--vscode-focusBorder);
-	--nx-btn-bg: var(--vscode-button-background);
-	--nx-btn-fg: var(--vscode-button-foreground);
-	--nx-btn-hover: var(--vscode-button-hoverBackground);
-	--nx-btn2-bg: var(--vscode-button-secondaryBackground);
-	--nx-btn2-fg: var(--vscode-button-secondaryForeground);
-	--nx-ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
-	--nx-err: var(--vscode-testing-iconFailed, var(--vscode-errorForeground));
-	--nx-warn: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
-	--nx-bar: var(--vscode-charts-blue, var(--vscode-button-background));
-}
 
 *
 {
@@ -774,7 +756,7 @@ body
 .nx-analytics-barFill
 {
 	height: 100%;
-	background: var(--nx-bar);
+	background: var(--nx-accent);
 	border-radius: 4px;
 }
 

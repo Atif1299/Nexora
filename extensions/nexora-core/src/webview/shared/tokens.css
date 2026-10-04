@@ -1,0 +1,105 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/*
+* Design tokens for every Nexora webview.
+*
+* Each panel used to declare its own :root block. They were near-identical but
+* never quite the same -- one panel took --nx-err from charts-red, another from
+* testing-iconFailed, a third had no focus colour at all -- so the same idea
+* looked different depending on which panel you were looking at.
+*
+* Every value resolves to a VS Code theme variable, never a literal colour, so
+* Nexora follows whatever theme the user has chosen instead of fighting it.
+* Fallbacks are themselves theme variables wherever one exists; a hex literal
+* appears only where VS Code offers nothing to fall back to.
+*/
+
+:root {
+	/* Surfaces and text */
+	--nx-bg: var(--vscode-editor-background);
+	--nx-fg: var(--vscode-editor-foreground);
+	--nx-muted: var(--vscode-descriptionForeground);
+	--nx-border: var(--vscode-panel-border);
+	--nx-surface: var(--vscode-input-background);
+	/* A second, recessed surface for rails and side columns. */
+	--nx-surface-2: var(--vscode-sideBar-background);
+	--nx-surface-hover: var(--vscode-list-hoverBackground);
+	--nx-surface-active: var(--vscode-list-activeSelectionBackground);
+
+	/* Focus. One ring everywhere, drawn inside the element like VS Code's. */
+	--nx-focus: var(--vscode-focusBorder);
+
+	/* Primary button */
+	--nx-btn-bg: var(--vscode-button-background);
+	--nx-btn-fg: var(--vscode-button-foreground);
+	--nx-btn-hover: var(--vscode-button-hoverBackground);
+
+	/* Secondary button. It has its own hover colour: using the primary one
+	made a secondary button turn primary-coloured under the cursor. */
+	--nx-btn2-bg: var(--vscode-button-secondaryBackground);
+	--nx-btn2-fg: var(--vscode-button-secondaryForeground);
+	--nx-btn2-hover: var(--vscode-button-secondaryHoverBackground);
+
+	/* Inputs */
+	--nx-input-bg: var(--vscode-input-background);
+	--nx-input-fg: var(--vscode-input-foreground);
+	--nx-input-border: var(--vscode-input-border, var(--vscode-panel-border));
+	--nx-input-placeholder: var(--vscode-input-placeholderForeground);
+
+	/* Status. Semantic theme variables first, charts only as a fallback, so
+	these track the theme's own idea of pass and fail. */
+	--nx-ok: var(--vscode-testing-iconPassed, var(--vscode-charts-green));
+	--nx-err: var(--vscode-testing-iconFailed, var(--vscode-errorForeground));
+	--nx-warn: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+	--nx-info: var(--vscode-charts-blue, var(--vscode-button-background));
+	--nx-disabled: var(--vscode-disabledForeground);
+
+	/* Accent, for bars, dots and progress. */
+	--nx-accent: var(--vscode-charts-blue, var(--vscode-button-background));
+
+	/* Typography: the editor's own, so Nexora reads as part of the IDE. */
+	--nx-font: var(--vscode-font-family);
+	--nx-font-size: var(--vscode-font-size);
+	--nx-font-mono: var(--vscode-editor-font-family);
+
+	/* Spacing scale. Four points, which is all these layouts need. */
+	--nx-space-1: 4px;
+	--nx-space-2: 8px;
+	--nx-space-3: 12px;
+	--nx-space-4: 16px;
+
+	--nx-radius: 4px;
+	--nx-radius-lg: 6px;
+
+	/*
+	* Motion. VS Code is close to instant and so is this: long transitions
+	* read as lag in an IDE. Only colour and opacity are ever transitioned --
+	* animating width, height or top forces layout on every frame, which is
+	* what makes a panel feel like it is struggling.
+	*/
+	--nx-duration: 100ms;
+	--nx-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+	--nx-transition: var(--nx-duration) var(--nx-ease);
+}
+
+/*
+* Honour the operating system's reduced-motion setting. Nexora animates very
+* little, but a user who asked for stillness should get it.
+*/
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--nx-duration: 1ms;
+	}
+
+	*,
+	*::before,
+	*::after {
+		animation-duration: 1ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 1ms !important;
+		scroll-behavior: auto !important;
+	}
+}

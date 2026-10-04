@@ -5,42 +5,22 @@
 
 import * as vscode from 'vscode';
 
-function getNonce(): string {
-	let text = '';
-	const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-	for (let i = 0; i < 32; i++) {
-		text += possible.charAt(Math.floor(Math.random() * possible.length));
-	}
-	return text;
-}
+import { renderWebviewPage } from '../shared/html';
 
 export function getAnalyticsWebviewHtml(
 	webview: vscode.Webview,
 	extensionUri: vscode.Uri
 ): string {
-	const nonce = getNonce();
-
-	const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'analytics', 'analytics.css'));
-	const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'out', 'webview', 'analytics', 'analytics.js'));
-
-	const csp = [
-		`default-src 'none'`,
-		`img-src ${webview.cspSource} https: data:`,
-		`style-src ${webview.cspSource} 'unsafe-inline'`,
-		`script-src 'nonce-${nonce}'`,
-	].join('; ');
-
-	return /* html */ `<!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta charset="UTF-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<meta http-equiv="Content-Security-Policy" content="${csp}">
-	<link rel="stylesheet" href="${cssUri}">
-	<title>Nexora Analytics</title>
-</head>
-<body>
-	<div id="analytics-root" role="main" aria-label="Nexora Analytics">
+	return renderWebviewPage({
+		webview,
+		extensionUri,
+		folder: 'analytics',
+		// This panel writes style attributes from script (bar widths).
+		allowInlineStyles: true,
+		title: 'Nexora Analytics',
+		styles: ['analytics.css'],
+		scripts: ['analytics.js'],
+		body: /* html */ `	<div id="analytics-root" role="main" aria-label="Nexora Analytics">
 		<div class="nx-section-head">
 			<h1>Cost &amp; Analytics</h1>
 			<button type="button" class="nx-btn nx-btn-secondary" id="refresh" aria-label="Refresh analytics">Refresh</button>
@@ -80,9 +60,6 @@ export function getAnalyticsWebviewHtml(
 		</section>
 
 		<div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
-	</div>
-
-	<script nonce="${nonce}" src="${jsUri}"></script>
-</body>
-</html>`;
+	</div>`
+	});
 }
