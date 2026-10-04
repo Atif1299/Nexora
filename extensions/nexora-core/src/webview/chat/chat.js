@@ -1301,6 +1301,15 @@
 		let html = escapeHtml(String(content || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
 		html = extractMarkdownFences(html, blocks);
 
+		// Every newline below becomes a <br/>, so runs of them become empty
+		// screen. Models pad their replies with trailing newlines, and a turn
+		// that ends in a tool call often adds several more, which is what put
+		// a wall of blank space between one agent turn and the next.
+		//
+		// This runs after the fences are stashed, so whitespace inside a code
+		// block is untouched: there, blank lines are content.
+		html = html.replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '');
+
 		html = html.replace(/^#{1,6}\s+(.+)$/gm, '<strong class="nx-mdH">$1</strong>');
 		html = html.replace(/^#{1,6}\s*/gm, '');
 		html = applyMarkdownLists(html);

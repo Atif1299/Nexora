@@ -3494,12 +3494,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._persistSessions();
 			}
 			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'agent');
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: finalAnswer,
-				isLoading: false
-			});
+			// The answer is already on screen: the agent loop streams it as it
+			// arrives and closes the bubble with finishMessage. Posting it here
+			// as well rendered every agent reply twice. Ask mode has always
+			// ended this way, persisting the turn without re-sending it.
 			this._clearChatActivity();
 		} catch (error) {
 			const errText = `Agent error: ${error instanceof Error ? error.message : 'Unknown error'}`;
