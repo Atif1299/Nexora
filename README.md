@@ -5,69 +5,61 @@
 <h1 align="center">Nexora</h1>
 
 <p align="center">
-  <strong>VS Code fork + <code>nexora-core</code> — the IDE half of Nexora</strong>
-</p>
-
-<p align="center">
-  Chat, templates, plan approval, and workflow views.<br>
-  Orchestration, connectors, and memory live in the backend.<br>
-  Frozen at tag <code>v1.0-fyp2</code> (FYP-2). Branch <code>Week19-Atif</code>.
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/status-FYP--2%20freeze%20v1.0--fyp2-green" alt="Status">
-  <img src="https://img.shields.io/badge/built%20with-VS%20Code%20Fork-007ACC" alt="Built With">
+  <strong>An agentic IDE that plans, approves and ships the whole software lifecycle</strong><br>
+  VS Code fork + the <code>nexora-core</code> extension — the IDE half of Nexora
 </p>
 
 ---
 
-## This repo vs the backend
+## What this repository is
 
-This repository is the **editor**: a VS Code OSS fork with the `extensions/nexora-core` extension (**22** commands, **7** keybindings, **1** sidebar + **8** panel views).
+The **editor**: a VS Code OSS fork whose product behaviour lives in one built-in extension, [`extensions/nexora-core`](extensions/nexora-core/README.md). It provides:
 
-The **orchestration engine** is [Atif1299/Nexora-IDE-Backend-Architecture](https://github.com/Atif1299/Nexora-IDE-Backend-Architecture): FastAPI, **45** catalogued platforms / **11** active connectors, custom DAG executor, HITL, lexical `.mv2` workspace memory, ChromaDB platform search.
+- **Chat** in five modes — Chat, Ask, Agent, Plan, Execute — with a model picker and streamed replies.
+- **An agent** that edits files (with diff previews), runs commands in a live *Nexora Agent* terminal, drives a real browser (*Nexora Browser*), suggests code at the cursor, and calls `@mentioned` connected platforms after your approval.
+- **Plans** shown as an approval card and a live **workflow graph**; code steps of a plan are executed here, by Nexora's agent or by Claude Code / Cursor / Cline inside a git worktree with diff review.
+- **Panels:** Platforms (catalogue and sign-in), Templates, Timeline, Settings, Cost & Analytics, Task Plan, Output.
+- **The engine supervisor:** it starts the local Nexora engine on `127.0.0.1`, generates its secrets in SecretStorage, and restarts it if it stops.
 
-Read that README, [`docs/USER_GUIDE.md`](https://github.com/Atif1299/Nexora-IDE-Backend-Architecture/blob/Week19-Atif/docs/USER_GUIDE.md), and [`Report/`](https://github.com/Atif1299/Nexora-IDE-Backend-Architecture/tree/Week19-Atif/Report) for counts, architecture, and the FYP report. Do not copy the old “500+ platforms / LangGraph / Celery” table.
+The **engine** (planner, DAG executor, memory, connectors, vendor MCP sign-in) and the **documentation hub** live in [Atif1299/Nexora-IDE-Backend-Architecture](https://github.com/Atif1299/Nexora-IDE-Backend-Architecture). Start with its [`docs/README.md`](https://github.com/Atif1299/Nexora-IDE-Backend-Architecture/blob/System-Refinement/docs/README.md).
 
-The extension talks to **exactly** `http://127.0.0.1:8000`. There is **no** `nexora.backendUrl` setting.
-
----
-
-## Quick start
-
-1. Start the backend first (Python 3.11+, Docker Compose **three** services, mandatory `TOKEN_ENCRYPTION_KEY`). Follow the backend [Quick start](https://github.com/Atif1299/Nexora-IDE-Backend-Architecture#quick-start).
-2. Then this IDE:
+## Quick start (development)
 
 ```powershell
 git clone https://github.com/Atif1299/Nexora.git
 cd Nexora
 yarn
 yarn watch
-# other terminal:
+# second terminal
 .\scripts\code.bat
 ```
 
-3. Open the Nexora activity-bar icon. **Default Chat does not deploy.** First workflow: Templates → Landing Page Deploy → Instantiate → Run → **Approve & Execute**.
+On first launch the extension starts the engine itself: from `nexora.engine.pythonPath`, a bundled `nexora-engine.exe`, or the engine repo's `backend/.venv`. No Docker is needed. Add a model key in **Settings → API Keys** (OpenRouter has a free router). Full setup: the engine repo's [developer guide](https://github.com/Atif1299/Nexora-IDE-Backend-Architecture/blob/System-Refinement/docs/guides/developer-guide.md).
 
----
+Extension-only rebuild:
 
-## What the extension owns
+```powershell
+cd extensions\nexora-core
+npm run compile
+```
 
-| Surface | Role |
-|---------|------|
-| Chat | Modes including Chat / Plan / Execute / Ask (workspace). Plan card HITL. |
-| Templates | Builtin `landing-page-deploy`, `saas-starter`, `research-report` |
-| Workflow / Task tree | DAG views. `plan_snapshot` updates Chat; Workflow can stay stale (W18-006). |
-| Analytics / Output / Timeline / Settings / Platforms | Cost, logs, history, keys, catalogue |
+## Where to read more
 
-Workspace Ask uses **lexical** `.mv2` retrieval after **Index Workspace** on the welcome screen. It is not vector RAG.
+| Topic | Page (engine repo `docs/`) |
+|---|---|
+| What Nexora is and how it compares | `product/overview.md`, `product/competitive-landscape.md` |
+| IDE surfaces and messaging | `architecture/ide-extension.md` |
+| Agent loop, tools, run modes, browser, local agents, inline suggestions | `architecture/agent-loop.md` |
+| Plans, approval, execution | `architecture/orchestration-and-hitl.md` |
+| Settings reference | `reference/settings-and-env.md` |
+| User guide | `guides/user-guide.md` |
 
----
+Notes on the fork itself (build, structure) are in [`vscode-structure-notes.md`](vscode-structure-notes.md).
 
 ## Status
 
-**FYP-2 freeze** `v1.0-fyp2`. Single-user, local, Windows-verified backend tests. Linux Docker suite deferred. Preference learning is **not** implemented (platform ids are task-type defaults).
+A Final Year Project (COMSATS University Islamabad, Lahore Campus) growing into a product. FYP-2 freeze tag: `v1.0-fyp2`; current work: `System-Refinement`.
 
-**Team:** Muhammad Atif (SP23-BAI-031), Talha Asif (SP23-BAI-042). **Supervisor:** Dr. Muhammad Shahid Bhatti. COMSATS University Islamabad, Lahore Campus.
+**Team:** Muhammad Atif (SP23-BAI-031), Talha Asif (SP23-BAI-042). **Supervisor:** Dr. Muhammad Shahid Bhatti.
 
-The Nexora IDE is built on VS Code OSS (MIT).
+Built on VS Code OSS (MIT).
