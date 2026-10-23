@@ -19,6 +19,15 @@
 	box-sizing: border-box;
 }
 
+/*
+* Author styles beat the browser's [hidden] rule. .nx-empty sets display:flex,
+* so a loading line with the hidden attribute stayed on screen after the list
+* had already rendered. This restores the attribute for every panel.
+*/
+[hidden] {
+	display: none !important;
+}
+
 body {
 	margin: 0;
 	padding: var(--nx-space-3);
