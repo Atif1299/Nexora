@@ -2192,6 +2192,7 @@
 	}
 
 	function showPlanExecuting(planId) {
+		clearStepRetryButtons(planId);
 		Object.keys(shownEscalationKeys).forEach(function (key) {
 			if (key.indexOf(planId + ':') === 0) {
 				delete shownEscalationKeys[key];
@@ -2271,8 +2272,56 @@
 				updateTaskStatus(task.task_id, task.status, task.error, task.actual_cost);
 			});
 		}
+		showStepRetryButtons(planId);
 
 		currentPlan = null;
+	}
+
+	const RETRYABLE_STEP_STATUSES = ['failed', 'timeout', 'skipped'];
+
+	/**
+	 * Retry on each failed, timed-out or skipped step of a finished plan. The rows
+	 * keep their live status, so this works after a retry finishes too. A skipped
+	 * step is often one that needed a connection the user has since made.
+	 */
+	function showStepRetryButtons(planId) {
+		const list = document.getElementById('plan-tasks-' + planId);
+		if (!list) {
+			return;
+		}
+		list.querySelectorAll('.nx-planTask').forEach(function (taskEl) {
+			const status = (taskEl.getAttribute('data-status') || '').toLowerCase();
+			let button = taskEl.querySelector('.nx-stepRetryBtn');
+			if (RETRYABLE_STEP_STATUSES.indexOf(status) === -1) {
+				if (button) {
+					button.remove();
+				}
+				return;
+			}
+			if (button) {
+				return;
+			}
+			const taskId = taskEl.id.replace(/^task-/, '');
+			button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'nx-stepRetryBtn';
+			button.textContent = 'Retry';
+			button.title = 'Run this step again, and the steps after it that did not run';
+			button.addEventListener('click', function () {
+				clearStepRetryButtons(planId);
+				vscode.postMessage({ type: 'retryPlanTask', planId: planId, taskId: taskId });
+			});
+			taskEl.appendChild(button);
+		});
+	}
+
+	function clearStepRetryButtons(planId) {
+		const list = document.getElementById('plan-tasks-' + planId);
+		if (list) {
+			list.querySelectorAll('.nx-stepRetryBtn').forEach(function (button) {
+				button.remove();
+			});
+		}
 	}
 
 	function showSuggestion(suggestion) {

@@ -35,6 +35,7 @@ export type WebviewInboundMessage =
 	| { type: 'executeRequest'; request: string; model?: string }
 	| { type: 'runAgent'; request: string; model?: string }
 	| { type: 'restoreCheckpoint'; id: string }
+	| { type: 'retryPlanTask'; planId: string; taskId: string }
 	| { type: 'stopGeneration' }
 	| { type: 'confirmSaveTemplate'; planId: string; name: string; description: string; category: string; parameters: Array<{ name: string; source_value: string; type?: string; required?: boolean; description?: string }> }
 	| { type: 'cancelSaveTemplate' }

@@ -52,6 +52,11 @@ function currentShell(): string {
 	return /pwsh/i.test(vscode.env.shell || '') ? 'pwsh' : 'powershell';
 }
 
+/** nexora.agent.projectRules: whether Ask, Agent and Chat requests carry the project rule files. */
+export function projectRulesEnabled(): boolean {
+	return vscode.workspace.getConfiguration('nexora.agent').get<boolean>('projectRules', true);
+}
+
 export function createAgentApi(transport: Transport) {
 	return {
 		/**
@@ -102,7 +107,7 @@ export function createAgentApi(transport: Transport) {
 				max_tokens: 2048,
 				session_id: sessionId,
 				shell: currentShell(),
-				project_rules: vscode.workspace.getConfiguration('nexora.agent').get<boolean>('projectRules', true)
+				project_rules: projectRulesEnabled()
 			}, signal, AGENT_TURN_TIMEOUT_MS);
 		},
 

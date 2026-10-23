@@ -2681,6 +2681,26 @@ body
 	text-decoration: underline;
 }
 
+/* Retry: on a failed, timed-out or skipped step of a finished plan. */
+.nx-stepRetryBtn
+{
+	margin-left: auto;
+	padding: 0 6px;
+	border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+	border-radius: 3px;
+	background: transparent;
+	color: var(--vscode-textLink-foreground);
+	font-size: 11px;
+	font-family: inherit;
+	cursor: pointer;
+}
+
+.nx-stepRetryBtn:hover,
+.nx-stepRetryBtn:focus-visible
+{
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
 /* Restore files: under an Agent message whose later edits can be undone. */
 .nx-restoreBtn
 {

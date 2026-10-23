@@ -18,7 +18,7 @@ import { createAuthApi, type AuthStatus, type SaasConnector } from './backend/au
 import { createOrchestrateApi } from './backend/orchestrate';
 import { createHistoryApi, type HistoryItem, type RollbackableItem, type RollbackInfo, type RollbackResponse, type HistoryStats } from './backend/history';
 import { createAnalyticsApi, type AnalyticsDashboardData, type CostSummary, type MemoryInsights } from './backend/analytics';
-import { createAgentApi, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './backend/agent';
+import { createAgentApi, projectRulesEnabled, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './backend/agent';
 import { createStatusApi, type ConnectionsResponse, type TestResult, type ProviderStatus } from './backend/status';
 import { createCapabilitiesApi, type CapabilitiesReport } from './backend/capabilities';
 import { createModelsApi, type ModelCatalog } from './backend/models';
@@ -195,7 +195,7 @@ export class BackendClient {
 	 * 
 	 * @param message User's message
 	 * @param workspacePath Optional workspace path for context
-	 * @param model Optional model to use (e.g., "anthropic/claude-3-haiku-20240307")
+	 * @param model Optional model to use (e.g., "anthropic/claude-haiku-5-5")
 	 * @returns Chat response with response text and model used
 	 */
 	async chat(
@@ -204,10 +204,11 @@ export class BackendClient {
 		model?: string,
 		options?: { session_id?: string; workspace_id?: string; signal?: AbortSignal }
 	): Promise<{ response: string; model_used: string; remembered?: string | null }> {
-		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string } = {
+		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string; project_rules: boolean } = {
 			message,
 			workspace_path: workspacePath,
-			model
+			model,
+			project_rules: projectRulesEnabled()
 		};
 		if (options?.session_id) {
 			body.session_id = options.session_id;
@@ -227,10 +228,11 @@ export class BackendClient {
 		model?: string,
 		options?: { session_id?: string; workspace_id?: string; signal?: AbortSignal }
 	): AsyncIterable<SSEEvent> {
-		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string } = {
+		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string; project_rules: boolean } = {
 			message,
 			workspace_path: workspacePath,
-			model
+			model,
+			project_rules: projectRulesEnabled()
 		};
 		if (options?.session_id) {
 			body.session_id = options.session_id;
@@ -656,6 +658,11 @@ export class BackendClient {
 		files: string[];
 	}): Promise<any> {
 		return createOrchestrateApi(this.transport).submitTaskResult(payload);
+	}
+
+	/** Re-run one failed, timed-out or skipped step of a finished plan. */
+	async retryPlanTask(planId: string, taskId: string): Promise<any> {
+		return createOrchestrateApi(this.transport).retryTask(planId, taskId);
 	}
 
 	/**

@@ -511,7 +511,7 @@
         "nexora.agent.projectRules": {
           "type": "boolean",
           "default": true,
-          "description": "Send the project's rule files (AGENTS.md, CLAUDE.md and .nexora/rules/*.md at the workspace root, up to 12,000 characters) with every Ask and Agent turn."
+          "description": "Send the project's rule files (AGENTS.md, CLAUDE.md and .nexora/rules/*.md at the workspace root, up to 12,000 characters) with every Ask, Agent and Chat message, and the first 3,000 characters when building a plan."
         },
         "nexora.agent.inlineDiffs": {
           "type": "boolean",

@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { Transport } from './transport';
+import { projectRulesEnabled } from './agent';
 
 /** Plan generation runs two LLM calls plus best-effort memory; default 30s is too short. */
 const PLAN_TIMEOUT_MS = 120_000;
@@ -17,6 +18,8 @@ export interface ExecutionTask {
 	dependencies: string[];
 	status: string;
 	estimated_cost: number;
+	/** [low, high] for a code step's agent loop. */
+	estimated_cost_range?: [number, number] | null;
 	actual_cost: number;
 	result?: any;
 	error?: string;
@@ -35,7 +38,10 @@ export interface PlanResponse {
 		platform: string;
 		operation: string;
 		estimated_cost: number;
+		estimated_cost_range?: [number, number];
 	}>;
+	/** [low, high] for the plan when it has code steps. */
+	estimated_cost_range?: [number, number] | null;
 }
 
 export interface PlanModification {
@@ -89,11 +95,13 @@ export function createOrchestrateApi(transport: Transport) {
 				model?: string;
 				session_id?: string;
 				workspace_id?: string;
+				project_rules: boolean;
 			} = {
 				request,
 				user_id: userId,
 				workspace_path: workspacePath,
-				model
+				model,
+				project_rules: projectRulesEnabled()
 			};
 			if (options?.session_id) {
 				body.session_id = options.session_id;
@@ -102,6 +110,14 @@ export function createOrchestrateApi(transport: Transport) {
 				body.workspace_id = options.workspace_id;
 			}
 			return await transport.post('/api/orchestrate/plan', body, PLAN_TIMEOUT_MS);
+		},
+
+		/** Re-run one failed, timed-out or skipped step of a finished plan. */
+		retryTask: async (planId: string, taskId: string): Promise<{ plan_id: string; task_id: string; status: string; tasks: ExecutionTask[] }> => {
+			return await transport.post(
+				`/api/orchestrate/retry/${encodeURIComponent(planId)}/${encodeURIComponent(taskId)}`,
+				{}
+			);
 		},
 
 		submitTaskResult: async (payload: {

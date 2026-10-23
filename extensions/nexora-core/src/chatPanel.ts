@@ -648,6 +648,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._handlePlanGeneration(data.request, data.model);
 		} else if (data.type === 'approvePlan') {
 			await this._handleApprovePlan(data.planId);
+		} else if (data.type === 'retryPlanTask') {
+			await this._handleRetryPlanTask(data.planId, data.taskId);
 		} else if (data.type === 'cancelPlan') {
 			await this._handleCancelPlan(data.planId);
 		} else if (data.type === 'modifyPlan') {
@@ -2841,6 +2843,54 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 
 		return lines.join('\n');
+	}
+
+	/**
+	 * Run one failed, timed-out or skipped step of a finished plan again. The
+	 * engine reopens that step and the steps after it that never ran, then the
+	 * usual task events and plan_completed update the card. No new approval:
+	 * the user approved these steps already.
+	 */
+	private async _handleRetryPlanTask(planId: string, taskId: string): Promise<void> {
+		if (!this._hasChatSurface() || !planId || !taskId) {
+			return;
+		}
+		const wsClient = getOrchestrationWebSocket('default');
+		if (!wsClient.isConnected()) {
+			await wsClient.connect();
+		}
+		wsClient.subscribeToPlan(planId);
+		this._currentPlanId = planId;
+		void this._syncOperationContext();
+		this._postToWebviews({ type: 'planExecutionStarted', planId });
+
+		const client = getBackendClient();
+		try {
+			await client.retryPlanTask(planId, taskId);
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			this._postToWebviews({
+				type: 'addMessage',
+				role: 'assistant',
+				content: `Could not retry that step: ${reason}`,
+				isLoading: false
+			});
+			// Put the card back as the engine has it, Retry buttons included.
+			try {
+				const plan = await client.getPlan(planId);
+				this._postToWebviews({
+					type: 'planExecutionComplete',
+					planId,
+					status: plan.status,
+					tasks: plan.tasks,
+					actualCost: plan.actual_cost
+				});
+			} catch {
+				// The error message above is enough.
+			}
+			this._currentPlanId = undefined;
+			void this._syncOperationContext();
+		}
 	}
 
 	private async _handleApprovePlan(planId: string): Promise<void> {
