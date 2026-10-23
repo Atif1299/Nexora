@@ -2680,3 +2680,25 @@ body
 {
 	text-decoration: underline;
 }
+
+/* Restore files: under an Agent message whose later edits can be undone. */
+.nx-restoreBtn
+{
+	display: block;
+	margin: 4px 0 0 auto;
+	padding: 0;
+	border: none;
+	background: none;
+	color: var(--vscode-textLink-foreground);
+	font-size: 11px;
+	font-family: inherit;
+	cursor: pointer;
+	opacity: 0.75;
+}
+
+.nx-restoreBtn:hover,
+.nx-restoreBtn:focus-visible
+{
+	opacity: 1;
+	text-decoration: underline;
+}

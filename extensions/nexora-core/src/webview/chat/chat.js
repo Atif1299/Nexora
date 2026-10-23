@@ -1754,6 +1754,50 @@
 		}
 	}
 
+	/** The Agent message just sent owns this checkpoint. */
+	function tagLatestUserMessage(id) {
+		if (!messages || !id) {
+			return;
+		}
+		const users = messages.querySelectorAll('.nx-msg.nx-user:not([data-checkpoint])');
+		const latest = users[users.length - 1];
+		if (latest) {
+			latest.setAttribute('data-checkpoint', id);
+		}
+	}
+
+	/**
+	 * Restore appears on a message when the agent changed files at or after it.
+	 * Restoring puts those files back as they were before the message.
+	 */
+	function showRestoreButtons(restorable) {
+		if (!messages) {
+			return;
+		}
+		const allowed = new Set(restorable);
+		messages.querySelectorAll('.nx-msg.nx-user[data-checkpoint]').forEach(function (div) {
+			const id = div.getAttribute('data-checkpoint');
+			let button = div.querySelector('.nx-restoreBtn');
+			if (!allowed.has(id)) {
+				if (button) {
+					button.remove();
+				}
+				return;
+			}
+			if (!button) {
+				button = document.createElement('button');
+				button.type = 'button';
+				button.className = 'nx-restoreBtn';
+				button.textContent = 'Restore files';
+				button.title = 'Put the files the agent changed back to how they were before this message';
+				button.addEventListener('click', function () {
+					vscode.postMessage({ type: 'restoreCheckpoint', id: id });
+				});
+				div.appendChild(button);
+			}
+		});
+	}
+
 	/**
 	 * A "remember ..." message saved a project fact. Show it inline with a way
 	 * to review it -- memory written silently is memory the user cannot trust.
@@ -2793,6 +2837,14 @@
 
 			case 'costUpdate':
 				updateCostTicker(data.cost_usd, data.tokens_in, data.tokens_out, data.tokens_cached);
+				break;
+
+			case 'checkpointStarted':
+				tagLatestUserMessage(data.id);
+				break;
+
+			case 'checkpoints':
+				showRestoreButtons(data.restorable || []);
 				break;
 
 			case 'memoryNote':

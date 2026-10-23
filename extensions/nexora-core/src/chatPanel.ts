@@ -36,6 +36,7 @@ import {
 	type CapabilitiesReport
 } from './services/backend/capabilities';
 import { deriveWorkspaceId } from './services/workspaceId';
+import { agentCheckpoints } from './services/checkpoints';
 
 type ChatMode = 'chat' | 'ask' | 'plan' | 'execute' | 'agent';
 
@@ -667,6 +668,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._handleExecuteRequest(data.request, data.model);
 		} else if (data.type === 'runAgent') {
 			await this._handleRunAgent(data.request, data.model);
+		} else if (data.type === 'restoreCheckpoint') {
+			await this._restoreCheckpoint(data.id);
 		} else if (data.type === 'stopGeneration') {
 			this._abortInFlightReply();
 		} else if (data.type === 'confirmSaveTemplate') {
@@ -3405,6 +3408,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		try {
 			const session = await this._recordUserMessage(request, 'agent');
 			const sessionId = session?.id;
+			// Files the agent edits from here on can be restored to how they are now.
+			this._postToWebviews({ type: 'checkpointStarted', id: agentCheckpoints.begin(request) });
 
 			const isConnected = await this._backendReady();
 			if (!isConnected) {
@@ -3506,7 +3511,70 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				content: errText,
 				isLoading: false
 			});
+		} finally {
+			// A stopped or failed run may still have edited files.
+			this._postCheckpoints();
 		}
+	}
+
+	/** Tell the chat which messages have agent edits to restore. */
+	private _postCheckpoints(): void {
+		this._postToWebviews({ type: 'checkpoints', restorable: agentCheckpoints.restorableIds() });
+	}
+
+	/**
+	 * Put the files the agent edited back as they were before a message, after
+	 * the user confirms the list. Only agent file edits are undone; the chat
+	 * history stays as it is.
+	 */
+	private async _restoreCheckpoint(id: string): Promise<void> {
+		const preview = agentCheckpoints.preview(id);
+		if (!preview || (preview.files.length === 0 && preview.unavailable.length === 0)) {
+			void vscode.window.showInformationMessage('Nothing to restore: the agent has not changed any files since that message.');
+			this._postCheckpoints();
+			return;
+		}
+		const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const label = (file: string) => (root ? path.relative(root, file) : file) || file;
+		const shown = preview.files.slice(0, 15).map(f => `• ${label(f)}`);
+		if (preview.files.length > shown.length) {
+			shown.push(`• and ${preview.files.length - shown.length} more`);
+		}
+		const detail = [
+			...shown,
+			'',
+			'Files the agent created are deleted. Your own edits to these files since then are lost too.',
+			'Changes made by terminal commands are not undone.'
+		];
+		if (preview.unavailable.length) {
+			detail.push(`Can't restore (too large or unreadable): ${preview.unavailable.map(label).join(', ')}`);
+		}
+		const choice = await vscode.window.showWarningMessage(
+			`Restore ${preview.files.length} file${preview.files.length === 1 ? '' : 's'} to how they were before this message?`,
+			{ modal: true, detail: detail.join('\n') },
+			'Restore'
+		);
+		if (choice !== 'Restore') {
+			return;
+		}
+
+		const result = await agentCheckpoints.restore(id);
+		this._postCheckpoints();
+		if (!result) {
+			return;
+		}
+		const parts = [`Restored ${result.restored.length} file${result.restored.length === 1 ? '' : 's'}`];
+		if (result.deleted.length) {
+			parts.push(`deleted ${result.deleted.length} the agent created`);
+		}
+		let note = `${parts.join(', ')} to how they were before that message.`;
+		if (result.failed.length) {
+			note += ` Could not restore: ${result.failed.map(label).join(', ')}.`;
+		}
+		if (result.unavailable.length) {
+			note += ` Not restored (too large or unreadable): ${result.unavailable.map(label).join(', ')}.`;
+		}
+		this._postToWebviews({ type: 'addMessage', role: 'assistant', content: note, isLoading: false });
 	}
 
 	/**
@@ -3670,6 +3738,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 		} finally {
 			this._workspaceTaskInFlight.delete(taskId);
+			// A plan's code step records into the checkpoint of the message that ran the plan.
+			this._postCheckpoints();
 		}
 	}
 

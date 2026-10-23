@@ -34,6 +34,7 @@ export type WebviewInboundMessage =
 	| { type: 'showEngineOutput' }
 	| { type: 'executeRequest'; request: string; model?: string }
 	| { type: 'runAgent'; request: string; model?: string }
+	| { type: 'restoreCheckpoint'; id: string }
 	| { type: 'stopGeneration' }
 	| { type: 'confirmSaveTemplate'; planId: string; name: string; description: string; category: string; parameters: Array<{ name: string; source_value: string; type?: string; required?: boolean; description?: string }> }
 	| { type: 'cancelSaveTemplate' }
@@ -98,7 +99,11 @@ export type WebviewOutboundMessage =
 		type: 'atCompleteResults';
 		items: Array<{ icon: string; label: string; path: string; kind: 'file' | 'folder' }>;
 	}
-	| { type: 'costUpdate'; cost_usd: number; tokens_in: number; tokens_out: number }
+	| { type: 'costUpdate'; cost_usd: number; tokens_in: number; tokens_out: number; tokens_cached?: number }
+	/** The latest user message's checkpoint: agent edits after it can be restored. */
+	| { type: 'checkpointStarted'; id: string }
+	/** Checkpoints with something to undo; the chat shows Restore on those messages. */
+	| { type: 'checkpoints'; restorable: string[] }
 	| { type: 'composerSettings'; submitWithCtrlEnter: boolean }
 	| {
 		type: 'modelPickerState';
