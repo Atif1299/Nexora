@@ -8,7 +8,7 @@ import { ChatPanelProvider } from './chatPanel';
 import { SessionsViewProvider } from './sessionsView';
 import { PlatformBrowserProvider } from './platformPanel';
 import { TaskTreeProvider } from './taskTreeProvider';
-import { WorkflowPanelProvider } from './workflowPanel';
+import { WorkflowPanelProvider, workflowPlanFromSnapshot } from './workflowPanel';
 import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { SettingsPanelProvider } from './settingsPanel';
 import { TemplatesPanelProvider } from './templatesPanel';
@@ -33,6 +33,9 @@ import { enginePlaceholderHtml, engineStateLabel } from './services/editorPage';
 import { nexoraDiffProvider, NEXORA_DIFF_SCHEME } from './services/tools/diffProvider';
 import { openNexoraBrowser } from './services/browser';
 import { closeAgentBrowser } from './services/tools/browserSession';
+
+/** Plan statuses after which the engine runs nothing more (backend PlanStatus). */
+const TERMINAL_PLAN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'partially_completed', 'timeout']);
 
 async function setOperationInProgress(value: boolean): Promise<void> {
 	await vscode.commands.executeCommand('setContext', 'nexora.operationInProgress', value);
@@ -427,6 +430,26 @@ export async function activate(context: vscode.ExtensionContext) {
 				void setOperationInProgress(true);
 			}
 			notifications.handleOrchestrationEvent(message);
+		}
+
+		// After a reconnect the client replays each subscribed plan as one snapshot.
+		// Task events missed while disconnected never arrive, so the Workflow view and
+		// the task tree take their state from it too, not only the chat (G-18).
+		if (message.type === 'plan_snapshot') {
+			const snapshot = workflowPlanFromSnapshot(message.plan_id || '', message.result);
+			if (snapshot) {
+				const shown = workflowProvider.getCurrentPlan();
+				if (!shown || shown.plan_id === snapshot.plan_id) {
+					workflowProvider.updatePlan(snapshot);
+				}
+				for (const task of snapshot.tasks) {
+					taskTreeProvider.updateTaskStatus(task.task_id, task.status);
+				}
+				// plan_completed may have been missed too; don't leave Escape bound to cancel.
+				if (TERMINAL_PLAN_STATUSES.has(snapshot.status)) {
+					void setOperationInProgress(false);
+				}
+			}
 		}
 
 		if (message.type === 'plan_completed') {
