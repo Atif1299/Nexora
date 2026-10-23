@@ -1991,7 +1991,7 @@
 			<div class="nx-planTitle">Execution Plan</div>
 			<div class="nx-planMeta">
 				<span class="nx-planId">${plan.plan_id}</span>
-				<span class="nx-planCost">Est. $${(plan.estimated_cost || 0).toFixed(4)}</span>
+				<span class="nx-planCost" title="${plan.estimated_cost_range ? 'Code steps run the agent for several turns, so their cost is a range' : ''}">Est. $${(plan.estimated_cost || 0).toFixed(4)}${costRangeText(plan.estimated_cost_range)}</span>
 			</div>
 		`;
 		card.appendChild(header);
@@ -2003,7 +2003,7 @@
 				plan.cost_breakdown.map(item => `
 					<div class="nx-costRow">
 						<span>${escapeHtml(item.task || item.platform || 'task')} · ${escapeHtml(item.platform || '')}</span>
-						<span>$${(item.estimated_cost || 0).toFixed(4)}</span>
+						<span>$${(item.estimated_cost || 0).toFixed(4)}${costRangeText(item.estimated_cost_range)}</span>
 					</div>
 				`).join('');
 			card.appendChild(breakdown);
@@ -2049,6 +2049,14 @@
 			lastLoadingMessage.remove();
 			lastLoadingMessage = null;
 		}
+	}
+
+	/** " ($low to $high)" for a code step's agent loop; empty for single-call steps. */
+	function costRangeText(range) {
+		if (!Array.isArray(range) || range.length !== 2 || range[0] === range[1]) {
+			return '';
+		}
+		return ` ($${Number(range[0]).toFixed(4)}\u2013$${Number(range[1]).toFixed(4)})`;
 	}
 
 	function updateTaskStatus(taskId, status, error, cost) {
