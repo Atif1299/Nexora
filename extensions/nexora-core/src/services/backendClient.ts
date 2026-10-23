@@ -11,7 +11,7 @@ export interface BackendConfig {
 
 import { createTransport, type HeaderProvider, type SSEEvent } from './backend/transport';
 import { createPlatformsApi } from './backend/platforms';
-import { createMemoryApi, type MemorySuggestion, type ProjectFact, type ProjectFactsResponse, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
+import { createMemoryApi, type MemorySuggestion, type ProjectFact, type ProjectFactsResponse, type ProjectRulesResponse, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
 import { createWorkflowsApi, type WorkflowTemplate, type TemplateListResponse, type SuggestFromPlanResponse, type SaveFromPlanRequest, type ImportPreview } from './backend/workflows';
 import { createCognitiveApi } from './backend/cognitive';
 import { createAuthApi, type AuthStatus, type SaasConnector } from './backend/auth';
@@ -774,6 +774,11 @@ export class BackendClient {
 	/** Standing project facts (memory Layer C) injected into every request. */
 	async getProjectFacts(workspaceId: string): Promise<ProjectFactsResponse> {
 		return createMemoryApi(this.transport).getFacts(workspaceId);
+	}
+
+	/** Project rule files (AGENTS.md, CLAUDE.md, .nexora/rules/*.md) the agent receives. */
+	async getProjectRules(workspacePath: string): Promise<ProjectRulesResponse> {
+		return createMemoryApi(this.transport).getRules(workspacePath);
 	}
 
 	async saveProjectFact(workspaceId: string, value: string, key = ''): Promise<ProjectFact | null> {

@@ -508,6 +508,11 @@
           "default": true,
           "description": "Attach the active editor and other open text files as context on the first send (up to 5)."
         },
+        "nexora.agent.projectRules": {
+          "type": "boolean",
+          "default": true,
+          "description": "Send the project's rule files (AGENTS.md, CLAUDE.md and .nexora/rules/*.md at the workspace root, up to 12,000 characters) with every Ask and Agent turn."
+        },
         "nexora.agent.inlineDiffs": {
           "type": "boolean",
           "default": true,

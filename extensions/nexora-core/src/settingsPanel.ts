@@ -15,7 +15,7 @@ import { oauthProviderLabel, onDidCompleteOAuth, startOAuthConnect } from './ser
 import type { SaasConnector } from './services/backend/auth';
 import type { McpServerRow } from './services/backend/mcp';
 import type { ModelCatalog } from './services/backend/models';
-import type { ProjectFactsResponse } from './services/backend/memory';
+import type { ProjectFactsResponse, ProjectRulesResponse } from './services/backend/memory';
 import { currentWorkspaceId } from './services/workspaceId';
 import {
 	getCachedCapabilities,
@@ -374,13 +374,23 @@ export class SettingsPanelProvider {
 	 * transcript uses. With no folder open there is no project to remember
 	 * about, so the section says that rather than showing an empty list.
 	 */
-	private async _loadFacts(): Promise<ProjectFactsResponse & { has_workspace: boolean }> {
+	private async _loadFacts(): Promise<ProjectFactsResponse & {
+		has_workspace: boolean;
+		rules?: ProjectRulesResponse;
+		rules_enabled?: boolean;
+	}> {
 		const workspaceId = currentWorkspaceId();
-		if (!workspaceId) {
+		const workspacePath = this._workspacePath();
+		if (!workspaceId || !workspacePath) {
 			return { workspace_id: '', facts: [], total: 0, injected: '', has_workspace: false };
 		}
-		const facts = await getBackendClient().getProjectFacts(workspaceId);
-		return { ...facts, has_workspace: true };
+		const client = getBackendClient();
+		const [facts, rules] = await Promise.all([
+			client.getProjectFacts(workspaceId),
+			client.getProjectRules(workspacePath)
+		]);
+		const rulesEnabled = vscode.workspace.getConfiguration('nexora.agent').get<boolean>('projectRules', true);
+		return { ...facts, has_workspace: true, rules, rules_enabled: rulesEnabled };
 	}
 
 	private async _pushFacts(): Promise<void> {

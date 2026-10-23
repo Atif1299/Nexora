@@ -101,7 +101,8 @@ export function createAgentApi(transport: Transport) {
 				mode,
 				max_tokens: 2048,
 				session_id: sessionId,
-				shell: currentShell()
+				shell: currentShell(),
+				project_rules: vscode.workspace.getConfiguration('nexora.agent').get<boolean>('projectRules', true)
 			}, signal, AGENT_TURN_TIMEOUT_MS);
 		},
 

@@ -23,6 +23,15 @@ export interface ProjectFactsResponse {
 	injected: string;
 }
 
+/** GET /api/memory/rules: the rule files the agent adds to its prompt. */
+export interface ProjectRulesResponse {
+	files: Array<{ path: string; chars: number; truncated: boolean }>;
+	/** Found but over the budget, so not sent. */
+	omitted: string[];
+	total_chars: number;
+	max_chars: number;
+}
+
 export interface MemorySuggestion {
 	id: string;
 	title: string;
@@ -158,6 +167,22 @@ export function createMemoryApi(transport: Transport) {
 				};
 			} catch {
 				return { workspace_id: workspaceId, facts: [], total: 0, injected: '' };
+			}
+		},
+
+		getRules: async (workspacePath: string): Promise<ProjectRulesResponse> => {
+			try {
+				const response = await transport.get(
+					`/api/memory/rules?workspace_path=${encodeURIComponent(workspacePath)}`
+				);
+				return {
+					files: Array.isArray(response?.files) ? response.files : [],
+					omitted: Array.isArray(response?.omitted) ? response.omitted : [],
+					total_chars: Number(response?.total_chars) || 0,
+					max_chars: Number(response?.max_chars) || 0
+				};
+			} catch {
+				return { files: [], omitted: [], total_chars: 0, max_chars: 0 };
 			}
 		},
 
