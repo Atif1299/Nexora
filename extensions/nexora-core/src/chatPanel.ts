@@ -871,6 +871,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		let startedTokens = false;
 		let usagePromptTokens = 0;
 		let usageCompletionTokens = 0;
+		let usageCachedTokens = 0;
+		let usageCostUsd = 0;
 
 		for await (const ev of client.agentTurnStream(
 			messages,
@@ -903,7 +905,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				if (ev.usage) {
 					usagePromptTokens = ev.usage.prompt_tokens || 0;
 					usageCompletionTokens = ev.usage.completion_tokens || 0;
+					usageCachedTokens = ev.usage.cached_tokens || 0;
 				}
+				usageCostUsd = typeof ev.cost_usd === 'number' ? ev.cost_usd : 0;
 			} else if (ev.type === 'model_unavailable') {
 				const failed = (ev.model || model || modelUsed || 'unknown').trim();
 				throw new ModelUnavailableSignal(failed);
@@ -916,14 +920,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 		}
 
-		// Post per-turn cost estimate when usage data is available
+		// Per-turn cost. The engine prices it from its registry, cache reads included.
 		if (this._hasChatSurface() && (usagePromptTokens > 0 || usageCompletionTokens > 0)) {
-			const costUsd = this._computeCostEstimate(modelUsed, usagePromptTokens, usageCompletionTokens);
 			this._postToWebviews({
 				type: 'costUpdate',
-				cost_usd: costUsd,
+				cost_usd: usageCostUsd,
 				tokens_in: usagePromptTokens,
-				tokens_out: usageCompletionTokens
+				tokens_out: usageCompletionTokens,
+				tokens_cached: usageCachedTokens
 			});
 		}
 
@@ -2120,20 +2124,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 		}
 		return maxMsg;
-	}
-
-	private _computeCostEstimate(model: string, promptTokens: number, completionTokens: number): number {
-		const m = (model || '').toLowerCase();
-		let inPer1k = 0.001;
-		let outPer1k = 0.003;
-		if (m.includes('gpt-4o')) {
-			inPer1k = 0.00015;
-			outPer1k = 0.0006;
-		} else if (m.includes('claude-3-5-sonnet') || m.includes('claude-3.5-sonnet') || m.includes('claude-3-haiku')) {
-			inPer1k = 0.003;
-			outPer1k = 0.015;
-		}
-		return (promptTokens / 1000) * inPer1k + (completionTokens / 1000) * outPer1k;
 	}
 
 	private _formatToolLabel(toolName: string, args: Record<string, any>): string {

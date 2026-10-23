@@ -64,6 +64,7 @@
 	let totalCostUsd = 0;
 	let totalTokensIn = 0;
 	let totalTokensOut = 0;
+	let totalTokensCached = 0;
 	let currentPlan = null;
 	let planCardElement = null;
 	const shownEscalationKeys = {};
@@ -1342,6 +1343,7 @@
 		totalCostUsd = 0;
 		totalTokensIn = 0;
 		totalTokensOut = 0;
+		totalTokensCached = 0;
 	}
 
 	function activityStepCount(items) {
@@ -1680,22 +1682,26 @@
 		return span;
 	}
 
-	function updateCostTicker(costUsd, tokensIn, tokensOut) {
+	function formatTokens(count) {
+		return count >= 1000 ? (count / 1000).toFixed(1) + 'K' : String(count);
+	}
+
+	function updateCostTicker(costUsd, tokensIn, tokensOut, tokensCached) {
 		if (!messages) {
 			return;
 		}
-		totalCostUsd += costUsd;
-		totalTokensIn += tokensIn;
-		totalTokensOut += tokensOut;
+		totalCostUsd += costUsd || 0;
+		totalTokensIn += tokensIn || 0;
+		totalTokensOut += tokensOut || 0;
+		totalTokensCached += tokensCached || 0;
 		if (!costTickerEl) {
 			costTickerEl = document.createElement('div');
 			costTickerEl.className = 'nx-costTicker';
 		}
-		const totalTokens = totalTokensIn + totalTokensOut;
-		const kTokens = totalTokens >= 1000
-			? (totalTokens / 1000).toFixed(1) + 'K'
-			: String(totalTokens);
-		costTickerEl.textContent = '$' + totalCostUsd.toFixed(4) + ' -- ' + kTokens + ' tokens';
+		// Cached tokens are part of the input count, billed at the cache rate.
+		const cached = totalTokensCached > 0 ? ' (' + formatTokens(totalTokensCached) + ' cached)' : '';
+		costTickerEl.textContent = '$' + totalCostUsd.toFixed(4) + ' -- '
+			+ formatTokens(totalTokensIn + totalTokensOut) + ' tokens' + cached;
 		if (chatActivityCard && chatActivityCard.parentNode) {
 			const next = chatActivityCard.nextSibling;
 			if (next !== costTickerEl) {
@@ -2786,7 +2792,7 @@
 				break;
 
 			case 'costUpdate':
-				updateCostTicker(data.cost_usd, data.tokens_in, data.tokens_out);
+				updateCostTicker(data.cost_usd, data.tokens_in, data.tokens_out, data.tokens_cached);
 				break;
 
 			case 'memoryNote':
