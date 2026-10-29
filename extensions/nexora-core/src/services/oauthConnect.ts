@@ -161,6 +161,13 @@ function watchForCompletion(provider: OAuthProvider): void {
  * Register the deep-link handler the callback page uses to bring Nexora back
  * to the front: <uriScheme>://<publisher>.nexora-core/oauth-complete?provider=github
  */
+/** Other deep links this extension answers (VS Code allows one handler per extension). */
+const uriRoutes = new Map<string, (uri: vscode.Uri) => void>();
+
+export function registerUriRoute(path: string, handler: (uri: vscode.Uri) => void): void {
+	uriRoutes.set(path, handler);
+}
+
 export function registerOAuthUriHandler(context: vscode.ExtensionContext): void {
 	extensionId = context.extension.id;
 	context.subscriptions.push(
@@ -168,6 +175,11 @@ export function registerOAuthUriHandler(context: vscode.ExtensionContext): void 
 		{ dispose: () => { for (const provider of [...watchers.keys()]) { stopWatching(provider); } } },
 		vscode.window.registerUriHandler({
 			handleUri(uri: vscode.Uri): void {
+				const route = uriRoutes.get(uri.path);
+				if (route) {
+					route(uri);
+					return;
+				}
 				if (uri.path !== '/oauth-complete') {
 					return;
 				}
