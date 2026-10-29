@@ -1098,8 +1098,11 @@
 		root.innerHTML = `
 			<div class="nx-card">
 				<div class="nx-row">
-					<label class="nx-label" for="pref-auto-index">Auto-index workspace</label>
-					${switchControl('pref-auto-index', !!p.autoIndexWorkspace, 'Auto-index workspace')}
+					<div>
+						<label class="nx-label" for="pref-auto-index">Auto-index workspace</label>
+						<p class="nx-hint">Index the open folder for code search when it is first opened, and again a minute after files change (at most every 10 minutes). The status bar shows the state; click it to re-index.</p>
+					</div>
+					${switchControl('pref-auto-index', p.autoIndexWorkspace !== false, 'Auto-index workspace')}
 				</div>
 			</div>
 			<div class="nx-card">
