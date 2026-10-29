@@ -282,6 +282,22 @@
         "title": "Refresh Timeline",
         "category": "Nexora",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "nexora.reindexWorkspace",
+        "title": "Re-index Workspace",
+        "category": "Nexora",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "nexora.cloudSignIn",
+        "title": "Sign In to Nexora Cloud",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.cloudSignOut",
+        "title": "Sign Out of Nexora Cloud",
+        "category": "Nexora"
       }
     ],
     "menus": {
@@ -552,6 +568,11 @@
           "type": "string",
           "default": "",
           "description": "Optional path to chrome.exe. Used when Chrome is not found in the default install locations."
+        },
+        "nexora.cloud.url": {
+          "type": "string",
+          "default": "https://nexora-gateway-4idrhaffca-ew.a.run.app",
+          "description": "Nexora Cloud gateway: sign-in, credit and models for users without their own API keys."
         }
       }
     }

@@ -35,6 +35,8 @@ export type WebviewInboundMessage =
 	| { type: 'executeRequest'; request: string; model?: string }
 	| { type: 'runAgent'; request: string; model?: string }
 	| { type: 'restoreCheckpoint'; id: string }
+	/** Edit or retry: drop the ordinal-th user message and everything after it, then send `text`. */
+	| { type: 'rewindTo'; ordinal: number; text: string }
 	| { type: 'retryPlanTask'; planId: string; taskId: string }
 	| { type: 'stopGeneration' }
 	| { type: 'confirmSaveTemplate'; planId: string; name: string; description: string; category: string; parameters: Array<{ name: string; source_value: string; type?: string; required?: boolean; description?: string }> }

@@ -85,6 +85,8 @@ type ChatSessionMessage = {
 	mode?: ChatMode;
 	timestamp?: number;
 	activity?: ChatActivityItem[];
+	/** Agent messages: the checkpoint holding the files as they were before it. */
+	checkpointId?: string;
 };
 
 type ChatSessionRecord = {
@@ -670,6 +672,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._handleExecuteRequest(data.request, data.model);
 		} else if (data.type === 'runAgent') {
 			await this._handleRunAgent(data.request, data.model);
+		} else if (data.type === 'rewindTo') {
+			await this._rewindTo(data.ordinal, data.text);
 		} else if (data.type === 'restoreCheckpoint') {
 			await this._restoreCheckpoint(data.id);
 		} else if (data.type === 'stopGeneration') {
@@ -1539,7 +1543,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 		try {
 			const result = await getBackendClient().getMemorySuggestions(workspaceId, workspacePath, 'default');
-			const first = (result.suggestions || [])[0] || null;
+			// Indexing runs on its own (services/workspaceIndex.ts), so it is never offered here.
+			const first = (result.suggestions || []).find((s) => s.id !== 'index-workspace') || null;
 			this._postToWebviews({ type: 'showSuggestion', suggestion: first });
 		} catch {
 			this._postToWebviews({ type: 'showSuggestion', suggestion: null });
@@ -1602,6 +1607,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleAcceptSuggestion(suggestionId: string): Promise<void> {
+		if (suggestionId === 'index-workspace') {
+			await vscode.commands.executeCommand('nexora.reindexWorkspace');
+			return;
+		}
 		const notifications = getNotificationService();
 		const { workspaceId, workspacePath } = await this._workspaceContext();
 		if (!workspaceId) {
@@ -3221,7 +3230,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		await this._handleAcceptSuggestion('index-workspace');
+		await vscode.commands.executeCommand('nexora.reindexWorkspace');
 	}
 
 	private async _rememberIndexedWorkspace(result: { tasks?: Array<{ operation?: string; status?: string; result?: { workspace_id?: string } }> }): Promise<void> {
@@ -3459,7 +3468,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			const session = await this._recordUserMessage(request, 'agent');
 			const sessionId = session?.id;
 			// Files the agent edits from here on can be restored to how they are now.
-			this._postToWebviews({ type: 'checkpointStarted', id: agentCheckpoints.begin(request) });
+			const checkpointId = agentCheckpoints.begin(request);
+			const sent = session?.messages[session.messages.length - 1];
+			if (sent?.role === 'user') {
+				sent.checkpointId = checkpointId;
+			}
+			this._postToWebviews({ type: 'checkpointStarted', id: checkpointId });
 
 			const isConnected = await this._backendReady();
 			if (!isConnected) {
@@ -3565,6 +3579,58 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			// A stopped or failed run may still have edited files.
 			this._postCheckpoints();
 		}
+	}
+
+	/**
+	 * Edit or retry a message: the chat goes back to just before it (here and in
+	 * the engine's transcript, so the model forgets the dropped answers), the
+	 * agent's file edits since then are restored if the user wants, and `text`
+	 * is sent again in the message's own mode.
+	 */
+	private async _rewindTo(ordinal: number, text: string): Promise<void> {
+		const session = this._getActiveSession();
+		const message = text.trim();
+		if (!session || !message || this._replyAbort) {
+			return;
+		}
+		const index = session.messages.map((m, i) => (m.role === 'user' ? i : -1)).filter((i) => i >= 0)[ordinal];
+		const original = index === undefined ? undefined : session.messages[index];
+		if (index === undefined || !original) {
+			return;
+		}
+
+		const preview = original.checkpointId ? agentCheckpoints.preview(original.checkpointId) : undefined;
+		if (original.checkpointId && preview && preview.files.length > 0) {
+			const count = preview.files.length;
+			const choice = await vscode.window.showWarningMessage(
+				`The agent changed ${count} file${count === 1 ? '' : 's'} after this message.`,
+				{ modal: true, detail: 'Restore puts them back as they were before the message. Changes made by terminal commands are not undone.' },
+				'Restore files and resend',
+				'Keep files and resend'
+			);
+			if (!choice) {
+				return;
+			}
+			if (choice === 'Restore files and resend') {
+				await agentCheckpoints.restore(original.checkpointId);
+			}
+		}
+
+		const occurrence = session.messages.slice(0, index).filter((m) => m.role === 'user' && m.content === original.content).length;
+		session.messages = session.messages.slice(0, index);
+		await this._persistSessions();
+		this._pushActiveSessionToWebview();
+		this._postCheckpoints();
+
+		const ctx = await this._workspaceContext();
+		if (ctx.workspaceId) {
+			try {
+				await getBackendClient().rewindTranscript(ctx.workspaceId, session.id, original.content, occurrence);
+			} catch {
+				// The local chat is already rewound; the engine copy is best effort, like appending.
+			}
+		}
+		this._postToWebviews({ type: 'resend', text: message, mode: original.mode });
 	}
 
 	/** Tell the chat which messages have agent edits to restore. */

@@ -143,8 +143,8 @@ export class BackendClient {
 	 * @param workspacePath Absolute path to the workspace directory
 	 * @returns Indexing result with workspace_id and statistics
 	 */
-	async indexWorkspace(workspacePath: string): Promise<any> {
-		return createMemoryApi(this.transport).indexWorkspace(workspacePath);
+	async indexWorkspace(workspacePath: string, timeoutMs?: number): Promise<any> {
+		return createMemoryApi(this.transport).indexWorkspace(workspacePath, timeoutMs);
 	}
 
 	/**
@@ -299,6 +299,16 @@ export class BackendClient {
 	/**
 	 * Append one chat/agent turn to the backend jsonl transcript (Layer A).
 	 */
+	/** Drop a user turn and everything after it from the engine's transcript (edit or retry). */
+	async rewindTranscript(workspaceId: string, sessionId: string, userText: string, occurrence: number): Promise<void> {
+		await this.transport.post('/api/transcript/rewind', {
+			workspace_id: workspaceId,
+			session_id: sessionId,
+			user_text: userText,
+			occurrence
+		});
+	}
+
 	async appendTranscript(
 		workspaceId: string,
 		sessionId: string,

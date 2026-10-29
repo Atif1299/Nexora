@@ -855,6 +855,11 @@ body
 	padding: 2px 0;
 }
 
+.nexora-activity-fold summary:hover
+{
+	color: var(--nx-fg);
+}
+
 .nexora-activity-fold[open]
 {
 	padding-bottom: 4px;
@@ -910,6 +915,18 @@ body
 .nx-msgLoading
 {
 	opacity: 0.75;
+}
+
+/* An empty placeholder takes no space; the activity card shows the progress. */
+.nx-msgLoading:not(.nx-msgStreaming) .nx-msgBody:empty
+{
+	display: none;
+}
+
+/* Once real text is arriving it is the answer, not a placeholder: no dimming. */
+.nx-msgLoading.nx-msgStreaming
+{
+	opacity: 1;
 }
 
 /* Code blocks */
@@ -2034,14 +2051,10 @@ body
 	background: color-mix(in srgb, var(--nx-surface) 85%, white);
 }
 
-/* Chat activity (honest backend / memory steps) */
+/* Chat activity: one quiet line per step, like an agent timeline */
 .nx-activityCard
 {
-	margin: var(--nx-space-2) 0 var(--nx-space-2) 0;
-	border: 1px solid var(--nx-border);
-	border-radius: var(--nx-radius-1);
-	background: var(--nx-surface-2);
-	overflow: hidden;
+	margin: var(--nx-space-2) 0;
 	max-width: 100%;
 }
 
@@ -2049,18 +2062,17 @@ body
 {
 	display: flex;
 	align-items: center;
-	gap: var(--nx-space-2);
+	gap: 6px;
 	width: 100%;
-	padding: var(--nx-space-2) var(--nx-space-3);
+	padding: 2px 4px;
 	margin: 0;
 	border: none;
+	border-radius: var(--nx-radius);
 	background: transparent;
 	color: var(--nx-muted);
-	font-family: var(--nx-font-mono);
-	font-size: 10px;
-	font-weight: 600;
-	letter-spacing: 0.06em;
-	font-variant: small-caps;
+	font-family: var(--nx-font);
+	font-size: 12px;
+	font-weight: 500;
 	text-align: left;
 	cursor: pointer;
 }
@@ -2068,15 +2080,44 @@ body
 .nx-activityCardHeader:hover
 {
 	color: var(--nx-fg);
-	background: color-mix(in srgb, var(--nx-fg) 6%, transparent);
 }
 
+/* The chevron is drawn here; the text the script puts inside is hidden. */
 .nx-activityChevron
 {
+	position: relative;
 	display: inline-block;
-	width: 1em;
+	width: 10px;
+	height: 10px;
 	flex-shrink: 0;
-	opacity: 0.85;
+	font-size: 0;
+	color: transparent;
+}
+
+.nx-activityChevron::before
+{
+	content: '';
+	position: absolute;
+	left: 2px;
+	top: 1px;
+	width: 4px;
+	height: 4px;
+	border-right: 1.5px solid var(--nx-muted);
+	border-bottom: 1.5px solid var(--nx-muted);
+	transform: rotate(45deg);
+	transition: transform 0.12s ease;
+}
+
+.nx-activityCardHeader:hover .nx-activityChevron::before
+{
+	border-color: var(--nx-fg);
+}
+
+.nx-activityCard.nx-activityCardCollapsed .nx-activityChevron::before
+{
+	left: 1px;
+	top: 3px;
+	transform: rotate(-45deg);
 }
 
 .nx-activityCardTitle
@@ -2084,9 +2125,12 @@ body
 	flex: 1;
 }
 
+/* A thin rule down the left ties the steps together as one thread. */
 .nx-activityCardBody
 {
-	padding: 0 var(--nx-space-3) var(--nx-space-2) var(--nx-space-3);
+	margin: 2px 0 0 8px;
+	padding: 0 0 0 10px;
+	border-left: 1px solid var(--nx-border);
 }
 
 .nx-activityCard.nx-activityCardCollapsed .nx-activityCardBody
@@ -2097,90 +2141,80 @@ body
 .nx-activityRow
 {
 	display: flex;
-	align-items: flex-start;
-	gap: var(--nx-space-2);
-	font-family: var(--nx-font-mono);
-	font-size: 11px;
-	line-height: 1.35;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	font-family: var(--nx-font);
+	font-size: 12px;
+	line-height: 1.5;
 	color: var(--nx-muted);
 	padding: 2px 0;
 }
 
-.nx-activityRowDone
+/* The step in progress stands out; finished ones recede. */
+.nx-activityRowRun
 {
 	color: var(--nx-fg);
 }
 
 .nx-activityMark
 {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	flex-shrink: 0;
-	width: 1em;
-	opacity: 0.9;
+	width: 14px;
+	height: 14px;
 }
 
 .nx-activityRowDone .nx-activityMark
 {
 	color: var(--vscode-charts-green, #3fb950);
+	opacity: 0.9;
 }
 
-.nx-activityLabel
+.nx-activityVerb
 {
-	word-break: break-word;
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+
+.nx-activityTarget
+{
+	flex: 0 1 auto;
+	min-width: 0;
+	padding: 0 6px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--nx-fg) 7%, transparent);
+	color: var(--nx-fg);
+	font-family: var(--nx-font-mono);
+	font-size: 11px;
+	opacity: 0.85;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* Spinner for in-progress activity rows */
 .nx-activitySpinner
 {
 	display: inline-block;
-	width: 8px;
-	height: 8px;
+	width: 10px;
+	height: 10px;
 	border: 1.5px solid color-mix(in srgb, var(--nx-muted) 35%, transparent);
 	border-top-color: var(--nx-primary);
 	border-radius: 50%;
 	animation: spin 0.8s linear infinite;
-	vertical-align: middle;
 }
 
 /* Turn counter in activity card header */
 .nx-activityTurnCounter
 {
-	font-size: 9px;
+	font-size: 10px;
 	color: var(--nx-muted);
 	margin-left: auto;
 	font-variant-numeric: tabular-nums;
 	opacity: 0.75;
-}
-
-/* File icon badge in activity rows */
-.nx-activityFileIcon
-{
-	flex-shrink: 0;
-	font-size: 9px;
-	font-weight: 700;
-	letter-spacing: 0.04em;
-	padding: 0 3px;
-	border-radius: 3px;
-	line-height: 1.5;
-	color: var(--nx-muted);
-	background: color-mix(in srgb, var(--nx-muted) 12%, transparent);
-}
-
-.nx-activityFileIconWrite
-{
-	color: var(--vscode-charts-orange, #d29922);
-	background: color-mix(in srgb, var(--vscode-charts-orange, #d29922) 14%, transparent);
-}
-
-.nx-activityFileIconRead
-{
-	color: var(--vscode-charts-blue, #58a6ff);
-	background: color-mix(in srgb, var(--vscode-charts-blue, #58a6ff) 14%, transparent);
-}
-
-.nx-activityFileIconSearch
-{
-	color: var(--vscode-charts-purple, #a371f7);
-	background: color-mix(in srgb, var(--vscode-charts-purple, #a371f7) 14%, transparent);
 }
 
 .nx-activityRowFailed .nx-activityMark
@@ -2198,7 +2232,12 @@ body
 .nx-activityTermRow
 {
 	align-items: flex-start;
-	padding: 4px 0 6px 0;
+	padding: 3px 0 4px 0;
+}
+
+.nx-activityTermRow .nx-activityMark
+{
+	margin-top: 2px;
 }
 
 .nx-activityTermGlyph
@@ -2207,9 +2246,8 @@ body
 	font-family: var(--nx-font-mono);
 	font-size: 11px;
 	font-weight: 700;
-	color: var(--vscode-charts-green, #3fb950);
-	opacity: 0.9;
-	line-height: 1.35;
+	color: var(--nx-muted);
+	line-height: 1.5;
 }
 
 .nx-activityTermBody
@@ -2230,6 +2268,8 @@ body
 {
 	flex: 1;
 	min-width: 0;
+	font-family: var(--nx-font-mono);
+	font-size: 11px;
 	word-break: break-word;
 	color: var(--nx-fg);
 }
@@ -2237,9 +2277,22 @@ body
 .nx-activityTermMeta
 {
 	flex-shrink: 0;
-	font-size: 10px;
+	font-size: 11px;
 	font-variant-numeric: tabular-nums;
 	opacity: 0.75;
+}
+
+.nx-activityRowFailed .nx-activityTermMeta
+{
+	color: var(--vscode-charts-red, #f85149);
+	opacity: 1;
+}
+
+.nx-activityRowConfirm .nx-activityTermMeta
+{
+	color: var(--vscode-charts-yellow, #d29922);
+	font-weight: 600;
+	opacity: 1;
 }
 
 .nx-activityTermLog
@@ -2277,8 +2330,8 @@ body
 	border: none;
 	background: transparent;
 	color: var(--nx-muted);
-	font-family: var(--nx-font-mono);
-	font-size: 10px;
+	font-family: var(--nx-font);
+	font-size: 11px;
 	cursor: pointer;
 }
 
@@ -2287,15 +2340,15 @@ body
 	color: var(--nx-fg);
 }
 
-/* Running cost ticker under activity card */
+/* Cost of a finished run, a quiet line under its answer */
 .nx-costTicker
 {
-	font-family: var(--nx-font-mono);
-	font-size: 10px;
+	font-family: var(--nx-font);
+	font-size: 11px;
 	color: var(--nx-muted);
-	padding: 2px var(--nx-space-3);
-	margin-top: -4px;
-	margin-bottom: var(--nx-space-2);
+	padding: 0 4px;
+	margin: 2px 0 var(--nx-space-3);
+	font-variant-numeric: tabular-nums;
 	opacity: 0.8;
 }
 
@@ -2702,6 +2755,121 @@ body
 }
 
 /* Restore files: under an Agent message whose later edits can be undone. */
+/* Copy, edit and retry: hidden until the message is hovered or focused, never during a reply. */
+.nx-msg.nx-user
+{
+	position: relative;
+}
+
+.nx-userActions
+{
+	position: absolute;
+	right: 6px;
+	bottom: -12px;
+	display: flex;
+	gap: 2px;
+	padding: 2px;
+	border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+	border-radius: 6px;
+	background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 120ms ease;
+}
+
+.nx-msg.nx-user:hover .nx-userActions,
+.nx-msg.nx-user:focus-within .nx-userActions
+{
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.nx-replying .nx-userActions,
+.nx-editing .nx-userActions
+{
+	display: none;
+}
+
+.nx-userAction
+{
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: none;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--vscode-descriptionForeground);
+	cursor: pointer;
+}
+
+.nx-userAction:hover,
+.nx-userAction:focus-visible
+{
+	background: var(--vscode-toolbar-hoverBackground);
+	color: var(--vscode-foreground);
+	outline: none;
+}
+
+.nx-msg.nx-user.nx-editing
+{
+	border-color: var(--vscode-focusBorder);
+}
+
+.nx-editInput
+{
+	display: block;
+	width: 100%;
+	box-sizing: border-box;
+	resize: none;
+	border: none;
+	outline: none;
+	padding: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	line-height: inherit;
+}
+
+.nx-editBar
+{
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-top: 8px;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.nx-editBar span
+{
+	flex: 1;
+}
+
+.nx-editCancel,
+.nx-editSend
+{
+	padding: 2px 10px;
+	border: none;
+	border-radius: 4px;
+	font: inherit;
+	cursor: pointer;
+}
+
+.nx-editCancel
+{
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+}
+
+.nx-editSend
+{
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+}
+
 .nx-restoreBtn
 {
 	display: block;

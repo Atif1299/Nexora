@@ -113,9 +113,9 @@ export interface TimelineDiff {
 
 export function createMemoryApi(transport: Transport) {
 	return {
-		indexWorkspace: async (workspacePath: string): Promise<any> => {
+		indexWorkspace: async (workspacePath: string, timeoutMs?: number): Promise<any> => {
 			try {
-				return await transport.post('/api/memory/index', { workspace_path: workspacePath });
+				return await transport.post('/api/memory/index', { workspace_path: workspacePath }, timeoutMs);
 			} catch (error) {
 				// preserve existing behavior: log + rethrow
 				console.error('Failed to index workspace:', error);

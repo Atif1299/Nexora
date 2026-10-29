@@ -11,11 +11,13 @@ import { TaskTreeProvider } from './taskTreeProvider';
 import { WorkflowPanelProvider, workflowPlanFromSnapshot } from './workflowPanel';
 import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { SettingsPanelProvider } from './settingsPanel';
+import { WorkspaceIndexService } from './services/workspaceIndex';
+import { CloudAccount } from './services/cloudAccount';
 import { TemplatesPanelProvider } from './templatesPanel';
 import { TimelinePanelProvider } from './timelinePanel';
 import { getBackendClient, notifyBackendClientConfigured, setApiKeyHeaderProvider } from './services/backendClient';
 import { getSettingsService } from './services/settingsService';
-import { registerOAuthUriHandler } from './services/oauthConnect';
+import { registerOAuthUriHandler, registerUriRoute } from './services/oauthConnect';
 import { registerMcpConnect } from './services/mcpConnect';
 import { registerInlineCompletion } from './services/inlineCompletion';
 import { getNotificationService } from './services/notificationService';
@@ -234,8 +236,21 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Inline completion: grey text ahead of the cursor in every editor
 	registerInlineCompletion(context);
 	// Wire IDE keys into every backend HTTP call (primary runtime credentials)
+	// Nexora Cloud: sign in instead of bringing keys; the engine bills models without an own key to it.
+	const cloud = new CloudAccount(context);
+	registerUriRoute('/cloud-auth', (uri) => void cloud.completeSignIn(uri));
+	context.subscriptions.push(
+		cloud,
+		vscode.commands.registerCommand('nexora.cloudSignIn', () => cloud.signIn()),
+		vscode.commands.registerCommand('nexora.cloudSignOut', () => cloud.signOut()),
+		vscode.commands.registerCommand('nexora.cloudMenu', () => cloud.showMenu())
+	);
 	setApiKeyHeaderProvider(async () => {
 		const headers: Record<string, string> = {};
+		const cloudToken = await cloud.token();
+		if (cloudToken) {
+			headers['X-Nexora-Cloud-Token'] = cloudToken;
+		}
 		const [openai, anthropic, gemini, openrouter] = await Promise.all([
 			settingsService.getApiKey('openai'),
 			settingsService.getApiKey('anthropic'),
@@ -349,6 +364,13 @@ export async function activate(context: vscode.ExtensionContext) {
 		)
 	);
 
+	const workspaceIndex = new WorkspaceIndexService(context);
+	context.subscriptions.push(
+		workspaceIndex,
+		workspaceIndex.onDidIndex(() => void timelineProvider.refresh()),
+		vscode.commands.registerCommand('nexora.reindexWorkspace', () => workspaceIndex.indexNow())
+	);
+
 	const engine = await startNexoraEngine(context);
 	getBackendClient({
 		baseUrl: engine.baseUrl,
@@ -371,11 +393,13 @@ export async function activate(context: vscode.ExtensionContext) {
 	};
 	if (engine.ready || getEngineState() === 'ready') {
 		await connectRealtime();
+		void workspaceIndex.start();
 	} else {
 		const sub = onDidChangeEngineState((state) => {
 			if (state === 'ready') {
 				sub.dispose();
 				void connectRealtime();
+				void workspaceIndex.start();
 			}
 		});
 		context.subscriptions.push(sub);
