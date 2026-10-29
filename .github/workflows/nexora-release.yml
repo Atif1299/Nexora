@@ -1,0 +1,87 @@
+name: Nexora release
+
+# Builds the Windows installer: the frozen engine (private engine repo) bundled
+# into the IDE, packaged with the repo's own gulp + Inno Setup tasks, and
+# published as a GitHub Release; nexora.visionscraft.tech/download offers the newest one.
+#
+# Run it by pushing a tag (git tag v1.0.0 && git push origin v1.0.0) or from
+# the Actions tab. Needs the repository secret ENGINE_DEPLOY_KEY: a read-only
+# deploy key of the engine repository (nexora-platform/infra/setup-github-ci.sh).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      engine_ref:
+        description: Engine branch or tag to bundle
+        default: ide-benchmarking
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: Nexora
+
+      # Beside the IDE, where the packaging tasks look for backend/dist/engine.
+      - uses: actions/checkout@v4
+        with:
+          repository: Atif1299/Nexora-IDE-Backend-Architecture
+          ref: ${{ github.ref_type == 'tag' && github.ref_name || inputs.engine_ref }}
+          ssh-key: ${{ secrets.ENGINE_DEPLOY_KEY }}
+          path: Nexora-IDE-Backend-Architecture
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: Nexora-IDE-Backend-Architecture/backend/requirements.txt
+
+      - name: Freeze the engine
+        working-directory: Nexora-IDE-Backend-Architecture/backend
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python -m pip install -q -r requirements.txt
+          .\packaging\build_engine.ps1
+          .venv\Scripts\python packaging\smoke_engine.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: Nexora/.nvmrc
+          cache: npm
+          cache-dependency-path: Nexora/package-lock.json
+
+      - name: Install IDE dependencies
+        working-directory: Nexora
+        run: npm ci
+
+      # Packaging ships the extension's out/ as it is; out/ is not in git.
+      - name: Compile the Nexora extension
+        working-directory: Nexora/extensions/nexora-core
+        run: |
+          npm ci
+          npm run compile
+
+      - name: Build the IDE and the installer
+        working-directory: Nexora
+        run: |
+          npm run gulp -- vscode-win32-x64-min
+          npm run gulp -- vscode-win32-x64-inno-updater
+          npm run gulp -- vscode-win32-x64-user-setup
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          # A manual run is a test build: kept as a draft. A tag is a release.
+          draft: ${{ github.ref_type != 'tag' }}
+          make_latest: ${{ github.ref_type == 'tag' }}
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          name: Nexora ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}
+          files: Nexora/.build/win32-x64/user-setup/*.exe
+          fail_on_unmatched_files: true
