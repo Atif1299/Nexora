@@ -22,8 +22,17 @@ permissions:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    # Pinned: windows-latest now ships Visual Studio 2026, which node-gyp cannot
+    # find, so native modules such as @parcel/watcher fail to build.
+    runs-on: windows-2022
     timeout-minutes: 240
+    env:
+      # Electron and built-in extension downloads go through the GitHub API; unauthenticated calls are rate limited.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        # Stop a step at its first failing command; plain pwsh carries on after a failed npm or gulp.
+        shell: pwsh -NoProfile -Command "$PSNativeCommandUseErrorActionPreference = $true; $ErrorActionPreference = 'Stop'; . '{0}'"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,6 +47,7 @@ jobs:
           path: Nexora-IDE-Backend-Architecture
 
       - uses: actions/setup-python@v5
+        id: python
         with:
           python-version: '3.12'
           cache: pip
@@ -59,6 +69,9 @@ jobs:
 
       - name: Install IDE dependencies
         working-directory: Nexora
+        # node-gyp otherwise picks the newest Python on the runner, not the one set up above.
+        env:
+          npm_config_python: ${{ steps.python.outputs.python-path }}
         run: npm ci
 
       # Packaging ships the extension's out/ as it is; out/ is not in git.
@@ -74,6 +87,8 @@ jobs:
           npm run gulp -- vscode-win32-x64-min
           npm run gulp -- vscode-win32-x64-inno-updater
           npm run gulp -- vscode-win32-x64-user-setup
+          # The packaging tasks only warn when the engine is missing; an installer without it is useless.
+          if (-not (Test-Path ..\VSCode-win32-x64\engine\nexora-engine.exe)) { throw 'The engine is not in the packaged app' }
 
       - name: Publish the release
         uses: softprops/action-gh-release@v2
