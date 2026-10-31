@@ -68,7 +68,9 @@ export class CloudAccount implements vscode.Disposable {
 		await this.refresh();
 	}
 
+	/** Revokes the token on the gateway too, so a copied token stops working; offline, it is only forgotten here. */
 	async signOut(): Promise<void> {
+		await this.call('/auth/logout', 'POST').catch(() => undefined);
 		await this.context.secrets.delete(TOKEN_KEY);
 		await this.refresh();
 	}
