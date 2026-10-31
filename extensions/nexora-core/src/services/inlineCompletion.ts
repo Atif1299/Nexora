@@ -40,6 +40,19 @@ function config(): vscode.WorkspaceConfiguration {
 	return vscode.workspace.getConfiguration(CONFIG_SECTION);
 }
 
+/**
+ * Wall time for one suggestion, for the measurement harness only.
+ * A cache hit is the remainder already held. A network call is the POST,
+ * including the debounce that preceded it. The line never contains code.
+ */
+function logInlineBench(source: 'cache_hit' | 'network', startedAt: number): void {
+	if (process.env.NEXORA_BENCH !== '1') {
+		return;
+	}
+	const duration_ms = Date.now() - startedAt;
+	console.log(`[Nexora bench] ${JSON.stringify({ source, duration_ms })}`);
+}
+
 function sleep(ms: number, token: vscode.CancellationToken): Promise<void> {
 	return new Promise((resolve) => {
 		const timer = setTimeout(resolve, ms);
@@ -86,6 +99,9 @@ class NexoraInlineCompletionProvider implements vscode.InlineCompletionItemProvi
 			return undefined;
 		}
 
+		const bench = process.env.NEXORA_BENCH === '1';
+		const benchStarted = bench ? Date.now() : 0;
+
 		const offset = document.offsetAt(position);
 		const text = document.getText();
 		const prefix = text.slice(0, offset);
@@ -93,6 +109,9 @@ class NexoraInlineCompletionProvider implements vscode.InlineCompletionItemProvi
 
 		const reused = this.reuseCached(document, prefix);
 		if (reused !== undefined) {
+			if (bench) {
+				logInlineBench('cache_hit', benchStarted);
+			}
 			return [new vscode.InlineCompletionItem(reused)];
 		}
 
@@ -111,7 +130,7 @@ class NexoraInlineCompletionProvider implements vscode.InlineCompletionItemProvi
 		this.inFlight = controller;
 		token.onCancellationRequested(() => controller.abort());
 
-		const result = await getBackendClient().inlineComplete(
+		const pending = getBackendClient().inlineComplete(
 			{
 				prefix: prefix.slice(-PREFIX_CHARS),
 				suffix: suffix.slice(0, SUFFIX_CHARS),
@@ -122,6 +141,9 @@ class NexoraInlineCompletionProvider implements vscode.InlineCompletionItemProvi
 			},
 			controller.signal
 		);
+		const result = bench
+			? await pending.finally(() => logInlineBench('network', benchStarted))
+			: await pending;
 
 		if (this.inFlight === controller) {
 			this.inFlight = undefined;

@@ -9,6 +9,7 @@ import * as vscode from 'vscode';
 import { getAgentFlag, shouldConfirmFileEdits } from '../agentRunMode';
 import type { ToolResult } from './executor';
 import { confirmOrPreviewDiff } from './diffProvider';
+import { agentCheckpoints } from '../checkpoints';
 
 const SKIP_PATTERNS = ['.env', '.pem', 'credentials', 'secret', '.key', 'node_modules', '.git'];
 
@@ -92,6 +93,8 @@ export async function writeFileTool(
 	}
 
 	try {
+		await agentCheckpoints.recordBeforeWrite(fullPath);
+
 		// Ensure parent directory exists
 		const dir = path.dirname(fullPath);
 		await fs.mkdir(dir, { recursive: true });

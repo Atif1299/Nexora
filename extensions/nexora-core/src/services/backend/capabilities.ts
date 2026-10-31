@@ -25,6 +25,7 @@ export interface CapabilitiesReport {
 		anthropic: CapabilityStatus;
 		gemini: CapabilityStatus;
 		openrouter: CapabilityStatus;
+		nexora_cloud: CapabilityStatus;
 	};
 	connectors: {
 		github: CapabilityStatus;
@@ -99,7 +100,8 @@ function normalizeCapabilities(raw: unknown): CapabilitiesReport {
 			openai: asStatus(llm.openai),
 			anthropic: asStatus(llm.anthropic),
 			gemini: asStatus(llm.gemini),
-			openrouter: asStatus(llm.openrouter)
+			openrouter: asStatus(llm.openrouter),
+			nexora_cloud: asStatus(llm.nexora_cloud)
 		},
 		connectors: {
 			github: asStatus(connectors.github),
@@ -147,7 +149,8 @@ export function allLlmNotConfigured(report: CapabilitiesReport | undefined): boo
 	return report.llm.openai === 'not_configured'
 		&& report.llm.anthropic === 'not_configured'
 		&& report.llm.gemini === 'not_configured'
-		&& report.llm.openrouter === 'not_configured';
+		&& report.llm.openrouter === 'not_configured'
+		&& report.llm.nexora_cloud !== 'ready';
 }
 
 export function capabilityReason(status: CapabilityStatus): string {

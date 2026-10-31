@@ -25,6 +25,7 @@ import * as vscode from 'vscode';
 
 import { previewDiffAndConfirm } from '../tools/diffProvider';
 import { formatAfterWrite } from '../tools/writeFile';
+import { agentCheckpoints } from '../checkpoints';
 import {
 	collectChanges,
 	prepareWorktree,
@@ -91,6 +92,7 @@ async function applyChange(
 		if (choice !== 'Delete') {
 			return false;
 		}
+		await agentCheckpoints.recordBeforeWrite(fullPath);
 		await fs.rm(fullPath, { force: true });
 		return true;
 	}
@@ -116,6 +118,7 @@ async function applyChange(
 		return false;
 	}
 
+	await agentCheckpoints.recordBeforeWrite(fullPath);
 	await fs.mkdir(path.dirname(fullPath), { recursive: true });
 	await fs.writeFile(fullPath, change.content, 'utf8');
 	await formatAfterWrite(fullPath).catch(() => undefined);

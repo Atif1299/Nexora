@@ -1098,8 +1098,11 @@
 		root.innerHTML = `
 			<div class="nx-card">
 				<div class="nx-row">
-					<label class="nx-label" for="pref-auto-index">Auto-index workspace</label>
-					${switchControl('pref-auto-index', !!p.autoIndexWorkspace, 'Auto-index workspace')}
+					<div>
+						<label class="nx-label" for="pref-auto-index">Auto-index workspace</label>
+						<p class="nx-hint">Index the open folder for code search when it is first opened, and again a minute after files change (at most every 10 minutes). The status bar shows the state; click it to re-index.</p>
+					</div>
+					${switchControl('pref-auto-index', p.autoIndexWorkspace !== false, 'Auto-index workspace')}
 				</div>
 			</div>
 			<div class="nx-card">
@@ -1193,6 +1196,42 @@
 		`;
 	}
 
+	/**
+	 * Rule files live in the repository and are edited there, so this card only
+	 * shows which ones the agent receives and whether the budget cut any.
+	 */
+	function renderProjectRules(data) {
+		const rules = data && data.rules;
+		if (!rules) {
+			return '';
+		}
+		const files = Array.isArray(rules.files) ? rules.files : [];
+		const omitted = Array.isArray(rules.omitted) ? rules.omitted : [];
+		const off = data.rules_enabled === false
+			? '<p class="nx-hint">Turned off by <code>nexora.agent.projectRules</code>; these files are not sent.</p>'
+			: '';
+		const rows = files.map((file) => `
+			<div class="nx-model-row">
+				<code>${escapeHtml(file.path)}</code>
+				<span class="nx-hint">${Number(file.chars).toLocaleString()} chars${file.truncated ? ', truncated' : ''}</span>
+			</div>
+		`).join('');
+		const cut = omitted.length
+			? `<p class="nx-hint">Over the ${Number(rules.max_chars).toLocaleString()}-character budget, not sent: ${omitted.map((p) => `<code>${escapeHtml(p)}</code>`).join(', ')}</p>`
+			: '';
+		return `
+			<div class="nx-card">
+				<label class="nx-label">Project rules</label>
+				${files.length
+					? `<div class="nx-model-list">${rows}</div>
+						<p class="nx-hint">Sent with every Ask and Agent turn, ${Number(rules.total_chars).toLocaleString()} of ${Number(rules.max_chars).toLocaleString()} characters. Edit the files in the repository.</p>`
+					: '<p class="nx-hint">Add <code>AGENTS.md</code>, <code>CLAUDE.md</code> or files in <code>.nexora/rules/</code> at the workspace root, and the agent follows them on every turn.</p>'}
+				${cut}
+				${off}
+			</div>
+		`;
+	}
+
 	function renderProjectMemory() {
 		const root = document.getElementById('project-memory');
 		if (!root) {
@@ -1248,6 +1287,8 @@
 					<pre class="nx-fact-injected">${escapeHtml(injected)}</pre>
 				</div>
 			` : ''}
+
+			${renderProjectRules(data)}
 		`;
 
 		const valueInput = document.getElementById('fact-value');

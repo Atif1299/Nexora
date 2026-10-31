@@ -10,6 +10,7 @@ import { shouldConfirmFileEdits } from '../agentRunMode';
 import type { ToolResult } from './executor';
 import { confirmOrPreviewDiff } from './diffProvider';
 import { formatAfterWrite } from './writeFile';
+import { agentCheckpoints } from '../checkpoints';
 
 const SKIP_PATTERNS = ['.env', '.pem', 'credentials', 'secret', '.key', 'node_modules', '.git'];
 
@@ -97,6 +98,7 @@ export async function applyPatchTool(
 		}
 
 		// Write patched content
+		await agentCheckpoints.recordBeforeWrite(fullPath);
 		await fs.writeFile(fullPath, newContent, 'utf8');
 		await formatAfterWrite(fullPath);
 
@@ -178,6 +180,7 @@ export async function insertLinesTool(
 			};
 		}
 
+		await agentCheckpoints.recordBeforeWrite(fullPath);
 		await fs.writeFile(fullPath, newContent, 'utf8');
 		await formatAfterWrite(fullPath);
 

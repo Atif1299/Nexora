@@ -28,6 +28,25 @@ export interface WorkflowPlan {
 	actual_total_cost: number;
 }
 
+/**
+ * A WorkflowPlan from a plan_snapshot, which carries the GET /api/orchestrate/plan
+ * response. That response names the plan total actual_cost, not actual_total_cost.
+ */
+export function workflowPlanFromSnapshot(planId: string, snapshot: unknown): WorkflowPlan | null {
+	const raw = snapshot as Record<string, any> | null;
+	if (!raw || !Array.isArray(raw.tasks)) {
+		return null;
+	}
+	return {
+		plan_id: planId || String(raw.plan_id || ''),
+		user_request: String(raw.user_request || ''),
+		status: String(raw.status || ''),
+		tasks: raw.tasks as WorkflowTask[],
+		estimated_total_cost: Number(raw.estimated_total_cost ?? raw.estimated_cost ?? 0),
+		actual_total_cost: Number(raw.actual_total_cost ?? raw.actual_cost ?? 0)
+	};
+}
+
 export class WorkflowPanelProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'nexora.workflowViewer';
 

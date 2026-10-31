@@ -18,7 +18,10 @@ export type SSEEvent = {
 	model_used?: string;
 	model?: string;
 	message?: string;
-	usage?: { prompt_tokens: number; completion_tokens: number };
+	/** prompt_tokens is the whole prompt; cached_tokens is the part read from the prompt cache. */
+	usage?: { prompt_tokens: number; completion_tokens: number; cached_tokens?: number; cache_write_tokens?: number };
+	/** agent "done": the turn's cost from the engine's pricing registry, cache rates included. */
+	cost_usd?: number;
 	/** chat/stream "remembered": the project fact this message just saved. */
 	value?: string;
 };

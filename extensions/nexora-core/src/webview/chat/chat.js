@@ -56,14 +56,23 @@
 	const firstRunMsg = document.getElementById('firstRunMsg');
 
 	let lastLoadingMessage = null;
-	let chatActivityCard = null;
+	// Raw text of the reply being streamed. The bubble shows it formatted, so
+	// the markdown source cannot be read back from the DOM.
+	let streamText = '';
+	let streamFrame = 0;
+	// Step groups of the run in progress, in thread order, and which group
+	// each step belongs to. textSinceGroup is set when reply text has streamed
+	// since the newest group was made; the next new step then starts a new group.
+	let activityGroups = [];
+	let activityStepGroup = {};
+	let textSinceGroup = false;
 	let lastActivityItems = [];
 	let lastActivityCaption = '';
 	let activityLogExpanded = {};
-	let costTickerEl = null;
 	let totalCostUsd = 0;
 	let totalTokensIn = 0;
 	let totalTokensOut = 0;
+	let totalTokensCached = 0;
 	let currentPlan = null;
 	let planCardElement = null;
 	const shownEscalationKeys = {};
@@ -810,6 +819,7 @@
 
 	function setReplyInFlight(running) {
 		replyInFlight = !!running;
+		document.body.classList.toggle('nx-replying', replyInFlight);
 		applySendButtonChrome();
 	}
 
@@ -1327,21 +1337,27 @@
 		return html;
 	}
 
-	function clearChatActivityCard() {
-		if (chatActivityCard && chatActivityCard.parentNode) {
-			chatActivityCard.remove();
-		}
-		chatActivityCard = null;
+	// Ends the run's live state. When the run finished normally the total cost
+	// is left under the answer; when the view is being cleared it is dropped.
+	function clearChatActivityCard(showCost) {
+		activityGroups.forEach(function (g) {
+			if (g.el.parentNode) {
+				g.el.remove();
+			}
+		});
+		activityGroups = [];
+		activityStepGroup = {};
+		textSinceGroup = false;
 		lastActivityItems = [];
 		lastActivityCaption = '';
 		activityLogExpanded = {};
-		if (costTickerEl && costTickerEl.parentNode) {
-			costTickerEl.remove();
+		if (showCost) {
+			showRunCost();
 		}
-		costTickerEl = null;
 		totalCostUsd = 0;
 		totalTokensIn = 0;
 		totalTokensOut = 0;
+		totalTokensCached = 0;
 	}
 
 	function activityStepCount(items) {
@@ -1393,13 +1409,43 @@
 		userEl.parentNode.insertBefore(fold, userEl.nextSibling);
 	}
 
+	// When a run ends each live group collapses where it is, into a
+	// "Worked - N steps" line, so the thread keeps its order.
+	function foldGroupsInPlace(list) {
+		const byId = {};
+		list.forEach(function (it) { byId[it.id] = it; });
+		const groups = activityGroups;
+		activityGroups = [];
+		groups.forEach(function (g) {
+			const steps = g.ids.map(function (id) { return byId[id]; }).filter(Boolean);
+			if (!steps.length) {
+				g.el.remove();
+				return;
+			}
+			const fold = document.createElement('details');
+			fold.className = 'nexora-activity-fold';
+			const summary = document.createElement('summary');
+			summary.textContent = activityFoldSummary(steps);
+			fold.appendChild(summary);
+			const body = document.createElement('div');
+			body.className = 'nx-activityCardBody';
+			fillActivityBody(body, steps, false);
+			fold.appendChild(body);
+			g.el.replaceWith(fold);
+		});
+	}
+
 	function foldLiveActivity(items) {
 		const list = (Array.isArray(items) && items.length) ? items : lastActivityItems;
-		const userEl = lastUserMessageEl();
-		if (userEl && list && list.length) {
-			attachActivityFold(userEl, list);
+		if (activityGroups.length) {
+			foldGroupsInPlace(list || []);
+		} else {
+			const userEl = lastUserMessageEl();
+			if (userEl && list && list.length) {
+				attachActivityFold(userEl, list);
+			}
 		}
-		clearChatActivityCard();
+		clearChatActivityCard(true);
 	}
 
 	function resizeComposer() {
@@ -1425,17 +1471,6 @@
 		const m = Math.floor(totalSec / 60);
 		const s = totalSec % 60;
 		return m + ':' + String(s).padStart(2, '0');
-	}
-
-	function updateLoadingCaption(caption) {
-		if (!caption || !lastLoadingMessage) {
-			return;
-		}
-		const body = lastLoadingMessage.querySelector('.nx-msgBody');
-		if (!body || body.getAttribute('data-nx-streaming') === '1') {
-			return;
-		}
-		body.textContent = caption;
 	}
 
 	function terminalStatusLabel(it) {
@@ -1480,21 +1515,19 @@
 		if (isLive && (status === 'running' || status === 'confirming')) {
 			row.classList.add('nx-activityRowLive');
 		}
-
-		const mark = document.createElement('span');
-		mark.className = 'nx-activityMark';
-		if (isLive && (status === 'running' || status === 'confirming')) {
-			const spinner = document.createElement('span');
-			spinner.className = 'nx-activitySpinner';
-			spinner.setAttribute('aria-hidden', 'true');
-			mark.appendChild(spinner);
-		} else if (status === 'failed' || status === 'timeout') {
-			mark.textContent = 'x';
-		} else if (status === 'cancelled') {
-			mark.textContent = '-';
-		} else {
-			mark.textContent = '+';
+		if (status === 'confirming') {
+			row.classList.add('nx-activityRowConfirm');
 		}
+
+		let markState = 'done';
+		if (isLive && (status === 'running' || status === 'confirming')) {
+			markState = 'running';
+		} else if (status === 'failed' || status === 'timeout') {
+			markState = 'failed';
+		} else if (status === 'cancelled') {
+			markState = 'cancelled';
+		}
+		const mark = makeActivityMark(markState);
 
 		const glyph = document.createElement('span');
 		glyph.className = 'nx-activityTermGlyph';
@@ -1507,7 +1540,9 @@
 		head.className = 'nx-activityTermHead';
 		const cmd = document.createElement('span');
 		cmd.className = 'nx-activityTermCmd';
-		cmd.textContent = it.label || ('$ ' + (it.command || ''));
+		// The "$" is drawn by the glyph beside it; the label already carries one.
+		cmd.textContent = String(it.label || it.command || '').replace(/^\$\s*/, '');
+		cmd.title = cmd.textContent;
 		const meta = document.createElement('span');
 		meta.className = 'nx-activityTermMeta';
 		meta.textContent = terminalStatusLabel(it);
@@ -1555,6 +1590,63 @@
 		return row;
 	}
 
+	// Status icon at the start of an activity row: a spinner while running,
+	// otherwise a small check, cross or dash.
+	const ACTIVITY_MARK_PATHS = {
+		done: 'M3.5 8.5l3 3 6-6.5',
+		failed: 'M4 4l8 8M12 4l-8 8',
+		cancelled: 'M4 8h8'
+	};
+
+	function makeActivityMark(state) {
+		const mark = document.createElement('span');
+		mark.className = 'nx-activityMark';
+		if (state === 'running') {
+			const spinner = document.createElement('span');
+			spinner.className = 'nx-activitySpinner';
+			spinner.setAttribute('aria-hidden', 'true');
+			mark.appendChild(spinner);
+		} else {
+			mark.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">'
+				+ '<path d="' + (ACTIVITY_MARK_PATHS[state] || ACTIVITY_MARK_PATHS.done) + '" fill="none" stroke="currentColor" '
+				+ 'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+		}
+		return mark;
+	}
+
+	// Past and present wording for each tool label the extension sends
+	// ("read_file: src/app.ts"). Unknown "name: detail" labels, such as a
+	// connected platform's tools, show the name as the verb.
+	const ACTIVITY_VERBS = {
+		read_file: ['Reading', 'Read'],
+		write_file: ['Writing', 'Wrote'],
+		apply_patch: ['Editing', 'Edited'],
+		insert_lines: ['Editing', 'Edited'],
+		list_files: ['Listing', 'Listed'],
+		grep: ['Searching', 'Searched'],
+		search_codebase: ['Searching', 'Searched'],
+		search_chat_history: ['Searching history', 'Searched history'],
+		open_browser: ['Opening', 'Opened'],
+		browser_snapshot: ['Taking snapshot', 'Took snapshot'],
+		browser_click: ['Clicking', 'Clicked'],
+		browser_type: ['Typing', 'Typed'],
+		browser_select: ['Selecting', 'Selected'],
+		browser_press: ['Pressing', 'Pressed'],
+		remember: ['Remembering', 'Remembered']
+	};
+
+	function splitActivityLabel(label, done) {
+		const text = String(label || '');
+		const at = text.indexOf(': ');
+		const name = at > 0 ? text.slice(0, at) : text;
+		const target = at > 0 ? text.slice(at + 2) : '';
+		const verbs = ACTIVITY_VERBS[name];
+		if (verbs) {
+			return { verb: verbs[done ? 1 : 0], target: target };
+		}
+		return at > 0 ? { verb: name, target: target } : { verb: text, target: '' };
+	}
+
 	function fillActivityBody(bodyEl, list, live) {
 		const isLive = live !== false;
 		bodyEl.innerHTML = '';
@@ -1563,30 +1655,80 @@
 				bodyEl.appendChild(renderTerminalActivityRow(it, isLive));
 				return;
 			}
+			const finished = !!it.done || !isLive;
 			const row = document.createElement('div');
-			row.className = 'nx-activityRow' + (it.done ? ' nx-activityRowDone' : '');
+			row.className = 'nx-activityRow' + (it.done ? ' nx-activityRowDone' : '') + (finished ? '' : ' nx-activityRowRun');
 			row.setAttribute('data-activity-id', it.id);
-			const mark = document.createElement('span');
-			mark.className = 'nx-activityMark';
-			if (it.done || !isLive) {
-				mark.textContent = '+';
-			} else {
-				const spinner = document.createElement('span');
-				spinner.className = 'nx-activitySpinner';
-				spinner.setAttribute('aria-hidden', 'true');
-				mark.appendChild(spinner);
+			const parts = splitActivityLabel(it.label, finished);
+			const verb = document.createElement('span');
+			verb.className = 'nx-activityVerb';
+			verb.textContent = parts.verb;
+			row.appendChild(makeActivityMark(finished ? 'done' : 'running'));
+			row.appendChild(verb);
+			if (parts.target) {
+				const target = document.createElement('span');
+				target.className = 'nx-activityTarget';
+				target.textContent = parts.target;
+				target.title = parts.target;
+				row.appendChild(target);
 			}
-			const fileIcon = _makeActivityFileIcon(it.label || '');
-			const lab = document.createElement('span');
-			lab.className = 'nx-activityLabel';
-			lab.textContent = it.label || '';
-			row.appendChild(mark);
-			if (fileIcon) {
-				row.appendChild(fileIcon);
-			}
-			row.appendChild(lab);
 			bodyEl.appendChild(row);
 		});
+	}
+
+	// The steps of a run are shown in groups, in the order things happened:
+	// text the model wrote, then the steps it took, then the text that
+	// followed. A group is one card of steps; a new one starts when text has
+	// streamed since the last one.
+	function createActivityGroup() {
+		const card = document.createElement('div');
+		card.className = 'nx-activityCard';
+		const headerBtn = document.createElement('button');
+		headerBtn.type = 'button';
+		headerBtn.className = 'nx-activityCardHeader';
+		headerBtn.setAttribute('aria-expanded', 'true');
+		const chev = document.createElement('span');
+		chev.className = 'nx-activityChevron';
+		chev.setAttribute('aria-hidden', 'true');
+		chev.textContent = 'v';
+		const title = document.createElement('span');
+		title.className = 'nx-activityCardTitle';
+		title.textContent = 'Activity';
+		const turnCounter = document.createElement('span');
+		turnCounter.className = 'nx-activityTurnCounter';
+		headerBtn.appendChild(chev);
+		headerBtn.appendChild(title);
+		headerBtn.appendChild(turnCounter);
+		const body = document.createElement('div');
+		body.className = 'nx-activityCardBody';
+		card.appendChild(headerBtn);
+		card.appendChild(body);
+		headerBtn.addEventListener('click', function () {
+			const collapsed = card.classList.toggle('nx-activityCardCollapsed');
+			headerBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+			chev.textContent = collapsed ? '>' : 'v';
+		});
+		return { el: card, body: body, counter: turnCounter, ids: [] };
+	}
+
+	/** Close the bubble that is streaming so the next text starts a new one below the steps. */
+	function sealStreamingBubble() {
+		if (!lastLoadingMessage) {
+			return;
+		}
+		const body = lastLoadingMessage.querySelector('.nx-msgBody');
+		if (!body || body.getAttribute('data-nx-streaming') !== '1') {
+			return;
+		}
+		if (streamFrame) {
+			cancelAnimationFrame(streamFrame);
+			streamFrame = 0;
+		}
+		lastLoadingMessage.classList.remove('nx-msgLoading', 'nx-msgStreaming');
+		body.removeAttribute('data-nx-streaming');
+		body.innerHTML = formatContent(streamText);
+		streamText = '';
+		lastLoadingMessage = null;
 	}
 
 	function renderChatActivity(items, caption) {
@@ -1596,114 +1738,81 @@
 		const list = Array.isArray(items) ? items : [];
 		lastActivityItems = list;
 		if (caption) {
+			// The activity card already shows the caption; repeating it in the
+			// placeholder reply below drew the same line twice.
 			lastActivityCaption = caption;
-			updateLoadingCaption(caption);
 		}
-		if (!chatActivityCard) {
-			const card = document.createElement('div');
-			card.className = 'nx-activityCard';
-			const headerBtn = document.createElement('button');
-			headerBtn.type = 'button';
-			headerBtn.className = 'nx-activityCardHeader';
-			headerBtn.setAttribute('aria-expanded', 'true');
-			const chev = document.createElement('span');
-			chev.className = 'nx-activityChevron';
-			chev.setAttribute('aria-hidden', 'true');
-			chev.textContent = 'v';
-			const title = document.createElement('span');
-			title.className = 'nx-activityCardTitle';
-			title.textContent = 'Activity';
-			const turnCounter = document.createElement('span');
-			turnCounter.className = 'nx-activityTurnCounter';
-			headerBtn.appendChild(chev);
-			headerBtn.appendChild(title);
-			headerBtn.appendChild(turnCounter);
-			const body = document.createElement('div');
-			body.className = 'nx-activityCardBody';
-			card.appendChild(headerBtn);
-			card.appendChild(body);
-			headerBtn.addEventListener('click', function () {
-				const collapsed = card.classList.toggle('nx-activityCardCollapsed');
-				headerBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-				const c = headerBtn.querySelector('.nx-activityChevron');
-				if (c) {
-					c.textContent = collapsed ? '>' : 'v';
-				}
-			});
-			chatActivityCard = card;
-		}
-		const turnCounterEl = chatActivityCard.querySelector('.nx-activityTurnCounter');
-		if (turnCounterEl) {
-			const agentIt = list.find(function (it) { return it.id === 'agent' && it.turn !== null && it.turn !== undefined; });
-			if (agentIt && agentIt.totalTurns) {
-				turnCounterEl.textContent = 'Turn ' + agentIt.turn + '/' + agentIt.totalTurns;
+		const follow = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 40;
+		const agentIt = list.find(function (it) { return it.id === 'agent'; });
+		const steps = list.filter(function (it) { return it.id !== 'agent'; });
+		const byId = {};
+		steps.forEach(function (it) { byId[it.id] = it; });
+
+		let last = activityGroups[activityGroups.length - 1];
+		const fresh = steps.filter(function (it) { return !activityStepGroup[it.id]; });
+		if (!last || (fresh.length && textSinceGroup)) {
+			sealStreamingBubble();
+			last = createActivityGroup();
+			activityGroups.push(last);
+			textSinceGroup = false;
+			if (lastLoadingMessage && lastLoadingMessage.parentNode === messages) {
+				messages.insertBefore(last.el, lastLoadingMessage);
 			} else {
-				turnCounterEl.textContent = '';
+				messages.appendChild(last.el);
 			}
 		}
-		const bodyEl = chatActivityCard.querySelector('.nx-activityCardBody');
-		if (!bodyEl) {
-			return;
-		}
-		fillActivityBody(bodyEl, list, true);
-		if (lastLoadingMessage && lastLoadingMessage.parentNode === messages) {
-			messages.insertBefore(chatActivityCard, lastLoadingMessage);
-		} else if (!chatActivityCard.parentNode) {
-			messages.appendChild(chatActivityCard);
-		}
-		messages.scrollTop = messages.scrollHeight;
-	}
+		fresh.forEach(function (it) {
+			activityStepGroup[it.id] = last;
+			last.ids.push(it.id);
+		});
 
-	function _makeActivityFileIcon(label) {
-		const lower = label.toLowerCase();
-		let iconClass = '';
-		let iconText = '';
-		if (lower.startsWith('write_file:') || lower.startsWith('apply_patch:') || lower.startsWith('insert_lines:')) {
-			iconClass = 'nx-activityFileIcon nx-activityFileIconWrite';
-			iconText = 'W';
-		} else if (lower.startsWith('read_file:')) {
-			iconClass = 'nx-activityFileIcon nx-activityFileIconRead';
-			iconText = 'R';
-		} else if (lower.startsWith('open_browser:') || lower.startsWith('browser_snapshot') || lower.startsWith('browser_click:') || lower.startsWith('browser_type:') || lower.startsWith('browser_select:') || lower.startsWith('browser_press:')) {
-			iconClass = 'nx-activityFileIcon nx-activityFileIconSearch';
-			iconText = 'B';
-		} else if (lower.startsWith('search_codebase:') || lower.startsWith('grep:') || lower.startsWith('search_chat_history:')) {
-			iconClass = 'nx-activityFileIcon nx-activityFileIconSearch';
-			iconText = 'S';
-		}
-		if (!iconText) {
-			return null;
-		}
-		const span = document.createElement('span');
-		span.className = iconClass;
-		span.textContent = iconText;
-		return span;
-	}
-
-	function updateCostTicker(costUsd, tokensIn, tokensOut) {
-		if (!messages) {
-			return;
-		}
-		totalCostUsd += costUsd;
-		totalTokensIn += tokensIn;
-		totalTokensOut += tokensOut;
-		if (!costTickerEl) {
-			costTickerEl = document.createElement('div');
-			costTickerEl.className = 'nx-costTicker';
-		}
-		const totalTokens = totalTokensIn + totalTokensOut;
-		const kTokens = totalTokens >= 1000
-			? (totalTokens / 1000).toFixed(1) + 'K'
-			: String(totalTokens);
-		costTickerEl.textContent = '$' + totalCostUsd.toFixed(4) + ' -- ' + kTokens + ' tokens';
-		if (chatActivityCard && chatActivityCard.parentNode) {
-			const next = chatActivityCard.nextSibling;
-			if (next !== costTickerEl) {
-				chatActivityCard.parentNode.insertBefore(costTickerEl, next);
+		activityGroups = activityGroups.filter(function (g) {
+			const isLast = g === last;
+			const rows = g.ids.map(function (id) { return byId[id]; }).filter(Boolean);
+			// A group left empty because its steps moved on is dropped.
+			if (!rows.length && !isLast) {
+				g.el.remove();
+				return false;
 			}
-		} else if (!costTickerEl.parentNode) {
-			messages.appendChild(costTickerEl);
+			// What the agent is doing right now is the last line of the newest group.
+			const showAgent = isLast && agentIt && !agentIt.done;
+			const shown = showAgent ? rows.concat([agentIt]) : rows;
+			g.el.hidden = shown.length === 0;
+			g.counter.textContent = (isLast && agentIt && agentIt.turn !== null && agentIt.turn !== undefined && agentIt.totalTurns)
+				? 'Turn ' + agentIt.turn + '/' + agentIt.totalTurns
+				: '';
+			fillActivityBody(g.body, shown, true);
+			return true;
+		});
+		if (follow) {
+			messages.scrollTop = messages.scrollHeight;
 		}
+	}
+
+	function formatTokens(count) {
+		return count >= 1000 ? (count / 1000).toFixed(1) + 'K' : String(count);
+	}
+
+	// Cost is added up while the run goes and shown once, under the answer,
+	// when the run ends (see showRunCost).
+	function updateCostTicker(costUsd, tokensIn, tokensOut, tokensCached) {
+		totalCostUsd += costUsd || 0;
+		totalTokensIn += tokensIn || 0;
+		totalTokensOut += tokensOut || 0;
+		totalTokensCached += tokensCached || 0;
+	}
+
+	function showRunCost() {
+		if (!messages || totalTokensIn + totalTokensOut <= 0) {
+			return;
+		}
+		// Cached tokens are part of the input count, billed at the cache rate.
+		const cached = totalTokensCached > 0 ? ' (' + formatTokens(totalTokensCached) + ' cached)' : '';
+		const cost = totalCostUsd > 0 ? '$' + totalCostUsd.toFixed(4) + ' - ' : '';
+		const el = document.createElement('div');
+		el.className = 'nx-costTicker';
+		el.textContent = cost + formatTokens(totalTokensIn + totalTokensOut) + ' tokens' + cached;
+		messages.appendChild(el);
 	}
 
 	function addMessage(role, content, isLoading, stopped, activity) {
@@ -1730,6 +1839,9 @@
 		}
 
 		div.appendChild(body);
+		if (role === 'user' && !isLoading) {
+			attachUserActions(div, content);
+		}
 
 		messages.appendChild(div);
 		if (role === 'user' && !isLoading && activity && activity.length) {
@@ -1746,6 +1858,153 @@
 		} else if (stopped) {
 			setReplyInFlight(false);
 		}
+	}
+
+	// ---------- Copy, edit and retry on your own messages ----------
+
+	const ICONS = {
+		copy: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M4 4V2.5A1.5 1.5 0 0 1 5.5 1h7A1.5 1.5 0 0 1 14 2.5v7a1.5 1.5 0 0 1-1.5 1.5H11v1.5A1.5 1.5 0 0 1 9.5 14h-7A1.5 1.5 0 0 1 1 12.5v-7A1.5 1.5 0 0 1 2.5 4H4zm1 0h4.5A1.5 1.5 0 0 1 11 5.5V10h1.5a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-7a.5.5 0 0 0-.5.5V4zM2.5 5a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-7z"/></svg>',
+		check: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M6.3 11.3 2.7 7.7l.7-.7 2.9 2.9 6.3-6.3.7.7z"/></svg>',
+		edit: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M13.2 1.8a1.9 1.9 0 0 0-2.7 0L2.9 9.4 2 14l4.6-.9 7.6-7.6a1.9 1.9 0 0 0 0-2.7l-1-1zM3.3 12.7l.4-2.2 1.8 1.8-2.2.4zm3-.9L4.2 9.7 9.5 4.4l2.1 2.1-5.3 5.3zm7.2-7.2-1.2 1.2-2.1-2.1 1.2-1.2a.9.9 0 0 1 1.3 0l.8.8a.9.9 0 0 1 0 1.3z"/></svg>',
+		retry: '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M3.5 8a4.5 4.5 0 0 1 8-2.8V3h1v4h-4V6h2.3A3.5 3.5 0 1 0 11.5 8h1A4.5 4.5 0 1 1 3.5 8z"/></svg>'
+	};
+
+	function userOrdinal(div) {
+		return Array.prototype.indexOf.call(messages.querySelectorAll('.nx-msg.nx-user'), div);
+	}
+
+	/** Go back to just before this message and send `text` instead (the extension confirms file restores). */
+	function rewindTo(div, text) {
+		const trimmed = (text || '').trim();
+		if (!trimmed || replyInFlight) {
+			return;
+		}
+		vscode.postMessage({ type: 'rewindTo', ordinal: userOrdinal(div), text: trimmed });
+	}
+
+	function actionButton(icon, label, onClick) {
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'nx-userAction';
+		button.title = label;
+		button.setAttribute('aria-label', label);
+		button.innerHTML = ICONS[icon];
+		button.addEventListener('click', function (event) {
+			event.stopPropagation();
+			onClick(button);
+		});
+		return button;
+	}
+
+	function attachUserActions(div, content) {
+		const bar = document.createElement('div');
+		bar.className = 'nx-userActions';
+		bar.appendChild(actionButton('copy', 'Copy', function (button) {
+			void navigator.clipboard.writeText(content).then(function () {
+				button.innerHTML = ICONS.check;
+				setTimeout(function () { button.innerHTML = ICONS.copy; }, 1200);
+			});
+		}));
+		bar.appendChild(actionButton('edit', 'Edit and resend', function () { startEdit(div, content); }));
+		bar.appendChild(actionButton('retry', 'Retry from here', function () { rewindTo(div, content); }));
+		div.appendChild(bar);
+	}
+
+	/** Edit in place: the bubble becomes a text box with the same look; Enter resends, Esc cancels. */
+	function startEdit(div, content) {
+		if (replyInFlight || div.classList.contains('nx-editing')) {
+			return;
+		}
+		const body = div.querySelector('.nx-msgBody');
+		const saved = body.innerHTML;
+		const editor = document.createElement('textarea');
+		editor.className = 'nx-editInput';
+		editor.value = content;
+		editor.rows = 1;
+		const fit = function () {
+			editor.style.height = 'auto';
+			editor.style.height = Math.min(editor.scrollHeight, 320) + 'px';
+		};
+		const hint = document.createElement('div');
+		hint.className = 'nx-editBar';
+		hint.innerHTML = '<span>Resending removes this message and everything after it.</span>';
+		const cancel = document.createElement('button');
+		cancel.type = 'button';
+		cancel.className = 'nx-editCancel';
+		cancel.textContent = 'Cancel';
+		const send = document.createElement('button');
+		send.type = 'button';
+		send.className = 'nx-editSend';
+		send.textContent = 'Send';
+		hint.appendChild(cancel);
+		hint.appendChild(send);
+
+		const finish = function () {
+			div.classList.remove('nx-editing');
+			body.innerHTML = saved;
+		};
+		cancel.addEventListener('click', finish);
+		send.addEventListener('click', function () { rewindTo(div, editor.value); });
+		editor.addEventListener('input', fit);
+		editor.addEventListener('keydown', function (event) {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				finish();
+			} else if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+				event.preventDefault();
+				rewindTo(div, editor.value);
+			}
+		});
+
+		div.classList.add('nx-editing');
+		body.replaceChildren(editor, hint);
+		fit();
+		editor.focus();
+		editor.setSelectionRange(editor.value.length, editor.value.length);
+	}
+
+	/** The Agent message just sent owns this checkpoint. */
+	function tagLatestUserMessage(id) {
+		if (!messages || !id) {
+			return;
+		}
+		const users = messages.querySelectorAll('.nx-msg.nx-user:not([data-checkpoint])');
+		const latest = users[users.length - 1];
+		if (latest) {
+			latest.setAttribute('data-checkpoint', id);
+		}
+	}
+
+	/**
+	 * Restore appears on a message when the agent changed files at or after it.
+	 * Restoring puts those files back as they were before the message.
+	 */
+	function showRestoreButtons(restorable) {
+		if (!messages) {
+			return;
+		}
+		const allowed = new Set(restorable);
+		messages.querySelectorAll('.nx-msg.nx-user[data-checkpoint]').forEach(function (div) {
+			const id = div.getAttribute('data-checkpoint');
+			let button = div.querySelector('.nx-restoreBtn');
+			if (!allowed.has(id)) {
+				if (button) {
+					button.remove();
+				}
+				return;
+			}
+			if (!button) {
+				button = document.createElement('button');
+				button.type = 'button';
+				button.className = 'nx-restoreBtn';
+				button.textContent = 'Restore files';
+				button.title = 'Put the files the agent changed back to how they were before this message';
+				button.addEventListener('click', function () {
+					vscode.postMessage({ type: 'restoreCheckpoint', id: id });
+				});
+				div.appendChild(button);
+			}
+		});
 	}
 
 	/**
@@ -1782,21 +2041,44 @@
 		if (!chunk) {
 			return;
 		}
+		textSinceGroup = true;
 		if (!lastLoadingMessage) {
-			addMessage('assistant', chunk, true);
-			return;
+			addMessage('assistant', '', true);
 		}
 		const body = lastLoadingMessage.querySelector('.nx-msgBody');
 		if (!body) {
 			return;
 		}
 		if (body.getAttribute('data-nx-streaming') !== '1') {
-			body.textContent = chunk;
+			streamText = chunk;
 			body.setAttribute('data-nx-streaming', '1');
+			lastLoadingMessage.classList.add('nx-msgStreaming');
 		} else {
-			body.textContent = (body.textContent || '') + chunk;
+			streamText += chunk;
 		}
-		messages.scrollTop = messages.scrollHeight;
+		// Format the text as it arrives, at most once per frame, so bold, lists
+		// and code blocks look right while streaming instead of jumping at the end.
+		if (!streamFrame) {
+			streamFrame = requestAnimationFrame(renderStream);
+		}
+	}
+
+	function renderStream() {
+		streamFrame = 0;
+		if (!lastLoadingMessage) {
+			return;
+		}
+		const body = lastLoadingMessage.querySelector('.nx-msgBody');
+		if (!body || body.getAttribute('data-nx-streaming') !== '1') {
+			return;
+		}
+		// Follow the new text only while the reader is at the bottom, so
+		// scrolling up to read earlier output is not pulled back down.
+		const follow = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 40;
+		body.innerHTML = formatContent(streamText);
+		if (follow) {
+			messages.scrollTop = messages.scrollHeight;
+		}
 	}
 
 	function finishMessage() {
@@ -1804,9 +2086,15 @@
 			setReplyInFlight(false);
 			return;
 		}
+		if (streamFrame) {
+			cancelAnimationFrame(streamFrame);
+			streamFrame = 0;
+		}
 		const body = lastLoadingMessage.querySelector('.nx-msgBody');
-		const text = body ? (body.textContent || '') : '';
-		lastLoadingMessage.classList.remove('nx-msgLoading');
+		const streaming = !!body && body.getAttribute('data-nx-streaming') === '1';
+		const text = streaming ? streamText : (body ? (body.textContent || '') : '');
+		lastLoadingMessage.classList.remove('nx-msgLoading', 'nx-msgStreaming');
+		streamText = '';
 		if (body) {
 			body.removeAttribute('data-nx-streaming');
 			body.innerHTML = formatContent(text);
@@ -1897,6 +2185,11 @@
 		}
 		arr.forEach(function (m) {
 			addMessage(m.role, m.content, false, false, m.activity);
+			if (m.role === 'user' && m.checkpointId) {
+				// The activity fold may follow the message, so find it by class, not position.
+				const users = messages.querySelectorAll('.nx-msg.nx-user');
+				users[users.length - 1].setAttribute('data-checkpoint', m.checkpointId);
+			}
 		});
 	}
 
@@ -1941,7 +2234,7 @@
 			<div class="nx-planTitle">Execution Plan</div>
 			<div class="nx-planMeta">
 				<span class="nx-planId">${plan.plan_id}</span>
-				<span class="nx-planCost">Est. $${(plan.estimated_cost || 0).toFixed(4)}</span>
+				<span class="nx-planCost" title="${plan.estimated_cost_range ? 'Code steps run the agent for several turns, so their cost is a range' : ''}">Est. $${(plan.estimated_cost || 0).toFixed(4)}${costRangeText(plan.estimated_cost_range)}</span>
 			</div>
 		`;
 		card.appendChild(header);
@@ -1953,7 +2246,7 @@
 				plan.cost_breakdown.map(item => `
 					<div class="nx-costRow">
 						<span>${escapeHtml(item.task || item.platform || 'task')} · ${escapeHtml(item.platform || '')}</span>
-						<span>$${(item.estimated_cost || 0).toFixed(4)}</span>
+						<span>$${(item.estimated_cost || 0).toFixed(4)}${costRangeText(item.estimated_cost_range)}</span>
 					</div>
 				`).join('');
 			card.appendChild(breakdown);
@@ -1999,6 +2292,14 @@
 			lastLoadingMessage.remove();
 			lastLoadingMessage = null;
 		}
+	}
+
+	/** " ($low to $high)" for a code step's agent loop; empty for single-call steps. */
+	function costRangeText(range) {
+		if (!Array.isArray(range) || range.length !== 2 || range[0] === range[1]) {
+			return '';
+		}
+		return ` ($${Number(range[0]).toFixed(4)}\u2013$${Number(range[1]).toFixed(4)})`;
 	}
 
 	function updateTaskStatus(taskId, status, error, cost) {
@@ -2134,6 +2435,7 @@
 	}
 
 	function showPlanExecuting(planId) {
+		clearStepRetryButtons(planId);
 		Object.keys(shownEscalationKeys).forEach(function (key) {
 			if (key.indexOf(planId + ':') === 0) {
 				delete shownEscalationKeys[key];
@@ -2213,8 +2515,56 @@
 				updateTaskStatus(task.task_id, task.status, task.error, task.actual_cost);
 			});
 		}
+		showStepRetryButtons(planId);
 
 		currentPlan = null;
+	}
+
+	const RETRYABLE_STEP_STATUSES = ['failed', 'timeout', 'skipped'];
+
+	/**
+	 * Retry on each failed, timed-out or skipped step of a finished plan. The rows
+	 * keep their live status, so this works after a retry finishes too. A skipped
+	 * step is often one that needed a connection the user has since made.
+	 */
+	function showStepRetryButtons(planId) {
+		const list = document.getElementById('plan-tasks-' + planId);
+		if (!list) {
+			return;
+		}
+		list.querySelectorAll('.nx-planTask').forEach(function (taskEl) {
+			const status = (taskEl.getAttribute('data-status') || '').toLowerCase();
+			let button = taskEl.querySelector('.nx-stepRetryBtn');
+			if (RETRYABLE_STEP_STATUSES.indexOf(status) === -1) {
+				if (button) {
+					button.remove();
+				}
+				return;
+			}
+			if (button) {
+				return;
+			}
+			const taskId = taskEl.id.replace(/^task-/, '');
+			button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'nx-stepRetryBtn';
+			button.textContent = 'Retry';
+			button.title = 'Run this step again, and the steps after it that did not run';
+			button.addEventListener('click', function () {
+				clearStepRetryButtons(planId);
+				vscode.postMessage({ type: 'retryPlanTask', planId: planId, taskId: taskId });
+			});
+			taskEl.appendChild(button);
+		});
+	}
+
+	function clearStepRetryButtons(planId) {
+		const list = document.getElementById('plan-tasks-' + planId);
+		if (list) {
+			list.querySelectorAll('.nx-stepRetryBtn').forEach(function (button) {
+				button.remove();
+			});
+		}
 	}
 
 	function showSuggestion(suggestion) {
@@ -2738,6 +3088,18 @@
 				loadSessionMessages(data.sessionId, data.messages);
 				break;
 
+			case 'resend':
+				// After a rewind: send again in the message's own mode, as if typed now.
+				if (data.mode) {
+					const modeRoot = document.getElementById('modeDd');
+					if (modeRoot && modeRoot.querySelector('[data-value="' + data.mode + '"]')) {
+						applyDdSelection(modeRoot, data.mode);
+					}
+				}
+				input.value = data.text || '';
+				handleSend();
+				break;
+
 			case 'taskUpdate':
 				updateTaskStatus(data.taskId, data.status, data.error, data.cost);
 				break;
@@ -2786,7 +3148,15 @@
 				break;
 
 			case 'costUpdate':
-				updateCostTicker(data.cost_usd, data.tokens_in, data.tokens_out);
+				updateCostTicker(data.cost_usd, data.tokens_in, data.tokens_out, data.tokens_cached);
+				break;
+
+			case 'checkpointStarted':
+				tagLatestUserMessage(data.id);
+				break;
+
+			case 'checkpoints':
+				showRestoreButtons(data.restorable || []);
 				break;
 
 			case 'memoryNote':

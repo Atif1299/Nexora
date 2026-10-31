@@ -14,8 +14,13 @@ import * as vscode from 'vscode';
 
 const execFileAsync = promisify(execFile);
 
-const DEV_BACKEND_DIR = 'D:\\Semesters\\Nexora\\Nexora-IDE-Backend-Architecture\\backend';
-const DEV_PYTHON = path.join(DEV_BACKEND_DIR, '.venv', 'Scripts', 'python.exe');
+/**
+ * The engine checkout during development: the two repositories sit side by
+ * side, and this file runs from Nexora/extensions/nexora-core/out/services.
+ * A packaged install never gets here; it finds the bundled engine first.
+ */
+const DEV_BACKEND_DIR = path.resolve(__dirname, '..', '..', '..', '..', '..', 'Nexora-IDE-Backend-Architecture', 'backend');
+const DEV_PYTHON = path.join(DEV_BACKEND_DIR, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python');
 
 const SECRET_ENCRYPTION_KEY = 'nexora.engine.TOKEN_ENCRYPTION_KEY';
 const SECRET_LOCAL_TOKEN = 'nexora.engine.NEXORA_LOCAL_TOKEN';

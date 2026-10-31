@@ -36,6 +36,7 @@ import {
 	type CapabilitiesReport
 } from './services/backend/capabilities';
 import { deriveWorkspaceId } from './services/workspaceId';
+import { agentCheckpoints } from './services/checkpoints';
 
 type ChatMode = 'chat' | 'ask' | 'plan' | 'execute' | 'agent';
 
@@ -84,6 +85,8 @@ type ChatSessionMessage = {
 	mode?: ChatMode;
 	timestamp?: number;
 	activity?: ChatActivityItem[];
+	/** Agent messages: the checkpoint holding the files as they were before it. */
+	checkpointId?: string;
 };
 
 type ChatSessionRecord = {
@@ -647,6 +650,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._handlePlanGeneration(data.request, data.model);
 		} else if (data.type === 'approvePlan') {
 			await this._handleApprovePlan(data.planId);
+		} else if (data.type === 'retryPlanTask') {
+			await this._handleRetryPlanTask(data.planId, data.taskId);
 		} else if (data.type === 'cancelPlan') {
 			await this._handleCancelPlan(data.planId);
 		} else if (data.type === 'modifyPlan') {
@@ -667,6 +672,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._handleExecuteRequest(data.request, data.model);
 		} else if (data.type === 'runAgent') {
 			await this._handleRunAgent(data.request, data.model);
+		} else if (data.type === 'rewindTo') {
+			await this._rewindTo(data.ordinal, data.text);
+		} else if (data.type === 'restoreCheckpoint') {
+			await this._restoreCheckpoint(data.id);
 		} else if (data.type === 'stopGeneration') {
 			this._abortInFlightReply();
 		} else if (data.type === 'confirmSaveTemplate') {
@@ -871,6 +880,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		let startedTokens = false;
 		let usagePromptTokens = 0;
 		let usageCompletionTokens = 0;
+		let usageCachedTokens = 0;
+		let usageCostUsd = 0;
 
 		for await (const ev of client.agentTurnStream(
 			messages,
@@ -903,7 +914,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				if (ev.usage) {
 					usagePromptTokens = ev.usage.prompt_tokens || 0;
 					usageCompletionTokens = ev.usage.completion_tokens || 0;
+					usageCachedTokens = ev.usage.cached_tokens || 0;
 				}
+				usageCostUsd = typeof ev.cost_usd === 'number' ? ev.cost_usd : 0;
 			} else if (ev.type === 'model_unavailable') {
 				const failed = (ev.model || model || modelUsed || 'unknown').trim();
 				throw new ModelUnavailableSignal(failed);
@@ -916,14 +929,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 		}
 
-		// Post per-turn cost estimate when usage data is available
+		// Per-turn cost. The engine prices it from its registry, cache reads included.
 		if (this._hasChatSurface() && (usagePromptTokens > 0 || usageCompletionTokens > 0)) {
-			const costUsd = this._computeCostEstimate(modelUsed, usagePromptTokens, usageCompletionTokens);
 			this._postToWebviews({
 				type: 'costUpdate',
-				cost_usd: costUsd,
+				cost_usd: usageCostUsd,
 				tokens_in: usagePromptTokens,
-				tokens_out: usageCompletionTokens
+				tokens_out: usageCompletionTokens,
+				tokens_cached: usageCachedTokens
 			});
 		}
 
@@ -1530,7 +1543,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 		try {
 			const result = await getBackendClient().getMemorySuggestions(workspaceId, workspacePath, 'default');
-			const first = (result.suggestions || [])[0] || null;
+			// Indexing runs on its own (services/workspaceIndex.ts), so it is never offered here.
+			const first = (result.suggestions || []).find((s) => s.id !== 'index-workspace') || null;
 			this._postToWebviews({ type: 'showSuggestion', suggestion: first });
 		} catch {
 			this._postToWebviews({ type: 'showSuggestion', suggestion: null });
@@ -1593,6 +1607,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _handleAcceptSuggestion(suggestionId: string): Promise<void> {
+		if (suggestionId === 'index-workspace') {
+			await vscode.commands.executeCommand('nexora.reindexWorkspace');
+			return;
+		}
 		const notifications = getNotificationService();
 		const { workspaceId, workspacePath } = await this._workspaceContext();
 		if (!workspaceId) {
@@ -2120,20 +2138,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 		}
 		return maxMsg;
-	}
-
-	private _computeCostEstimate(model: string, promptTokens: number, completionTokens: number): number {
-		const m = (model || '').toLowerCase();
-		let inPer1k = 0.001;
-		let outPer1k = 0.003;
-		if (m.includes('gpt-4o')) {
-			inPer1k = 0.00015;
-			outPer1k = 0.0006;
-		} else if (m.includes('claude-3-5-sonnet') || m.includes('claude-3.5-sonnet') || m.includes('claude-3-haiku')) {
-			inPer1k = 0.003;
-			outPer1k = 0.015;
-		}
-		return (promptTokens / 1000) * inPer1k + (completionTokens / 1000) * outPer1k;
 	}
 
 	private _formatToolLabel(toolName: string, args: Record<string, any>): string {
@@ -2850,6 +2854,54 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		return lines.join('\n');
 	}
 
+	/**
+	 * Run one failed, timed-out or skipped step of a finished plan again. The
+	 * engine reopens that step and the steps after it that never ran, then the
+	 * usual task events and plan_completed update the card. No new approval:
+	 * the user approved these steps already.
+	 */
+	private async _handleRetryPlanTask(planId: string, taskId: string): Promise<void> {
+		if (!this._hasChatSurface() || !planId || !taskId) {
+			return;
+		}
+		const wsClient = getOrchestrationWebSocket('default');
+		if (!wsClient.isConnected()) {
+			await wsClient.connect();
+		}
+		wsClient.subscribeToPlan(planId);
+		this._currentPlanId = planId;
+		void this._syncOperationContext();
+		this._postToWebviews({ type: 'planExecutionStarted', planId });
+
+		const client = getBackendClient();
+		try {
+			await client.retryPlanTask(planId, taskId);
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			this._postToWebviews({
+				type: 'addMessage',
+				role: 'assistant',
+				content: `Could not retry that step: ${reason}`,
+				isLoading: false
+			});
+			// Put the card back as the engine has it, Retry buttons included.
+			try {
+				const plan = await client.getPlan(planId);
+				this._postToWebviews({
+					type: 'planExecutionComplete',
+					planId,
+					status: plan.status,
+					tasks: plan.tasks,
+					actualCost: plan.actual_cost
+				});
+			} catch {
+				// The error message above is enough.
+			}
+			this._currentPlanId = undefined;
+			void this._syncOperationContext();
+		}
+	}
+
 	private async _handleApprovePlan(planId: string): Promise<void> {
 		if (!this._hasChatSurface()) {
 			return;
@@ -3178,7 +3230,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		await this._handleAcceptSuggestion('index-workspace');
+		await vscode.commands.executeCommand('nexora.reindexWorkspace');
 	}
 
 	private async _rememberIndexedWorkspace(result: { tasks?: Array<{ operation?: string; status?: string; result?: { workspace_id?: string } }> }): Promise<void> {
@@ -3415,6 +3467,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		try {
 			const session = await this._recordUserMessage(request, 'agent');
 			const sessionId = session?.id;
+			// Files the agent edits from here on can be restored to how they are now.
+			const checkpointId = agentCheckpoints.begin(request);
+			const sent = session?.messages[session.messages.length - 1];
+			if (sent?.role === 'user') {
+				sent.checkpointId = checkpointId;
+			}
+			this._postToWebviews({ type: 'checkpointStarted', id: checkpointId });
 
 			const isConnected = await this._backendReady();
 			if (!isConnected) {
@@ -3516,7 +3575,122 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				content: errText,
 				isLoading: false
 			});
+		} finally {
+			// A stopped or failed run may still have edited files.
+			this._postCheckpoints();
 		}
+	}
+
+	/**
+	 * Edit or retry a message: the chat goes back to just before it (here and in
+	 * the engine's transcript, so the model forgets the dropped answers), the
+	 * agent's file edits since then are restored if the user wants, and `text`
+	 * is sent again in the message's own mode.
+	 */
+	private async _rewindTo(ordinal: number, text: string): Promise<void> {
+		const session = this._getActiveSession();
+		const message = text.trim();
+		if (!session || !message || this._replyAbort) {
+			return;
+		}
+		const index = session.messages.map((m, i) => (m.role === 'user' ? i : -1)).filter((i) => i >= 0)[ordinal];
+		const original = index === undefined ? undefined : session.messages[index];
+		if (index === undefined || !original) {
+			return;
+		}
+
+		const preview = original.checkpointId ? agentCheckpoints.preview(original.checkpointId) : undefined;
+		if (original.checkpointId && preview && preview.files.length > 0) {
+			const count = preview.files.length;
+			const choice = await vscode.window.showWarningMessage(
+				`The agent changed ${count} file${count === 1 ? '' : 's'} after this message.`,
+				{ modal: true, detail: 'Restore puts them back as they were before the message. Changes made by terminal commands are not undone.' },
+				'Restore files and resend',
+				'Keep files and resend'
+			);
+			if (!choice) {
+				return;
+			}
+			if (choice === 'Restore files and resend') {
+				await agentCheckpoints.restore(original.checkpointId);
+			}
+		}
+
+		const occurrence = session.messages.slice(0, index).filter((m) => m.role === 'user' && m.content === original.content).length;
+		session.messages = session.messages.slice(0, index);
+		await this._persistSessions();
+		this._pushActiveSessionToWebview();
+		this._postCheckpoints();
+
+		const ctx = await this._workspaceContext();
+		if (ctx.workspaceId) {
+			try {
+				await getBackendClient().rewindTranscript(ctx.workspaceId, session.id, original.content, occurrence);
+			} catch {
+				// The local chat is already rewound; the engine copy is best effort, like appending.
+			}
+		}
+		this._postToWebviews({ type: 'resend', text: message, mode: original.mode });
+	}
+
+	/** Tell the chat which messages have agent edits to restore. */
+	private _postCheckpoints(): void {
+		this._postToWebviews({ type: 'checkpoints', restorable: agentCheckpoints.restorableIds() });
+	}
+
+	/**
+	 * Put the files the agent edited back as they were before a message, after
+	 * the user confirms the list. Only agent file edits are undone; the chat
+	 * history stays as it is.
+	 */
+	private async _restoreCheckpoint(id: string): Promise<void> {
+		const preview = agentCheckpoints.preview(id);
+		if (!preview || (preview.files.length === 0 && preview.unavailable.length === 0)) {
+			void vscode.window.showInformationMessage('Nothing to restore: the agent has not changed any files since that message.');
+			this._postCheckpoints();
+			return;
+		}
+		const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const label = (file: string) => (root ? path.relative(root, file) : file) || file;
+		const shown = preview.files.slice(0, 15).map(f => `• ${label(f)}`);
+		if (preview.files.length > shown.length) {
+			shown.push(`• and ${preview.files.length - shown.length} more`);
+		}
+		const detail = [
+			...shown,
+			'',
+			'Files the agent created are deleted. Your own edits to these files since then are lost too.',
+			'Changes made by terminal commands are not undone.'
+		];
+		if (preview.unavailable.length) {
+			detail.push(`Can't restore (too large or unreadable): ${preview.unavailable.map(label).join(', ')}`);
+		}
+		const choice = await vscode.window.showWarningMessage(
+			`Restore ${preview.files.length} file${preview.files.length === 1 ? '' : 's'} to how they were before this message?`,
+			{ modal: true, detail: detail.join('\n') },
+			'Restore'
+		);
+		if (choice !== 'Restore') {
+			return;
+		}
+
+		const result = await agentCheckpoints.restore(id);
+		this._postCheckpoints();
+		if (!result) {
+			return;
+		}
+		const parts = [`Restored ${result.restored.length} file${result.restored.length === 1 ? '' : 's'}`];
+		if (result.deleted.length) {
+			parts.push(`deleted ${result.deleted.length} the agent created`);
+		}
+		let note = `${parts.join(', ')} to how they were before that message.`;
+		if (result.failed.length) {
+			note += ` Could not restore: ${result.failed.map(label).join(', ')}.`;
+		}
+		if (result.unavailable.length) {
+			note += ` Not restored (too large or unreadable): ${result.unavailable.map(label).join(', ')}.`;
+		}
+		this._postToWebviews({ type: 'addMessage', role: 'assistant', content: note, isLoading: false });
 	}
 
 	/**
@@ -3680,6 +3854,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			});
 		} finally {
 			this._workspaceTaskInFlight.delete(taskId);
+			// A plan's code step records into the checkpoint of the message that ran the plan.
+			this._postCheckpoints();
 		}
 	}
 

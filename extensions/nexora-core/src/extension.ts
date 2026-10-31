@@ -8,14 +8,16 @@ import { ChatPanelProvider } from './chatPanel';
 import { SessionsViewProvider } from './sessionsView';
 import { PlatformBrowserProvider } from './platformPanel';
 import { TaskTreeProvider } from './taskTreeProvider';
-import { WorkflowPanelProvider } from './workflowPanel';
+import { WorkflowPanelProvider, workflowPlanFromSnapshot } from './workflowPanel';
 import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { SettingsPanelProvider } from './settingsPanel';
+import { WorkspaceIndexService } from './services/workspaceIndex';
+import { CloudAccount } from './services/cloudAccount';
 import { TemplatesPanelProvider } from './templatesPanel';
 import { TimelinePanelProvider } from './timelinePanel';
 import { getBackendClient, notifyBackendClientConfigured, setApiKeyHeaderProvider } from './services/backendClient';
 import { getSettingsService } from './services/settingsService';
-import { registerOAuthUriHandler } from './services/oauthConnect';
+import { registerOAuthUriHandler, registerUriRoute } from './services/oauthConnect';
 import { registerMcpConnect } from './services/mcpConnect';
 import { registerInlineCompletion } from './services/inlineCompletion';
 import { getNotificationService } from './services/notificationService';
@@ -33,6 +35,9 @@ import { enginePlaceholderHtml, engineStateLabel } from './services/editorPage';
 import { nexoraDiffProvider, NEXORA_DIFF_SCHEME } from './services/tools/diffProvider';
 import { openNexoraBrowser } from './services/browser';
 import { closeAgentBrowser } from './services/tools/browserSession';
+
+/** Plan statuses after which the engine runs nothing more (backend PlanStatus). */
+const TERMINAL_PLAN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'partially_completed', 'timeout']);
 
 async function setOperationInProgress(value: boolean): Promise<void> {
 	await vscode.commands.executeCommand('setContext', 'nexora.operationInProgress', value);
@@ -231,8 +236,21 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Inline completion: grey text ahead of the cursor in every editor
 	registerInlineCompletion(context);
 	// Wire IDE keys into every backend HTTP call (primary runtime credentials)
+	// Nexora Cloud: sign in instead of bringing keys; the engine bills models without an own key to it.
+	const cloud = new CloudAccount(context);
+	registerUriRoute('/cloud-auth', (uri) => void cloud.completeSignIn(uri));
+	context.subscriptions.push(
+		cloud,
+		vscode.commands.registerCommand('nexora.cloudSignIn', () => cloud.signIn()),
+		vscode.commands.registerCommand('nexora.cloudSignOut', () => cloud.signOut()),
+		vscode.commands.registerCommand('nexora.cloudMenu', () => cloud.showMenu())
+	);
 	setApiKeyHeaderProvider(async () => {
 		const headers: Record<string, string> = {};
+		const cloudToken = await cloud.token();
+		if (cloudToken) {
+			headers['X-Nexora-Cloud-Token'] = cloudToken;
+		}
 		const [openai, anthropic, gemini, openrouter] = await Promise.all([
 			settingsService.getApiKey('openai'),
 			settingsService.getApiKey('anthropic'),
@@ -346,6 +364,13 @@ export async function activate(context: vscode.ExtensionContext) {
 		)
 	);
 
+	const workspaceIndex = new WorkspaceIndexService(context);
+	context.subscriptions.push(
+		workspaceIndex,
+		workspaceIndex.onDidIndex(() => void timelineProvider.refresh()),
+		vscode.commands.registerCommand('nexora.reindexWorkspace', () => workspaceIndex.indexNow())
+	);
+
 	const engine = await startNexoraEngine(context);
 	getBackendClient({
 		baseUrl: engine.baseUrl,
@@ -368,11 +393,13 @@ export async function activate(context: vscode.ExtensionContext) {
 	};
 	if (engine.ready || getEngineState() === 'ready') {
 		await connectRealtime();
+		void workspaceIndex.start();
 	} else {
 		const sub = onDidChangeEngineState((state) => {
 			if (state === 'ready') {
 				sub.dispose();
 				void connectRealtime();
+				void workspaceIndex.start();
 			}
 		});
 		context.subscriptions.push(sub);
@@ -427,6 +454,26 @@ export async function activate(context: vscode.ExtensionContext) {
 				void setOperationInProgress(true);
 			}
 			notifications.handleOrchestrationEvent(message);
+		}
+
+		// After a reconnect the client replays each subscribed plan as one snapshot.
+		// Task events missed while disconnected never arrive, so the Workflow view and
+		// the task tree take their state from it too, not only the chat (G-18).
+		if (message.type === 'plan_snapshot') {
+			const snapshot = workflowPlanFromSnapshot(message.plan_id || '', message.result);
+			if (snapshot) {
+				const shown = workflowProvider.getCurrentPlan();
+				if (!shown || shown.plan_id === snapshot.plan_id) {
+					workflowProvider.updatePlan(snapshot);
+				}
+				for (const task of snapshot.tasks) {
+					taskTreeProvider.updateTaskStatus(task.task_id, task.status);
+				}
+				// plan_completed may have been missed too; don't leave Escape bound to cancel.
+				if (TERMINAL_PLAN_STATUSES.has(snapshot.status)) {
+					void setOperationInProgress(false);
+				}
+			}
 		}
 
 		if (message.type === 'plan_completed') {
