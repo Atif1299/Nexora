@@ -13,6 +13,7 @@ import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { SettingsPanelProvider } from './settingsPanel';
 import { WorkspaceIndexService } from './services/workspaceIndex';
 import { CloudAccount } from './services/cloudAccount';
+import { refreshCapabilities } from './services/backend/capabilities';
 import { TemplatesPanelProvider } from './templatesPanel';
 import { TimelinePanelProvider } from './timelinePanel';
 import { getBackendClient, notifyBackendClientConfigured, setApiKeyHeaderProvider } from './services/backendClient';
@@ -241,6 +242,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	registerUriRoute('/cloud-auth', (uri) => void cloud.completeSignIn(uri));
 	context.subscriptions.push(
 		cloud,
+		// The engine reports Cloud as a usable model once the token header arrives; re-ask so the first-run card updates.
+		cloud.onDidChange(() => void refreshCapabilities()),
 		vscode.commands.registerCommand('nexora.cloudSignIn', () => cloud.signIn()),
 		vscode.commands.registerCommand('nexora.cloudSignOut', () => cloud.signOut()),
 		vscode.commands.registerCommand('nexora.cloudMenu', () => cloud.showMenu())
@@ -371,6 +374,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.reindexWorkspace', () => workspaceIndex.indexNow())
 	);
 
+	// Registered before the engine wait: the status bar item opens it while the engine is still starting.
+	context.subscriptions.push(vscode.commands.registerCommand('nexora.showEngineOutput', () => showEngineOutput()));
 	const engine = await startNexoraEngine(context);
 	getBackendClient({
 		baseUrl: engine.baseUrl,
@@ -539,9 +544,6 @@ export async function activate(context: vscode.ExtensionContext) {
 			} else {
 				void notifications.showError('Nexora engine is offline. Check the "Nexora Engine" output channel.');
 			}
-		}),
-		vscode.commands.registerCommand('nexora.showEngineOutput', () => {
-			showEngineOutput();
 		}),
 		vscode.commands.registerCommand('nexora.decomposeRequest', async () => {
 			const request = await vscode.window.showInputBox({

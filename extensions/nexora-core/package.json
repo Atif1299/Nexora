@@ -567,7 +567,7 @@
         "nexora.browser.chromePath": {
           "type": "string",
           "default": "",
-          "description": "Optional path to chrome.exe. Used when Chrome is not found in the default install locations."
+          "description": "Optional path to chrome.exe or msedge.exe. Without it, Nexora uses Chrome, or Microsoft Edge when Chrome is not installed."
         },
         "nexora.cloud.url": {
           "type": "string",

@@ -31,6 +31,9 @@ function cloudUrl(): string {
 export class CloudAccount implements vscode.Disposable {
 	private readonly statusItem = vscode.window.createStatusBarItem('nexora.cloud', vscode.StatusBarAlignment.Right, 100);
 	private readonly timer = setInterval(() => void this.refresh(), REFRESH_MS);
+	private readonly changed = new vscode.EventEmitter<void>();
+	/** Signed in or out: what the engine can run has changed. */
+	readonly onDidChange = this.changed.event;
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		this.statusItem.name = 'Nexora Cloud';
@@ -41,6 +44,7 @@ export class CloudAccount implements vscode.Disposable {
 	dispose(): void {
 		clearInterval(this.timer);
 		this.statusItem.dispose();
+		this.changed.dispose();
 	}
 
 	token(): Thenable<string | undefined> {
@@ -65,6 +69,7 @@ export class CloudAccount implements vscode.Disposable {
 		}
 		await this.context.secrets.store(TOKEN_KEY, token);
 		void vscode.window.showInformationMessage(`Signed in to Nexora Cloud as ${query.get('login') ?? 'you'}.`);
+		this.changed.fire();
 		await this.refresh();
 	}
 
@@ -72,6 +77,7 @@ export class CloudAccount implements vscode.Disposable {
 	async signOut(): Promise<void> {
 		await this.call('/auth/logout', 'POST').catch(() => undefined);
 		await this.context.secrets.delete(TOKEN_KEY);
+		this.changed.fire();
 		await this.refresh();
 	}
 
@@ -89,8 +95,13 @@ export class CloudAccount implements vscode.Disposable {
 			{ title: `Nexora Cloud: ${account.login}, $${account.credit_usd.toFixed(2)} left, $${account.month.cost_usd.toFixed(2)} used this month` }
 		);
 		if (choice?.id === 'credit') {
-			const { url } = await this.call<{ url: string }>('/billing/checkout', 'POST');
-			await vscode.env.openExternal(vscode.Uri.parse(url));
+			try {
+				const { url } = await this.call<{ url: string }>('/billing/checkout', 'POST');
+				await vscode.env.openExternal(vscode.Uri.parse(url));
+			} catch {
+				// The gateway answers 503 until payments are configured.
+				void vscode.window.showWarningMessage('Adding credit is not open yet. You can add your own API key in Settings meanwhile.');
+			}
 		} else if (choice?.id === 'out') {
 			await this.signOut();
 		}

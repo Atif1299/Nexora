@@ -91,17 +91,20 @@ function configuredChromePath(): string {
 	return String(vscode.workspace.getConfiguration('nexora').get<string>('browser.chromePath', '') || '').trim();
 }
 
+/** Chrome first; Microsoft Edge (same Chromium engine, on every Windows PC) when Chrome is missing. */
 function findChromeOnDisk(): string | undefined {
 	const localApp = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
 	const candidates = process.platform === 'win32'
 		? [
 			'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
 			'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-			path.join(localApp, 'Google', 'Chrome', 'Application', 'chrome.exe')
+			path.join(localApp, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+			'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+			'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
 		]
 		: process.platform === 'darwin'
-			? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
-			: ['/usr/bin/google-chrome-stable', '/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium'];
+			? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge']
+			: ['/usr/bin/google-chrome-stable', '/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/microsoft-edge'];
 	return candidates.find(p => p && fs.existsSync(p));
 }
 
@@ -120,11 +123,14 @@ async function launchPersistent(): Promise<BrowserContext> {
 	if (found) {
 		return chromium.launchPersistentContext(userDataDir, { ...opts, executablePath: found });
 	}
-	try {
-		return await chromium.launchPersistentContext(userDataDir, { ...opts, channel: 'chrome' });
-	} catch {
-		throw new Error('Chrome not found. Install Google Chrome or set nexora.browser.chromePath.');
+	for (const channel of ['chrome', 'msedge']) {
+		try {
+			return await chromium.launchPersistentContext(userDataDir, { ...opts, channel });
+		} catch {
+			// Try the next installed browser.
+		}
 	}
+	throw new Error('No Chrome or Edge found. Install Google Chrome or Microsoft Edge, or set nexora.browser.chromePath.');
 }
 
 export async function stopScreencast(): Promise<void> {
