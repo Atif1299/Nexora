@@ -9,7 +9,7 @@ import { promises as fs } from 'fs';
 import { getBackendClient, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './services/backendClient';
 import { RequestCancelledError, isRequestCancelled } from './services/backend/transport';
 import { getChatWebviewHtml } from './webview/chat';
-import type { ChatActivityItem, ChatInitialState, WebviewInboundMessage } from './webview/chat/types';
+import type { ChatActivityItem, ChatInitialState, ContextTag, RunMode, WebviewInboundMessage } from './webview/chat/types';
 import { getOrchestrationWebSocket, type WebSocketMessage } from './services/websocketClient';
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
 import { openUrlFromChat } from './services/browser';
@@ -18,6 +18,7 @@ import { getSettingsService } from './services/settingsService';
 import { oauthProviderLabel, onDidCompleteOAuth, startOAuthConnect, type OAuthProvider } from './services/oauthConnect';
 import {
 	getAgentFlag,
+	getAgentRunMode,
 	getAgentMaxBudgetUsd,
 	getAgentMaxTurns,
 	getCodeExecutor,
@@ -87,6 +88,8 @@ type ChatSessionMessage = {
 	activity?: ChatActivityItem[];
 	/** Agent messages: the checkpoint holding the files as they were before it. */
 	checkpointId?: string;
+	/** User messages: composer selection tags sent with it, replayed on Edit/Retry. */
+	context?: ContextTag[];
 };
 
 type ChatSessionRecord = {
@@ -116,6 +119,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	private _onSessionsChanged?: () => void;
 
 	private readonly _context: vscode.ExtensionContext;
+	/** Selection tags from the composer, added to the next request by _injectAtMentionContext. */
+	private _pendingContextBlocks: string[] = [];
+	/** The same tags, stored on the user message by _recordUserMessage so a rewind can resend them. */
+	private _pendingContextTags: ContextTag[] = [];
+	private _selectionTimer?: ReturnType<typeof setTimeout>;
 	private _sessions: ChatSessionRecord[] = [];
 	private _activeSessionId: string = '';
 	private _backendOffline = false;
@@ -132,6 +140,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		this._loadSessions();
 		onDidChangeCapabilities((report) => {
 			void this._pushFirstRunCard(report);
+			// A key saved or a Nexora Cloud sign-in changes which models the picker can offer.
+			void this._pushModelPicker();
 		});
 		onDidCompleteOAuth(() => {
 			void this._checkAuthStatus();
@@ -141,7 +151,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				if (e.affectsConfiguration('nexora.chat.submitWithCtrlEnter')) {
 					this._pushChatComposerSettings();
 				}
-			})
+				if (e.affectsConfiguration('nexora.agent.runMode') || e.affectsConfiguration('nexora.agent.autoApply')) {
+					this._pushComposerState();
+				}
+			}),
+			// The composer's "Current selection" item appears only while something is selected.
+			vscode.window.onDidChangeTextEditorSelection(() => this._scheduleComposerState()),
+			vscode.window.onDidChangeActiveTextEditor(() => this._scheduleComposerState())
 		);
 	}
 
@@ -363,6 +379,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return undefined;
 		}
 		const entry: ChatSessionMessage = { role: 'user', content };
+		if (this._pendingContextTags.length) {
+			entry.context = this._pendingContextTags;
+			this._pendingContextTags = [];
+		}
 		if (mode) {
 			entry.mode = mode;
 			entry.timestamp = Date.now();
@@ -608,7 +628,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			void this._broadcastSessions();
 			void this._pushSuggestions();
 			void this._pushFirstRunCard();
+			this._pushComposerState();
 			return;
+		}
+		if (data.type === 'sendMessage' || data.type === 'askWorkspace' || data.type === 'generatePlan'
+			|| data.type === 'executeRequest' || data.type === 'runAgent') {
+			this._pendingContextBlocks = this._contextTagBlocks(data.context);
+			this._pendingContextTags = (data.context || []).filter((t) => t.kind === 'selection' && t.text);
 		}
 		if (data.type === 'sendMessage') {
 			await this._handleUserMessage(data.message, data.model);
@@ -642,6 +668,21 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._handleSaveFirstRunKey(data.provider, data.key);
 		} else if (data.type === 'dismissFirstRunCard') {
 			await this._dismissFirstRunCard();
+		} else if (data.type === 'cloudSignIn') {
+			await vscode.commands.executeCommand('nexora.cloudSignIn');
+		} else if (data.type === 'setRunMode') {
+			await this._setRunMode(data.runMode);
+		} else if (data.type === 'setEffort') {
+			await getSettingsService(this._context).setAgentEffort(data.effort);
+			this._pushComposerState();
+		} else if (data.type === 'runSlash') {
+			await this._runSlash(data.command);
+		} else if (data.type === 'requestSelection') {
+			this._postSelectionTag();
+		} else if (data.type === 'requestOpenEditors') {
+			this._postOpenEditorTags();
+		} else if (data.type === 'requestFolder') {
+			await this._postFolderTag();
 		} else if (data.type === 'deployProject') {
 			await this._handleDeployment(data.prompt, data.repoName, data.projectName);
 		} else if (data.type === 'checkAuthStatus') {
@@ -830,7 +871,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		for await (const ev of client.chatStream(message, workspacePath, llmModel, {
 			session_id: sessionId,
 			workspace_id: workspaceId,
-			signal: reply.signal
+			signal: reply.signal,
+			effort: getSettingsService(this._context).getPreferences().agentEffort
 		})) {
 			this._assertReply(reply);
 			if (ev.type === 'token' && ev.content) {
@@ -890,7 +932,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			model,
 			mode,
 			sessionId,
-			reply?.signal
+			reply?.signal,
+			getSettingsService(this._context).getPreferences().agentEffort
 		)) {
 			this._assertReply(reply);
 			if (ev.type === 'token' && ev.content) {
@@ -1299,9 +1342,165 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		return `[Context: ${rel}]\n\`\`\`\n${text.slice(0, maxChars)}\n\`\`\`\n... (truncated)`;
 	}
 
+	// --- composer (src/webview/chat/composer.js) ---------------------------
+
+	private _pushComposerState(): void {
+		if (!this._hasChatSurface()) {
+			return;
+		}
+		const editor = vscode.window.activeTextEditor;
+		this._postToWebviews({
+			type: 'composerState',
+			runMode: getAgentRunMode(),
+			effort: getSettingsService(this._context).getPreferences().agentEffort,
+			hasSelection: !!editor && !editor.selection.isEmpty
+		});
+	}
+
+	private _scheduleComposerState(): void {
+		clearTimeout(this._selectionTimer);
+		this._selectionTimer = setTimeout(() => this._pushComposerState(), 300);
+	}
+
+	/** The approval chip writes the same setting as Settings; getAgentRunMode() reads it on every tool call. */
+	private async _setRunMode(runMode: RunMode): Promise<void> {
+		try {
+			await vscode.workspace.getConfiguration('nexora').update('agent.runMode', runMode, vscode.ConfigurationTarget.Global);
+		} catch (error) {
+			void vscode.window.showWarningMessage(`Could not change the approval mode: ${error instanceof Error ? error.message : String(error)}`);
+		}
+		this._pushComposerState();
+	}
+
+	private _contextTagBlocks(tags: ContextTag[] | undefined): string[] {
+		return (tags || [])
+			.filter((t) => t.kind === 'selection' && t.text)
+			.map((t) => `[Context: ${t.label}]\n\`\`\`\n${t.text}\n\`\`\``);
+	}
+
+	private _postSelectionTag(): void {
+		const editor = vscode.window.activeTextEditor;
+		if (!editor || editor.selection.isEmpty) {
+			return;
+		}
+		const sel = editor.selection;
+		const label = `${path.basename(editor.document.uri.fsPath || editor.document.fileName)}:${sel.start.line + 1}-${sel.end.line + 1}`;
+		const text = editor.document.getText(sel).slice(0, 8000);
+		this._postToWebviews({ type: 'contextTags', tags: [{ kind: 'selection', label, text }] });
+	}
+
+	/** Workspace-relative POSIX path, or undefined for a file outside the workspace. */
+	private _workspaceRel(uri: vscode.Uri): string | undefined {
+		if (!vscode.workspace.getWorkspaceFolder(uri)) {
+			return undefined;
+		}
+		const rel = vscode.workspace.asRelativePath(uri, false);
+		return rel && !path.isAbsolute(rel) ? rel.replace(/\\/g, '/') : undefined;
+	}
+
+	private _postOpenEditorTags(): void {
+		const tags: ContextTag[] = [];
+		for (const group of vscode.window.tabGroups.all) {
+			for (const tab of group.tabs) {
+				if (tags.length >= 10 || !(tab.input instanceof vscode.TabInputText)) {
+					continue;
+				}
+				const rel = this._workspaceRel(tab.input.uri);
+				if (rel && !tags.some((t) => t.path === rel)) {
+					tags.push({ kind: 'file', label: rel, path: rel });
+				}
+			}
+		}
+		if (tags.length) {
+			this._postToWebviews({ type: 'contextTags', tags });
+		}
+	}
+
+	private async _postFolderTag(): Promise<void> {
+		const picked = await vscode.window.showOpenDialog({
+			canSelectFolders: true,
+			canSelectFiles: false,
+			canSelectMany: false,
+			defaultUri: vscode.workspace.workspaceFolders?.[0]?.uri,
+			openLabel: 'Add folder'
+		});
+		if (!picked?.[0]) {
+			return;
+		}
+		const rel = this._workspaceRel(picked[0]);
+		if (!rel) {
+			void vscode.window.showInformationMessage('Pick a folder inside this workspace.');
+			return;
+		}
+		this._postToWebviews({ type: 'contextTags', tags: [{ kind: 'folder', label: rel, path: rel }] });
+	}
+
+	private async _runSlash(command: string): Promise<void> {
+		switch (command) {
+			case 'new':
+				await this._handleNewSession();
+				return;
+			case 'reindex':
+				await vscode.commands.executeCommand('nexora.reindexWorkspace');
+				return;
+			case 'rules':
+				await this._openProjectRules();
+				return;
+			case 'help':
+				this._postToWebviews({
+					type: 'addMessage',
+					role: 'assistant',
+					isLoading: false,
+					content: [
+						'**Commands:** `/new` new chat, `/chat` `/ask` `/agent` `/plan` `/execute` switch mode (text after the command is sent in that mode), `/model` choose a model, `/reindex` re-index the workspace, `/rules` open the project rules, `/help` this list.',
+						'**Keys:** Enter send, Shift+Enter new line, Shift+Tab next mode, Esc close a menu or stop a reply, @ add a file, / commands.'
+					].join('\n\n')
+				});
+				return;
+			default:
+				return;
+		}
+	}
+
+	private async _openProjectRules(): Promise<void> {
+		const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+		if (!root) {
+			void vscode.window.showInformationMessage('Open a folder to use project rules.');
+			return;
+		}
+		for (const name of ['AGENTS.md', 'CLAUDE.md']) {
+			const uri = vscode.Uri.joinPath(root, name);
+			try {
+				await vscode.workspace.fs.stat(uri);
+				await vscode.window.showTextDocument(uri);
+				return;
+			} catch {
+				// Try the next rules file.
+			}
+		}
+		const rulesDir = vscode.Uri.joinPath(root, '.nexora', 'rules');
+		try {
+			const entries = await vscode.workspace.fs.readDirectory(rulesDir);
+			const first = entries.find(([name, type]) => type === vscode.FileType.File && name.endsWith('.md'));
+			if (first) {
+				await vscode.window.showTextDocument(vscode.Uri.joinPath(rulesDir, first[0]));
+				return;
+			}
+		} catch {
+			// No rules folder.
+		}
+		const create = 'Create AGENTS.md';
+		if (await vscode.window.showInformationMessage('This project has no rules file yet.', create) === create) {
+			const uri = vscode.Uri.joinPath(root, 'AGENTS.md');
+			await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode('# Project rules\n\nWrite how Nexora should work in this project.\n'));
+			await vscode.window.showTextDocument(uri);
+		}
+	}
+
 	private async _injectAtMentionContext(message: string): Promise<string> {
 		const mentions = this._parseAtMentions(message);
-		const blocks: string[] = [];
+		const blocks: string[] = this._pendingContextBlocks;
+		this._pendingContextBlocks = [];
 		for (const mention of mentions) {
 			const block = await this._readAtMentionBlock(mention);
 			if (block) {
@@ -3630,7 +3829,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				// The local chat is already rewound; the engine copy is best effort, like appending.
 			}
 		}
-		this._postToWebviews({ type: 'resend', text: message, mode: original.mode });
+		this._postToWebviews({ type: 'resend', text: message, mode: original.mode, context: original.context ?? [] });
 	}
 
 	/** Tell the chat which messages have agent edits to restore. */

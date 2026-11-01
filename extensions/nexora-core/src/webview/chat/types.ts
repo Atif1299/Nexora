@@ -3,10 +3,24 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+/** Composer effort: how hard the model thinks (engine services/llm.py:effort_kwargs). */
+export type Effort = 'fast' | 'balanced' | 'thorough';
+/** Same values as the nexora.agent.runMode setting. */
+export type RunMode = 'ask' | 'auto-edit' | 'allowlist' | 'run-everything';
+/** Context the user attached in the composer; sent with the message and cleared after. */
+export interface ContextTag {
+	kind: 'file' | 'folder' | 'selection';
+	label: string;
+	path?: string;
+	text?: string;
+}
+/** What every composer send carries besides the text. */
+type ComposerExtras = { model?: string; effort?: Effort; context?: ContextTag[] };
+
 export type WebviewInboundMessage =
 	| { type: 'chatWebviewReady' }
-	| { type: 'sendMessage'; message: string; model?: string }
-	| { type: 'askWorkspace'; message: string; model?: string }
+	| ({ type: 'sendMessage'; message: string } & ComposerExtras)
+	| ({ type: 'askWorkspace'; message: string } & ComposerExtras)
 	| { type: 'checkBackend' }
 	| { type: 'generateCode'; prompt: string; connector: string }
 	| { type: 'connectGitHub' }
@@ -16,9 +30,10 @@ export type WebviewInboundMessage =
 	| { type: 'openUrl'; url: string }
 	| { type: 'saveFirstRunKey'; provider: 'openai' | 'anthropic' | 'gemini' | 'openrouter'; key: string }
 	| { type: 'dismissFirstRunCard' }
+	| { type: 'cloudSignIn' }
 	| { type: 'deployProject'; prompt: string; repoName: string; projectName: string }
 	| { type: 'checkAuthStatus' }
-	| { type: 'generatePlan'; request: string; model?: string }
+	| ({ type: 'generatePlan'; request: string } & ComposerExtras)
 	| { type: 'newSession' }
 	| { type: 'switchSession'; sessionId: string }
 	| { type: 'deleteSession'; sessionId: string }
@@ -32,8 +47,8 @@ export type WebviewInboundMessage =
 	| { type: 'browsePlatforms' }
 	| { type: 'indexWorkspace' }
 	| { type: 'showEngineOutput' }
-	| { type: 'executeRequest'; request: string; model?: string }
-	| { type: 'runAgent'; request: string; model?: string }
+	| ({ type: 'executeRequest'; request: string } & ComposerExtras)
+	| ({ type: 'runAgent'; request: string } & ComposerExtras)
 	| { type: 'restoreCheckpoint'; id: string }
 	/** Edit or retry: drop the ordinal-th user message and everything after it, then send `text`. */
 	| { type: 'rewindTo'; ordinal: number; text: string }
@@ -46,7 +61,13 @@ export type WebviewInboundMessage =
 	| { type: 'requestSuggestions' }
 	| { type: 'requestAtComplete'; prefix: string }
 	| { type: 'requestModelPicker' }
-	| { type: 'selectModel'; modelId: string };
+	| { type: 'selectModel'; modelId: string }
+	| { type: 'setRunMode'; runMode: RunMode }
+	| { type: 'setEffort'; effort: Effort }
+	| { type: 'runSlash'; command: string; rest: string }
+	| { type: 'requestSelection' }
+	| { type: 'requestOpenEditors' }
+	| { type: 'requestFolder' };
 
 export type ChatActivityStatus =
 	| 'confirming'
@@ -97,6 +118,9 @@ export type WebviewOutboundMessage =
 	| { type: 'showSaveTemplate'; planId: string; parameters: any[] }
 	| { type: 'showSuggestion'; suggestion: any | null }
 	| { type: 'firstRunKeyCard'; show: boolean }
+	| { type: 'composerState'; runMode: RunMode; effort: Effort; hasSelection: boolean }
+	| { type: 'contextTags'; tags: ContextTag[] }
+	| { type: 'openModelMenu' }
 	| { type: 'firstRunKeyResult'; success: boolean; error?: string }
 	| {
 		type: 'atCompleteResults';

@@ -35,6 +35,7 @@ import {
 	type McpDevicePoll
 } from './backend/mcpConnect';
 import { createA2AApi, type A2ADelegateResult } from './backend/a2a';
+import type { Effort } from '../webview/chat/types';
 
 export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
 export type { SSEEvent };
@@ -226,13 +227,14 @@ export class BackendClient {
 		message: string,
 		workspacePath?: string,
 		model?: string,
-		options?: { session_id?: string; workspace_id?: string; signal?: AbortSignal }
+		options?: { session_id?: string; workspace_id?: string; signal?: AbortSignal; effort?: Effort }
 	): AsyncIterable<SSEEvent> {
-		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string; project_rules: boolean } = {
+		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string; project_rules: boolean; effort?: Effort } = {
 			message,
 			workspace_path: workspacePath,
 			model,
-			project_rules: projectRulesEnabled()
+			project_rules: projectRulesEnabled(),
+			effort: options?.effort
 		};
 		if (options?.session_id) {
 			body.session_id = options.session_id;
@@ -260,7 +262,8 @@ export class BackendClient {
 		model?: string,
 		mode: AgentMode = 'ask',
 		sessionId?: string,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		effort?: Effort
 	): Promise<AgentTurnResponse> {
 		return createAgentApi(this.transport).agentTurn(
 			messages,
@@ -269,7 +272,8 @@ export class BackendClient {
 			model,
 			mode,
 			sessionId,
-			signal
+			signal,
+			effort
 		);
 	}
 
@@ -283,7 +287,8 @@ export class BackendClient {
 		model?: string,
 		mode: AgentMode = 'ask',
 		sessionId?: string,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		effort?: Effort
 	): AsyncIterable<SSEEvent> {
 		return createAgentApi(this.transport).agentTurnStream(
 			messages,
@@ -292,7 +297,8 @@ export class BackendClient {
 			model,
 			mode,
 			sessionId,
-			signal
+			signal,
+			effort
 		);
 	}
 

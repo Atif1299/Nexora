@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 
 import type { SSEEvent, Transport } from './transport';
+import type { Effort } from '../../webview/chat/types';
 
 /** Agent turns call LiteLLM with tools; 30s aborts a healthy first completion. */
 const AGENT_TURN_TIMEOUT_MS = 120000;
@@ -72,7 +73,8 @@ export function createAgentApi(transport: Transport) {
 			model?: string,
 			mode: AgentMode = 'ask',
 			sessionId?: string,
-			signal?: AbortSignal
+			signal?: AbortSignal,
+			effort?: Effort
 		): Promise<AgentTurnResponse> => {
 			return await transport.post('/api/agent/turn', {
 				messages,
@@ -81,6 +83,7 @@ export function createAgentApi(transport: Transport) {
 				model,
 				mode,
 				max_tokens: 2048,
+				effort,
 				session_id: sessionId,
 				shell: currentShell()
 			}, AGENT_TURN_TIMEOUT_MS, signal);
@@ -96,7 +99,8 @@ export function createAgentApi(transport: Transport) {
 			model?: string,
 			mode: AgentMode = 'ask',
 			sessionId?: string,
-			signal?: AbortSignal
+			signal?: AbortSignal,
+			effort?: Effort
 		): AsyncIterable<SSEEvent> => {
 			return transport.postStream('/api/agent/turn/stream', {
 				messages,
@@ -105,6 +109,7 @@ export function createAgentApi(transport: Transport) {
 				model,
 				mode,
 				max_tokens: 2048,
+				effort,
 				session_id: sessionId,
 				shell: currentShell(),
 				project_rules: projectRulesEnabled()

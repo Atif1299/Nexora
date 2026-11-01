@@ -5,7 +5,7 @@
 
 import type { Transport } from './transport';
 
-export type ModelProviderId = 'openai' | 'anthropic' | 'gemini' | 'openrouter';
+export type ModelProviderId = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'nexora_cloud';
 export type ModelTier = 'free' | 'paid';
 
 export interface CatalogModel {
@@ -14,6 +14,10 @@ export interface CatalogModel {
 	context?: number;
 	tier: ModelTier;
 	recommended?: boolean;
+	/** The model has a reasoning setting, so the composer's effort changes how it thinks. */
+	reasoning: boolean;
+	/** "$" / "$$" / "$$$" from the engine price table; "" when unpriced. */
+	priceTier: string;
 }
 
 export interface CatalogProvider {
@@ -51,7 +55,7 @@ function normalizeTier(value: unknown): ModelTier {
 }
 
 function normalizeProviderId(value: unknown): ModelProviderId | undefined {
-	if (value === 'openai' || value === 'anthropic' || value === 'gemini' || value === 'openrouter') {
+	if (value === 'openai' || value === 'anthropic' || value === 'gemini' || value === 'openrouter' || value === 'nexora_cloud') {
 		return value;
 	}
 	return undefined;
@@ -71,7 +75,9 @@ function normalizeModel(raw: unknown): CatalogModel | undefined {
 		id,
 		label,
 		tier: normalizeTier(m.tier),
-		recommended: asBool(m.recommended)
+		recommended: asBool(m.recommended),
+		reasoning: asBool(m.reasoning),
+		priceTier: asString(m.price_tier)
 	};
 	const context = asNumber(m.context);
 	if (context !== undefined) {

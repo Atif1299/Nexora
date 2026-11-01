@@ -241,12 +241,26 @@ body
 	cursor: pointer;
 }
 
-.nx-firstRunSave
+.nx-firstRunCloud
 {
+	border: none;
+	border-radius: var(--nx-radius-1);
+	padding: 6px 10px;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
 	background: var(--nx-primary);
 	color: var(--nx-primaryFg);
 }
 
+.nx-firstRunOr
+{
+	font-size: 11px;
+	color: var(--nx-muted);
+	margin-top: var(--nx-space-1);
+}
+
+.nx-firstRunSave,
 .nx-firstRunSettings,
 .nx-firstRunDismiss
 {
@@ -1033,6 +1047,7 @@ body
 	border: 0;
 	background: transparent;
 	color: var(--nx-inputFg);
+	font-family: inherit;
 	font-size: 13px;
 	line-height: 1.45;
 	height: auto;
@@ -1590,26 +1605,7 @@ body
 	border: 0;
 }
 
-.nx-modeHint
-{
-	position: relative;
-	z-index: 0;
-	margin-top: 6px;
-	padding: 2px 4px 0;
-	background: transparent;
-	border-radius: 0;
-	border: none;
-}
 
-.nx-modeHint[data-mode="chat"],
-.nx-modeHint[data-mode="ask"],
-.nx-modeHint[data-mode="plan"],
-.nx-modeHint[data-mode="execute"],
-.nx-modeHint[data-mode="agent"]
-{
-	border: none;
-	background: transparent;
-}
 
 .nx-hintText
 {
@@ -1631,26 +1627,9 @@ body
 	opacity: 0.55;
 }
 
-.nx-modeHint[data-mode="ask"] .nx-hintText::before
-{
-	background: var(--vscode-charts-purple, #a371f7);
-}
 
-.nx-modeHint[data-mode="plan"] .nx-hintText::before
-{
-	background: var(--vscode-charts-orange, #d29922);
-}
 
-.nx-modeHint[data-mode="execute"] .nx-hintText::before
-{
-	background: var(--vscode-charts-green, #3fb950);
-}
 
-.nx-modeHint[data-mode="agent"] .nx-hintText::before
-{
-	background: color-mix(in srgb, var(--vscode-charts-red, #f85149) 40%, var(--nx-muted));
-	opacity: 0.5;
-}
 
 /* Plan Approval Card */
 .nx-planCard
@@ -2644,7 +2623,9 @@ body
 	margin: 0;
 	border: 0;
 	overflow: hidden;
-	white-space: pre;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+	word-break: break-word;
 	font-size: 13px;
 	line-height: 1.45;
 	font-family: inherit;
@@ -2889,4 +2870,273 @@ body
 {
 	opacity: 1;
 	text-decoration: underline;
+}
+
+/* Composer chips, menus and tags (composer.js) */
+.nx-composerCard
+{
+	position: relative;
+}
+
+.nx-composerChips
+{
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	flex-wrap: wrap;
+}
+
+.nx-chip
+{
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	max-width: 220px;
+	height: 24px;
+	padding: 0 8px;
+	border: 1px solid color-mix(in srgb, var(--nx-border) 70%, transparent);
+	border-radius: var(--nx-radius-1);
+	background: transparent;
+	color: var(--nx-muted);
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.nx-chip:hover,
+.nx-chip[aria-expanded="true"]
+{
+	color: var(--nx-fg);
+	background: var(--nx-ddListHover);
+}
+
+.nx-chip[hidden]
+{
+	display: none;
+}
+
+.nx-chipIcon
+{
+	width: 24px;
+	padding: 0;
+	justify-content: center;
+	font-size: 15px;
+	line-height: 1;
+}
+
+.nx-chipText
+{
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.nx-chipChevron
+{
+	flex: 0 0 auto;
+	opacity: 0.7;
+}
+
+.nx-composerMenu
+{
+	position: absolute;
+	z-index: 50;
+	min-width: 220px;
+	max-width: min(320px, calc(100% - 8px));
+	max-height: 320px;
+	overflow-y: auto;
+	padding: 4px;
+	border: 1px solid var(--nx-ddMenuBorder);
+	border-radius: var(--nx-radius-2);
+	background: var(--nx-ddMenuBg);
+	color: var(--nx-ddMenuFg);
+	box-shadow: var(--nx-ddShadow);
+}
+
+.nx-composerMenu[hidden]
+{
+	display: none;
+}
+
+.nx-menuHeader
+{
+	padding: 6px 8px 2px;
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-menuNote
+{
+	padding: 6px 8px;
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-menuItem
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	width: 100%;
+	padding: 5px 8px;
+	border: 0;
+	border-radius: var(--nx-radius-1);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.nx-menuItem:hover,
+.nx-menuItem.nx-isActive
+{
+	background: var(--nx-ddListHover);
+}
+
+.nx-menuItem.nx-isSelected .nx-menuLabel
+{
+	color: var(--nx-fg);
+	font-weight: 600;
+}
+
+.nx-menuMain
+{
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.nx-menuLabel
+{
+	font-size: 12px;
+}
+
+.nx-menuDesc
+{
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-menuHint
+{
+	flex: 0 0 auto;
+	font-size: 11px;
+	color: var(--nx-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+.nx-menuFooter
+{
+	margin-top: 4px;
+	padding-top: 4px;
+	border-top: 1px solid color-mix(in srgb, var(--nx-border) 55%, transparent);
+}
+
+.nx-menuSearch
+{
+	width: 100%;
+	margin: 2px 0 4px;
+	padding: 4px 8px;
+	border: 1px solid var(--nx-inputBorder, var(--nx-border));
+	border-radius: var(--nx-radius-1);
+	background: var(--nx-inputBg);
+	color: var(--nx-inputFg);
+	font: inherit;
+	font-size: 12px;
+}
+
+.nx-menuEffort
+{
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	padding: 4px 8px;
+}
+
+.nx-menuEffortLabel
+{
+	font-size: 12px;
+}
+
+.nx-menuEffortGroup
+{
+	display: inline-flex;
+	gap: 2px;
+}
+
+.nx-effortBtn
+{
+	padding: 2px 8px;
+	border: 1px solid transparent;
+	border-radius: var(--nx-radius-1);
+	background: transparent;
+	color: var(--nx-muted);
+	font: inherit;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.nx-effortBtn:hover
+{
+	color: var(--nx-fg);
+}
+
+.nx-effortBtn.nx-isSelected
+{
+	color: var(--nx-fg);
+	border-color: color-mix(in srgb, var(--nx-border) 80%, transparent);
+	background: var(--nx-ddListHover);
+}
+
+.nx-menuEffort .nx-menuNote
+{
+	flex-basis: 100%;
+	padding: 0;
+}
+
+.nx-composerTags
+{
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 8px 12px 0;
+}
+
+.nx-composerTags[hidden]
+{
+	display: none;
+}
+
+.nx-composerTag
+{
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	max-width: 100%;
+	padding: 1px 4px 1px 8px;
+	border-radius: var(--nx-radius-1);
+	background: color-mix(in srgb, var(--nx-primary) 18%, transparent);
+	color: var(--nx-fg);
+	font-size: 11px;
+}
+
+.nx-composerTagLabel
+{
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.nx-composerTagRemove
+{
+	border: 0;
+	background: transparent;
+	color: var(--nx-muted);
+	font: inherit;
+	cursor: pointer;
 }

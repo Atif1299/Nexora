@@ -33,9 +33,6 @@
 	const sendBtnText = document.getElementById('sendBtnText');
 	const modeSelect = document.getElementById('modeSelect');
 	const modelSelect = document.getElementById('modelSelect');
-	const modeDdRoot = document.getElementById('modeDd');
-	const modelDdRoot = document.getElementById('modelDd');
-	const modeHint = document.getElementById('modeHint');
 	const statusDot = document.getElementById('statusDot');
 	const statusText = document.getElementById('statusText');
 	const welcome = document.getElementById('welcome');
@@ -54,6 +51,7 @@
 	const firstRunSettings = document.getElementById('firstRunSettings');
 	const firstRunDismiss = document.getElementById('firstRunDismiss');
 	const firstRunMsg = document.getElementById('firstRunMsg');
+	const firstRunCloud = document.getElementById('firstRunCloud');
 
 	let lastLoadingMessage = null;
 	// Raw text of the reply being streamed. The bubble shows it formatted, so
@@ -80,9 +78,6 @@
 	let saveTemplateCard = null;
 	let currentMode = 'chat';
 	let activeSessionId = null;
-	let openDdRoot = null;
-	let ddKbIndex = 0;
-	let ddGlobalsBound = false;
 	let messagesScrollBarTimer = null;
 	let replyInFlight = false;
 	let atCompleteTimer = null;
@@ -93,22 +88,6 @@
 	let atCompleteSuppressEnter = false;
 	let submitWithCtrlEnter = !!initial.submitWithCtrlEnter;
 
-	const modelDdList = document.getElementById('modelDdList');
-	const modelDdSearch = document.getElementById('modelDdSearch');
-	const modelDdSearchWrap = document.getElementById('modelDdSearchWrap');
-
-	let modelCatalog = null;
-	let enabledModelIds = [];
-	const selectedModelLabelCache = {};
-
-	const modeHints = {
-		'chat': 'Chat mode: Have a conversation, ask questions, get explanations',
-		'ask': 'Ask mode: Answer using indexed workspace memory (.mv2). Index the workspace first if needed.',
-		'plan': 'Plan mode: Generate an execution plan with cost estimation before executing',
-		'execute': 'Execute mode: Directly execute tasks with real-time progress',
-		'agent': 'Agent mode: Autonomous AI agent that plans and executes multi-step tasks'
-	};
-
 	const buttonLabels = {
 		'chat': 'Send',
 		'ask': 'Ask',
@@ -116,403 +95,6 @@
 		'execute': 'Execute',
 		'agent': 'Run Agent'
 	};
-
-	const PROVIDER_TITLE_CASE = {
-		openai: 'OpenAI',
-		openrouter: 'OpenRouter',
-		anthropic: 'Anthropic',
-		gemini: 'Gemini'
-	};
-
-	let ddCloseTimer = null;
-
-	function getDdMenu(root) {
-		if (!root) {
-			return null;
-		}
-		const trigger = root.querySelector('.nx-ddTrigger');
-		const id = trigger && trigger.getAttribute('aria-controls');
-		if (id) {
-			const byId = document.getElementById(id);
-			if (byId) {
-				return byId;
-			}
-		}
-		return root.querySelector('.nx-ddMenu');
-	}
-
-	function getDdOptions(menu) {
-		return Array.prototype.slice.call(menu.querySelectorAll('[role="option"]'));
-	}
-
-	function findDdOptionByValue(menu, val) {
-		const items = getDdOptions(menu);
-		for (let i = 0; i < items.length; i++) {
-			if (items[i].getAttribute('data-value') === val) {
-				return items[i];
-			}
-		}
-		return null;
-	}
-
-	function optionDisplayLabel(opt) {
-		if (!opt) {
-			return '';
-		}
-		const fromAttr = opt.getAttribute('data-label');
-		if (fromAttr) {
-			return fromAttr;
-		}
-		const labelEl = opt.querySelector('.nx-ddItemLabel');
-		if (labelEl) {
-			return (labelEl.textContent || '').trim();
-		}
-		return (opt.textContent || '').trim();
-	}
-
-	function prettifyModelId(id) {
-		let s = String(id || '').trim();
-		if (!s) {
-			return '';
-		}
-		s = s.replace(/:(free|paid)$/i, '');
-		const slash = s.lastIndexOf('/');
-		if (slash >= 0) {
-			s = s.slice(slash + 1);
-		}
-		s = s.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
-		return s.split(' ').map(function (word) {
-			if (!word) {
-				return word;
-			}
-			if (/^gpt\d/i.test(word) || /^gpt$/i.test(word)) {
-				return word.replace(/^gpt/i, 'GPT');
-			}
-			if (/^o\d/i.test(word)) {
-				return word;
-			}
-			return word.charAt(0).toUpperCase() + word.slice(1);
-		}).join(' ');
-	}
-
-	function resolveModelLabel(model) {
-		const id = model && model.id ? String(model.id) : '';
-		const label = model && model.label ? String(model.label).trim() : '';
-		if (label && label !== id) {
-			return label;
-		}
-		if (label && label.indexOf('/') === -1 && label.indexOf(':') === -1) {
-			return label;
-		}
-		return prettifyModelId(id || label) || label || id;
-	}
-
-	function humanProviderLabel(provider) {
-		if (!provider) {
-			return '';
-		}
-		const id = String(provider.id || '').toLowerCase();
-		if (PROVIDER_TITLE_CASE[id]) {
-			return PROVIDER_TITLE_CASE[id];
-		}
-		const raw = String(provider.label || provider.id || '').trim();
-		if (!raw) {
-			return '';
-		}
-		if (raw === raw.toUpperCase() && raw.length > 1) {
-			return raw.charAt(0) + raw.slice(1).toLowerCase();
-		}
-		return raw;
-	}
-
-	function ddItemHtml(value, label, opts) {
-		opts = opts || {};
-		const tierHtml = opts.tier === 'free'
-			? '<span class="nx-ddItemTier">Free</span>'
-			: '';
-		return '<button type="button" class="nx-ddItem" role="option" data-value="'
-			+ escapeHtml(value) + '" data-label="' + escapeHtml(label) + '">'
-			+ '<span class="nx-ddItemCheck" aria-hidden="true"></span>'
-			+ '<span class="nx-ddItemLabel">' + escapeHtml(label) + '</span>'
-			+ tierHtml
-			+ '</button>';
-	}
-
-	function portalDdMenu(menu) {
-		if (!menu || menu.parentElement === document.body) {
-			return;
-		}
-		menu._nxDdHome = {
-			parent: menu.parentElement,
-			next: menu.nextSibling
-		};
-		document.body.appendChild(menu);
-	}
-
-	function restoreDdMenu(menu) {
-		if (!menu || !menu._nxDdHome || !menu._nxDdHome.parent) {
-			return;
-		}
-		const home = menu._nxDdHome;
-		if (home.next && home.next.parentNode === home.parent) {
-			home.parent.insertBefore(menu, home.next);
-		} else {
-			home.parent.appendChild(menu);
-		}
-		menu._nxDdHome = null;
-	}
-
-	function syncOneDd(root) {
-		const hidden = root.querySelector('input[type="hidden"]');
-		const textEl = root.querySelector('.nx-ddTriggerText');
-		const menu = getDdMenu(root);
-		if (!hidden || !textEl || !menu) {
-			return;
-		}
-		const val = hidden.value;
-		const opt = findDdOptionByValue(menu, val);
-		if (opt) {
-			const label = optionDisplayLabel(opt);
-			textEl.textContent = label;
-			if (val) {
-				selectedModelLabelCache[val] = label;
-			}
-		} else if (root.getAttribute('data-dd-kind') === 'model') {
-			textEl.textContent = selectedModelLabelCache[val] || (val === 'auto' ? 'Auto' : prettifyModelId(val) || val);
-		}
-		getDdOptions(menu).forEach(function (o) {
-			const on = o.getAttribute('data-value') === val;
-			o.classList.toggle('nx-ddItemSelected', on);
-			o.setAttribute('aria-selected', on ? 'true' : 'false');
-		});
-	}
-
-	function positionDdMenu(root) {
-		const trigger = root.querySelector('.nx-ddTrigger');
-		const menu = getDdMenu(root);
-		if (!trigger || !menu) {
-			return;
-		}
-		const rect = trigger.getBoundingClientRect();
-		const gap = 6;
-		const isModel = root.getAttribute('data-dd-kind') === 'model';
-		const cap = isModel ? 320 : 240;
-		const minW = Math.max(rect.width, isModel ? 240 : 148);
-		let left = rect.left;
-		if (left + minW > window.innerWidth - 6) {
-			left = window.innerWidth - 6 - minW;
-		}
-		const spaceAbove = Math.max(48, Math.floor(rect.top - gap - 4));
-		const maxH = Math.min(cap, spaceAbove);
-
-		menu.style.left = Math.max(4, left) + 'px';
-		menu.style.right = 'auto';
-		menu.style.minWidth = minW + 'px';
-		menu.style.maxWidth = Math.min(360, window.innerWidth - 8) + 'px';
-		menu.style.maxHeight = maxH + 'px';
-		menu.style.top = 'auto';
-		menu.style.bottom = Math.max(gap, Math.round(window.innerHeight - rect.top + gap)) + 'px';
-	}
-
-	function setDdKeyboardHighlight(menu, index) {
-		const items = getDdOptions(menu).filter(function (el) {
-			return !el.hidden && el.style.display !== 'none';
-		});
-		const all = getDdOptions(menu);
-		all.forEach(function (el) {
-			el.classList.remove('nx-ddItemKeyboard');
-		});
-		if (items[index]) {
-			items[index].classList.add('nx-ddItemKeyboard');
-		}
-		ddKbIndex = index;
-	}
-
-	function clearDdMenuInline(menu) {
-		menu.style.top = '';
-		menu.style.bottom = '';
-		menu.style.left = '';
-		menu.style.right = '';
-		menu.style.minWidth = '';
-		menu.style.maxWidth = '';
-		menu.style.maxHeight = '';
-	}
-
-	function closeDd(root, immediate) {
-		if (!root) {
-			return;
-		}
-		if (ddCloseTimer) {
-			window.clearTimeout(ddCloseTimer);
-			ddCloseTimer = null;
-		}
-		const trigger = root.querySelector('.nx-ddTrigger');
-		const menu = getDdMenu(root);
-		if (trigger) {
-			trigger.setAttribute('aria-expanded', 'false');
-		}
-		root.classList.remove('nx-ddOpen');
-		if (openDdRoot === root) {
-			openDdRoot = null;
-		}
-		if (!menu) {
-			return;
-		}
-		menu.classList.remove('nx-ddMenuOpen');
-		getDdOptions(menu).forEach(function (o) {
-			o.classList.remove('nx-ddItemKeyboard');
-		});
-
-		function finishClose() {
-			ddCloseTimer = null;
-			menu.hidden = true;
-			clearDdMenuInline(menu);
-			restoreDdMenu(menu);
-		}
-
-		if (immediate) {
-			finishClose();
-		} else {
-			ddCloseTimer = window.setTimeout(finishClose, 130);
-		}
-	}
-
-	function openDd(root) {
-		if (ddCloseTimer) {
-			window.clearTimeout(ddCloseTimer);
-			ddCloseTimer = null;
-		}
-		if (openDdRoot && openDdRoot !== root) {
-			closeDd(openDdRoot, true);
-		}
-		const trigger = root.querySelector('.nx-ddTrigger');
-		const menu = getDdMenu(root);
-		const hidden = root.querySelector('input[type="hidden"]');
-		if (!trigger || !menu || !hidden) {
-			return;
-		}
-		if (root.getAttribute('data-dd-kind') === 'model') {
-			vscode.postMessage({ type: 'requestModelPicker' });
-			if (modelDdSearch) {
-				modelDdSearch.value = '';
-				filterModelMenu('');
-			}
-		}
-		portalDdMenu(menu);
-		openDdRoot = root;
-		root.classList.add('nx-ddOpen');
-		trigger.setAttribute('aria-expanded', 'true');
-		menu.hidden = false;
-		menu.classList.remove('nx-ddMenuOpen');
-		const visible = getDdOptions(menu).filter(function (el) {
-			return !el.hidden && el.style.display !== 'none';
-		});
-		const focusItems = visible.length ? visible : getDdOptions(menu);
-		const idx = Math.max(0, focusItems.findIndex(function (i) {
-			return i.getAttribute('data-value') === hidden.value;
-		}));
-		setDdKeyboardHighlight(menu, idx);
-		positionDdMenu(root);
-		requestAnimationFrame(function () {
-			if (openDdRoot !== root) {
-				return;
-			}
-			positionDdMenu(root);
-			menu.classList.add('nx-ddMenuOpen');
-		});
-		try {
-			if (root.getAttribute('data-dd-kind') === 'model' && modelDdSearch && modelDdSearchWrap && !modelDdSearchWrap.hidden) {
-				modelDdSearch.focus({ preventScroll: true });
-			} else {
-				menu.focus({ preventScroll: true });
-			}
-		} catch (_e) {
-			menu.focus();
-		}
-	}
-
-	function applyDdSelection(root, value) {
-		const hidden = root.querySelector('input[type="hidden"]');
-		if (!hidden) {
-			return;
-		}
-		hidden.value = value;
-		syncOneDd(root);
-		closeDd(root);
-		if (root.getAttribute('data-dd-kind') === 'mode') {
-			updateModeUI();
-		} else if (root.getAttribute('data-dd-kind') === 'model') {
-			vscode.postMessage({ type: 'selectModel', modelId: value });
-		}
-	}
-
-	function wireDd(root) {
-		if (!root || root.dataset.nxDdWired) {
-			return;
-		}
-		root.dataset.nxDdWired = '1';
-		const trigger = root.querySelector('.nx-ddTrigger');
-		const menu = getDdMenu(root);
-		if (!trigger || !menu) {
-			return;
-		}
-		menu.setAttribute('tabindex', '-1');
-
-		trigger.addEventListener('click', function () {
-			if (root.classList.contains('nx-ddOpen')) {
-				closeDd(root);
-			} else {
-				openDd(root);
-			}
-		});
-
-		trigger.addEventListener('keydown', function (e) {
-			if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !root.classList.contains('nx-ddOpen')) {
-				e.preventDefault();
-				openDd(root);
-			}
-		});
-
-		menu.addEventListener('click', function (e) {
-			const opt = e.target.closest('[role="option"]');
-			if (!opt || !menu.contains(opt)) {
-				return;
-			}
-			applyDdSelection(root, opt.getAttribute('data-value'));
-			trigger.focus();
-		});
-
-		menu.addEventListener('keydown', function (e) {
-			const items = getDdOptions(menu).filter(function (el) {
-				return !el.hidden && el.style.display !== 'none';
-			});
-			if (!items.length) {
-				return;
-			}
-			if (e.key === 'ArrowDown') {
-				e.preventDefault();
-				const next = Math.min(items.length - 1, ddKbIndex + 1);
-				setDdKeyboardHighlight(menu, next);
-				items[next].scrollIntoView({ block: 'nearest' });
-			} else if (e.key === 'ArrowUp') {
-				e.preventDefault();
-				const prev = Math.max(0, ddKbIndex - 1);
-				setDdKeyboardHighlight(menu, prev);
-				items[prev].scrollIntoView({ block: 'nearest' });
-			} else if (e.key === 'Enter' || e.key === ' ') {
-				e.preventDefault();
-				const pick = items[ddKbIndex];
-				if (pick) {
-					applyDdSelection(root, pick.getAttribute('data-value'));
-					trigger.focus();
-				}
-			} else if (e.key === 'Escape') {
-				e.preventDefault();
-				closeDd(root);
-				trigger.focus();
-			}
-		});
-	}
 
 	function wireMessagesScrollbarFlash() {
 		if (!messages) {
@@ -527,178 +109,6 @@
 		}
 		messages.addEventListener('scroll', showThumb, { passive: true });
 		messages.addEventListener('wheel', showThumb, { passive: true });
-	}
-
-	function filterModelMenu(query) {
-		if (!modelDdList) {
-			return;
-		}
-		const q = String(query || '').trim().toLowerCase();
-		const sections = modelDdList.querySelectorAll('.nx-ddSection');
-		const options = modelDdList.querySelectorAll('[role="option"]');
-		options.forEach(function (opt) {
-			const label = (opt.getAttribute('data-label') || optionDisplayLabel(opt) || '').toLowerCase();
-			const id = (opt.getAttribute('data-value') || '').toLowerCase();
-			const match = !q || label.indexOf(q) !== -1 || id.indexOf(q) !== -1;
-			opt.hidden = !match;
-			opt.style.display = match ? '' : 'none';
-		});
-		sections.forEach(function (section) {
-			let el = section.nextElementSibling;
-			let any = false;
-			while (el && !el.classList.contains('nx-ddSection')) {
-				if (el.getAttribute('role') === 'option' && !el.hidden) {
-					any = true;
-					break;
-				}
-				el = el.nextElementSibling;
-			}
-			section.hidden = q ? !any : false;
-			section.style.display = section.hidden ? 'none' : '';
-		});
-		if (modelDdRoot && modelDdRoot.classList.contains('nx-ddOpen')) {
-			positionDdMenu(modelDdRoot);
-		}
-	}
-
-	function wireModelSearch() {
-		if (!modelDdSearch || modelDdSearch.dataset.nxWired) {
-			return;
-		}
-		modelDdSearch.dataset.nxWired = '1';
-		modelDdSearch.addEventListener('input', function () {
-			filterModelMenu(modelDdSearch.value);
-		});
-		modelDdSearch.addEventListener('keydown', function (e) {
-			if (e.key === 'ArrowDown' || e.key === 'Enter') {
-				e.preventDefault();
-				const menu = modelDdRoot && getDdMenu(modelDdRoot);
-				if (!menu) {
-					return;
-				}
-				const items = getDdOptions(menu).filter(function (el) {
-					return !el.hidden;
-				});
-				if (!items.length) {
-					return;
-				}
-				setDdKeyboardHighlight(menu, 0);
-				try {
-					items[0].focus();
-				} catch (_e) { /* ignore */ }
-			} else if (e.key === 'Escape') {
-				e.preventDefault();
-				closeDd(modelDdRoot);
-			}
-		});
-		modelDdSearch.addEventListener('click', function (e) {
-			e.stopPropagation();
-		});
-	}
-
-	function renderModelPicker(catalog, enabledIds, selectedId) {
-		modelCatalog = catalog || null;
-		enabledModelIds = Array.isArray(enabledIds) ? enabledIds : [];
-		const enabled = new Set(enabledModelIds);
-		const list = modelDdList || document.getElementById('modelDdList');
-		if (!list) {
-			return;
-		}
-
-		const autoLabel = (catalog && catalog.auto && catalog.auto.label) || 'Auto';
-		selectedModelLabelCache.auto = autoLabel;
-
-		let html = ddItemHtml('auto', autoLabel);
-
-		const providers = (catalog && Array.isArray(catalog.providers)) ? catalog.providers : [];
-		let optionCount = 1;
-		providers.forEach(function (provider) {
-			if (!provider || !provider.configured) {
-				return;
-			}
-			const models = Array.isArray(provider.models) ? provider.models : [];
-			const visible = models.filter(function (m) {
-				return m && enabled.has(m.id);
-			});
-			if (!visible.length) {
-				return;
-			}
-			html += '<div class="nx-ddSection" role="presentation">'
-				+ escapeHtml(humanProviderLabel(provider)) + '</div>';
-			visible.forEach(function (model) {
-				const label = resolveModelLabel(model);
-				selectedModelLabelCache[model.id] = label;
-				html += ddItemHtml(model.id, label, { tier: model.tier });
-				optionCount += 1;
-			});
-		});
-
-		list.innerHTML = html;
-
-		if (modelDdSearchWrap) {
-			modelDdSearchWrap.hidden = optionCount < 8;
-		}
-
-		if (modelSelect) {
-			const nextId = selectedId || modelSelect.value || 'auto';
-			modelSelect.value = nextId;
-		}
-		if (modelDdRoot) {
-			syncOneDd(modelDdRoot);
-			if (modelDdRoot.classList.contains('nx-ddOpen')) {
-				positionDdMenu(modelDdRoot);
-			}
-		}
-		if (modelDdSearch && modelDdSearch.value) {
-			filterModelMenu(modelDdSearch.value);
-		}
-	}
-
-	function wireComposerDropdowns() {
-		if (modeDdRoot) {
-			wireDd(modeDdRoot);
-		}
-		if (modelDdRoot) {
-			wireDd(modelDdRoot);
-		}
-		wireModelSearch();
-		if (ddGlobalsBound) {
-			return;
-		}
-		ddGlobalsBound = true;
-		document.addEventListener('mousedown', function (e) {
-			if (!openDdRoot || !e.target || !e.target.closest) {
-				return;
-			}
-			if (openDdRoot.contains(e.target)) {
-				return;
-			}
-			const menu = getDdMenu(openDdRoot);
-			if (menu && menu.contains(e.target)) {
-				return;
-			}
-			closeDd(openDdRoot);
-		}, true);
-		document.addEventListener('keydown', function (e) {
-			if (e.key !== 'Escape' || !openDdRoot) {
-				return;
-			}
-			const tr = openDdRoot.querySelector('.nx-ddTrigger');
-			closeDd(openDdRoot);
-			if (tr) {
-				tr.focus();
-			}
-		});
-		window.addEventListener('resize', function () {
-			if (openDdRoot) {
-				positionDdMenu(openDdRoot);
-			}
-		});
-		window.addEventListener('scroll', function () {
-			if (openDdRoot) {
-				positionDdMenu(openDdRoot);
-			}
-		}, true);
 	}
 
 	function ensureOfflineBanner() {
@@ -776,22 +186,10 @@
 		if (!modeSelect) {
 			return;
 		}
-		if (modeDdRoot) {
-			syncOneDd(modeDdRoot);
-		}
-		if (modelDdRoot) {
-			syncOneDd(modelDdRoot);
-		}
 		currentMode = modeSelect.value;
 		applySendButtonChrome();
-		
-		if (modeHint) {
-			modeHint.setAttribute('data-mode', currentMode);
-		}
-		
-		const hintEl = modeHint ? modeHint.querySelector('.nx-hintText') : null;
-		if (hintEl) {
-			hintEl.textContent = modeHints[currentMode] || '';
+		if (window.NexoraComposer) {
+			window.NexoraComposer.render();
 		}
 	}
 
@@ -943,6 +341,8 @@
 		ensureAtCompleteMenu();
 		input.addEventListener('input', onAtComposerInput);
 		input.addEventListener('input', resizeComposer);
+		// The box grows to 8 lines, then scrolls; keep the @ highlight layer aligned.
+		input.addEventListener('scroll', syncAtMentionHighlight);
 		input.addEventListener('click', onAtComposerInput);
 		input.addEventListener('keyup', function (e) {
 			if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
@@ -985,6 +385,7 @@
 		}
 		hl.innerHTML = hasMentions ? formatAtMentionHighlight(input.value) : '';
 		hl.scrollLeft = input.scrollLeft;
+		hl.scrollTop = input.scrollTop;
 	}
 
 	function syncAtMentionChips() {
@@ -2650,12 +2051,14 @@
 		vscode.postMessage({ type: 'stopGeneration' });
 	}
 
-	function handleSend() {
+	/** resend: a rewound message replays with its own context tags, not the ones queued for the next message. */
+	function handleSend(resend) {
 		if (replyInFlight) {
 			return;
 		}
 
-		const text = input.value.trim();
+		const composer = window.NexoraComposer;
+		const text = input.value.trim() || (composer && composer.hasContext() ? 'Use the attached context' : '');
 		if (!text) {
 			return;
 		}
@@ -2664,6 +2067,9 @@
 
 		const model = modelSelect.value;
 		const mode = modeSelect.value;
+		const extras = composer ? composer.extras() : { effort: undefined, context: [] };
+		const effort = extras.effort;
+		const context = resend ? (resend.context || []) : extras.context;
 
 		addMessage('user', text, false);
 
@@ -2675,25 +2081,28 @@
 
 		switch (mode) {
 			case 'chat':
-				vscode.postMessage({ type: 'sendMessage', message: text, model: model });
+				vscode.postMessage({ type: 'sendMessage', message: text, model: model, effort: effort, context: context });
 				break;
 			case 'ask':
-				vscode.postMessage({ type: 'askWorkspace', message: text, model: model });
+				vscode.postMessage({ type: 'askWorkspace', message: text, model: model, effort: effort, context: context });
 				break;
 			case 'plan':
-				vscode.postMessage({ type: 'generatePlan', request: text, model: model });
+				vscode.postMessage({ type: 'generatePlan', request: text, model: model, effort: effort, context: context });
 				break;
 			case 'execute':
-				vscode.postMessage({ type: 'executeRequest', request: text, model: model });
+				vscode.postMessage({ type: 'executeRequest', request: text, model: model, effort: effort, context: context });
 				break;
 			case 'agent':
-				vscode.postMessage({ type: 'runAgent', request: text, model: model });
+				vscode.postMessage({ type: 'runAgent', request: text, model: model, effort: effort, context: context });
 				break;
 			default:
-				vscode.postMessage({ type: 'sendMessage', message: text, model: model });
+				vscode.postMessage({ type: 'sendMessage', message: text, model: model, effort: effort, context: context });
 		}
 
 		input.value = '';
+		if (composer && !resend) {
+			composer.afterSend();
+		}
 		syncAtMentionChips();
 		syncAtMentionHighlight();
 		resizeComposer();
@@ -2708,7 +2117,32 @@
 		handleSend();
 	};
 
-	wireComposerDropdowns();
+	window.NexoraComposer.init({
+		input: input,
+		post: function (msg) { vscode.postMessage(msg); },
+		getMode: function () { return modeSelect.value; },
+		setMode: function (mode) {
+			modeSelect.value = mode;
+			updateModeUI();
+		},
+		getModel: function () { return modelSelect.value; },
+		setModel: function (id) {
+			modelSelect.value = id;
+			vscode.postMessage({ type: 'selectModel', modelId: id });
+		},
+		isBusy: function () { return replyInFlight; },
+		isAtOpen: function () { return atCompleteOpen; },
+		stop: handleStop,
+		send: function () { handleSend(); },
+		insertMention: function (relPath) {
+			const sep = input.value && !/\s$/.test(input.value) ? ' ' : '';
+			input.value += sep + quoteAtMentionPath(relPath) + ' ';
+			syncAtMentionChips();
+			syncAtMentionHighlight();
+			resizeComposer();
+			input.focus();
+		}
+	});
 	wireMessagesScrollbarFlash();
 	wireAtContextComposer();
 	input.addEventListener('keydown', function (e) {
@@ -3013,6 +2447,13 @@
 			vscode.postMessage({ type: 'saveFirstRunKey', provider: provider, key: key });
 		});
 	}
+	if (firstRunCloud) {
+		firstRunCloud.addEventListener('click', () => {
+			// The card hides by itself once the browser sign-in returns to Nexora.
+			setFirstRunMsg('Finish signing in in your browser, then come back here.', '');
+			vscode.postMessage({ type: 'cloudSignIn' });
+		});
+	}
 	if (firstRunSettings) {
 		firstRunSettings.addEventListener('click', () => {
 			vscode.postMessage({ type: 'openSettings' });
@@ -3090,14 +2531,12 @@
 
 			case 'resend':
 				// After a rewind: send again in the message's own mode, as if typed now.
-				if (data.mode) {
-					const modeRoot = document.getElementById('modeDd');
-					if (modeRoot && modeRoot.querySelector('[data-value="' + data.mode + '"]')) {
-						applyDdSelection(modeRoot, data.mode);
-					}
+				if (data.mode && ['chat', 'ask', 'agent', 'plan', 'execute'].indexOf(data.mode) >= 0) {
+					modeSelect.value = data.mode;
+					updateModeUI();
 				}
 				input.value = data.text || '';
-				handleSend();
+				handleSend({ context: Array.isArray(data.context) ? data.context : [] });
 				break;
 
 			case 'taskUpdate':
@@ -3169,16 +2608,27 @@
 				break;
 
 			case 'modelPickerState':
-				renderModelPicker(data.catalog, data.enabledModelIds, data.selectedModelId);
+				modelSelect.value = data.selectedModelId || modelSelect.value || 'auto';
+				window.NexoraComposer.setCatalog(data.catalog, data.enabledModelIds);
 				break;
 
 			case 'modelSelected':
 				if (modelSelect && data.modelId) {
 					modelSelect.value = data.modelId;
-					if (modelDdRoot) {
-						syncOneDd(modelDdRoot);
-					}
+					window.NexoraComposer.render();
 				}
+				break;
+
+			case 'composerState':
+				window.NexoraComposer.setComposerState({ runMode: data.runMode, effort: data.effort, hasSelection: data.hasSelection });
+				break;
+
+			case 'contextTags':
+				window.NexoraComposer.addTags(data.tags);
+				break;
+
+			case 'openModelMenu':
+				window.NexoraComposer.openModelMenu();
 				break;
 		}
 	});
@@ -3196,25 +2646,6 @@
 		loadSessionMessages(initial.activeSessionId, initial.messages || []);
 	}
 
-	function injectDdTriggerIcon(root, svgHtml) {
-		if (!root) {
-			return;
-		}
-		const trigger = root.querySelector('.nx-ddTrigger');
-		if (!trigger || trigger.querySelector('.nx-ddTriggerIcon')) {
-			return;
-		}
-		const icon = document.createElement('span');
-		icon.className = 'nx-ddTriggerIcon';
-		icon.setAttribute('aria-hidden', 'true');
-		icon.innerHTML = svgHtml;
-		const text = trigger.querySelector('.nx-ddTriggerText');
-		if (text) {
-			trigger.insertBefore(icon, text);
-		} else {
-			trigger.insertBefore(icon, trigger.firstChild);
-		}
-	}
 
 	function syncComposerCompact() {
 		const card = document.getElementById('composerCard');
@@ -3225,14 +2656,6 @@
 		card.classList.toggle('nx-composerCompact', narrow);
 	}
 
-	injectDdTriggerIcon(
-		modeDdRoot,
-		'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3 14.2 8.8 20 11 14.2 13.2 12 19 9.8 13.2 4 11 9.8 8.8 12 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>'
-	);
-	injectDdTriggerIcon(
-		modelDdRoot,
-		'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="4" y="6" width="16" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 10h8M8 14h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
-	);
 
 	const composerCardEl = document.getElementById('composerCard');
 	if (composerCardEl && typeof ResizeObserver !== 'undefined') {

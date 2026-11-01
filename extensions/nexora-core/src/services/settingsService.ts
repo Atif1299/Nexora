@@ -5,11 +5,14 @@
 
 import * as vscode from 'vscode';
 import type { ModelCatalog } from './backend/models';
+import type { Effort } from '../webview/chat/types';
 
 export type ApiKeyProvider = 'openai' | 'anthropic' | 'gemini' | 'openrouter';
 
 export interface NexoraPreferences {
 	defaultModel: string;
+	/** Composer effort, remembered across sessions. */
+	agentEffort: Effort;
 	autoIndexWorkspace: boolean;
 	showCostEstimates: boolean;
 	theme: 'auto' | 'light' | 'dark';
@@ -19,6 +22,7 @@ const PREFERENCES_KEY = 'nexora.preferences';
 const ENABLED_MODEL_IDS_KEY = 'nexora.enabledModelIds';
 const DEFAULT_PREFERENCES: NexoraPreferences = {
 	defaultModel: 'auto',
+	agentEffort: 'balanced',
 	autoIndexWorkspace: true,
 	showCostEstimates: true,
 	theme: 'auto'
@@ -106,6 +110,10 @@ export class SettingsService {
 		const next = { ...this.getPreferences(), ...prefs };
 		await this.context.globalState.update(PREFERENCES_KEY, next);
 		return next;
+	}
+
+	async setAgentEffort(effort: Effort): Promise<void> {
+		await this.setPreferences({ agentEffort: effort });
 	}
 
 	async setPreference<K extends keyof NexoraPreferences>(

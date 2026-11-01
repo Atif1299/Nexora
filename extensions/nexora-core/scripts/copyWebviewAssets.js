@@ -40,7 +40,7 @@ function main() {
 	copyWebviewFolder(root, 'shared', ['tokens.css', 'base.css', 'components.css']);
 
 	// Chat panel assets
-	copyWebviewFolder(root, 'chat', ['chat.css', 'chat.js']);
+	copyWebviewFolder(root, 'chat', ['chat.css', 'composer.js', 'chat.js']);
 
 	// Week 11: Workflow panel assets
 	copyWebviewFolder(root, 'workflow', ['workflow.css', 'workflow.js']);
