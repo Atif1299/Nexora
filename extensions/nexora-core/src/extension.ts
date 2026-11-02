@@ -38,7 +38,7 @@ import { openNexoraBrowser } from './services/browser';
 import { closeAgentBrowser } from './services/tools/browserSession';
 
 /** Plan statuses after which the engine runs nothing more (backend PlanStatus). */
-const TERMINAL_PLAN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'partially_completed', 'timeout']);
+const TERMINAL_PLAN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'partially_completed', 'timeout', 'skipped']);
 
 async function setOperationInProgress(value: boolean): Promise<void> {
 	await vscode.commands.executeCommand('setContext', 'nexora.operationInProgress', value);

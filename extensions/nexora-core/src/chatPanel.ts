@@ -16,6 +16,7 @@ import { openUrlFromChat } from './services/browser';
 import type { TerminalCommandProgress } from './services/tools/terminalCommand';
 import { getSettingsService } from './services/settingsService';
 import { oauthProviderLabel, onDidCompleteOAuth, startOAuthConnect, type OAuthProvider } from './services/oauthConnect';
+import { connectMcpServer, mcpServerLabel } from './services/mcpConnect';
 import {
 	getAgentFlag,
 	getAgentRunMode,
@@ -697,6 +698,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._handleCancelPlan(data.planId);
 		} else if (data.type === 'modifyPlan') {
 			await this._handleModifyPlan(data.planId, data.modification);
+		} else if (data.type === 'runFix') {
+			await this._runFix(data.fix);
+		} else if (data.type === 'updateStepInputs') {
+			if (typeof data.planId === 'string' && typeof data.taskId === 'string'
+				&& data.inputs && typeof data.inputs === 'object') {
+				await this._handleModifyPlan(data.planId, { update_inputs: { [data.taskId]: data.inputs } });
+			}
 		} else if (data.type === 'getHistory') {
 			await this._handleGetHistory();
 		} else if (data.type === 'getRollbackable') {
@@ -984,7 +992,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 
 		if (toolCalls && toolCalls.length > 0) {
-			return { type: 'tool_calls', tool_calls: toolCalls, model_used: modelUsed || 'unknown' };
+			return { type: 'tool_calls', tool_calls: toolCalls, model_used: modelUsed || 'unknown', cost_usd: usageCostUsd };
 		}
 
 		const unavailableFinal = parseModelUnavailable(assembled);
@@ -1006,7 +1014,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		return {
 			type: 'final',
 			content: assembled || 'No response generated.',
-			model_used: modelUsed || 'unknown'
+			model_used: modelUsed || 'unknown',
+			cost_usd: usageCostUsd
 		};
 	}
 
@@ -2604,6 +2613,36 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		await this._handleOAuthConnect('github');
 	}
 
+	/**
+	 * A plan step's readiness fix from the engine: "connect:<mcp server>",
+	 * "oauth:<provider>", "settings:<key group>", "install:<cli>" or "open-folder".
+	 * The step's readiness is checked again when it runs.
+	 */
+	private async _runFix(fix: unknown): Promise<void> {
+		if (typeof fix !== 'string' || !fix) {
+			return;
+		}
+		const split = fix.indexOf(':');
+		const kind = split < 0 ? fix : fix.slice(0, split);
+		const name = split < 0 ? '' : fix.slice(split + 1);
+		if (kind === 'connect' && name) {
+			const result = await connectMcpServer(name);
+			if (result.status === 'connected') {
+				void vscode.window.showInformationMessage(`${mcpServerLabel(name)} connected`);
+			} else if (result.status === 'needs_setup' || result.status === 'error') {
+				void vscode.window.showWarningMessage(result.message);
+			}
+		} else if (kind === 'oauth' && (name === 'github' || name === 'vercel')) {
+			await this._handleOAuthConnect(name);
+		} else if (kind === 'settings') {
+			await this._handleOpenSettings(name || undefined);
+		} else if (kind === 'install' && name) {
+			void vscode.window.showInformationMessage(`Install the ${name} command-line tool, then run the step again.`);
+		} else if (kind === 'open-folder') {
+			await vscode.commands.executeCommand('workbench.action.files.openFolder');
+		}
+	}
+
 	/** GitHub/Vercel Connect from chat: same browser flow as the platform sidebar. */
 	private async _handleOAuthConnect(provider: OAuthProvider): Promise<void> {
 		const label = oauthProviderLabel(provider);
@@ -3101,6 +3140,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/**
+	 * Approve failed: the engine refused the plan (a step needs input) or could not be
+	 * reached. Put the card back with the reason and Cancel, and forget the plan so a
+	 * later Execute request is planned afresh instead of approving it again.
+	 * Returns the reason for the chat message.
+	 */
+	private _restorePlanAfterFailedApprove(planId: string, error: unknown): string {
+		const reason = error instanceof Error ? error.message : String(error);
+		this._postToWebviews({ type: 'planApproveFailed', planId, message: reason });
+		if (this._currentPlanId === planId) {
+			this._currentPlanId = undefined;
+			void this._syncOperationContext();
+		}
+		return reason;
+	}
+
 	private async _handleApprovePlan(planId: string): Promise<void> {
 		if (!this._hasChatSurface()) {
 			return;
@@ -3145,10 +3200,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._offerSaveAsTemplate(planId, result.status);
 
 		} catch (error) {
+			const reason = this._restorePlanAfterFailedApprove(planId, error);
 			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
-				content: `Error executing plan: ${error instanceof Error ? error.message : 'Unknown error'}`,
+				content: `Error executing plan: ${reason}`,
 				isLoading: false
 			});
 		}
@@ -3463,6 +3519,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		// Check if there's an existing approved plan to execute
 		if (this._currentPlanId) {
+			const pendingPlanId = this._currentPlanId;
 			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',
@@ -3511,7 +3568,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._syncOperationContext();
 				return;
 			} catch (error) {
-				const errMsg = `Error executing plan: ${error instanceof Error ? error.message : 'Unknown error'}`;
+				const errMsg = `Error executing plan: ${this._restorePlanAfterFailedApprove(pendingPlanId, error)}`;
 				const sessionErr = this._getActiveSession();
 				if (sessionErr) {
 					sessionErr.messages.push({ role: 'assistant', content: errMsg, mode: 'execute', timestamp: Date.now() });
@@ -3536,6 +3593,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			isLoading: true
 		});
 
+		let newPlanId: string | undefined;
 		try {
 			const client = getBackendClient();
 			const ctx = await this._workspaceContext();
@@ -3550,6 +3608,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				ctx.workspaceId
 			);
 
+			newPlanId = plan.plan_id;
 			this._currentPlanId = plan.plan_id;
 			await this._syncOperationContext();
 
@@ -3597,7 +3656,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._offerSaveAsTemplate(plan.plan_id, result.status);
 
 		} catch (error) {
-			const errMsg = `Error executing request: ${error instanceof Error ? error.message : 'Unknown error'}`;
+			const reason = newPlanId
+				? this._restorePlanAfterFailedApprove(newPlanId, error)
+				: (error instanceof Error ? error.message : 'Unknown error');
+			const errMsg = `Error executing request: ${reason}`;
 			const sessionErr = this._getActiveSession();
 			if (sessionErr) {
 				sessionErr.messages.push({ role: 'assistant', content: errMsg, mode: 'execute', timestamp: Date.now() });
@@ -3632,7 +3694,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			type: 'planExecutionStarted',
 			planId
 		});
-		const result = await client.approvePlan(planId);
+		let result;
+		try {
+			result = await client.approvePlan(planId);
+		} catch (error) {
+			this._restorePlanAfterFailedApprove(planId, error);
+			throw error;
+		}
 		await this._rememberIndexedWorkspace(result);
 		if (this._isPlanStillRunning(result.status)) {
 			this._postPlanRunningMessage();
@@ -3946,7 +4014,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			task_id: task.taskId,
 			success: outcome.success,
 			summary: (outcome.error ? `${outcome.summary} - ${outcome.error}` : outcome.summary).slice(0, 200),
-			files: outcome.files
+			files: outcome.files,
+			cost_usd: typeof outcome.costUsd === 'number' ? outcome.costUsd : 0
 		});
 		this._emitChatActivity([
 			{ id: `ws-task-${task.taskId}`, label: `${label}: ${task.firstLine}`, done: true }
@@ -4011,6 +4080,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			const llmModel = this._mapUiModelToLiteLlm(preferred || message.model);
 			const userMessage = context ? `${context}\n\n${instruction}` : instruction;
 
+			// The step's own LLM spend, reported with the result so the plan records it.
+			const stepCost = { usd: 0 };
 			const finalAnswer = await this._runAgentLoopWithMode(
 				userMessage,
 				workspaceId,
@@ -4019,7 +4090,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				'agent',
 				sessionId,
 				undefined,
-				{ maxTurns: 8, modifiedFilesOut: modifiedFiles }
+				{ maxTurns: 8, modifiedFilesOut: modifiedFiles, costOut: stepCost }
 			);
 
 			const summaryLine = (finalAnswer.split(/\r?\n/).find((l) => l.trim()) || 'Done').trim().slice(0, 200);
@@ -4028,7 +4099,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				task_id: taskId,
 				success: true,
 				summary: summaryLine,
-				files: Array.from(modifiedFiles)
+				files: Array.from(modifiedFiles),
+				cost_usd: stepCost.usd
 			});
 			this._emitChatActivity([{ id: `ws-task-${taskId}`, label: firstLine, done: true }]);
 		} catch (error) {
@@ -4070,7 +4142,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		mode: AgentMode,
 		sessionId?: string,
 		reply?: InFlightReply,
-		options?: { maxTurns?: number; modifiedFilesOut?: Set<string> }
+		options?: { maxTurns?: number; modifiedFilesOut?: Set<string>; costOut?: { usd: number } }
 	): Promise<string> {
 		const maxTurns = options?.maxTurns ?? getAgentMaxTurns();
 		let turn = 0;
@@ -4135,6 +4207,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				}
 			}
 			this._assertReply(reply);
+			if (options?.costOut && typeof response.cost_usd === 'number') {
+				options.costOut.usd += response.cost_usd;
+			}
 
 			const unavailableContent = response.type === 'final'
 				? parseModelUnavailable(response.content)

@@ -1614,6 +1614,161 @@
 		return 'o';
 	}
 
+	// --- capability step details (spec section 8) ---------------------------------
+
+	const EFFECT_LABELS = { read: 'reads', write: 'changes', destructive: 'destructive' };
+
+	/** "GitHub via MCP", "github API", "IDE agent": which route the step will take. */
+	function planRouteLabel(route) {
+		if (!route || !route.kind) {
+			return '';
+		}
+		const provider = String(route.target || '').split('/')[0];
+		if (route.kind === 'mcp') {
+			return provider + ' via MCP';
+		}
+		if (route.kind === 'rest') {
+			return provider + ' API';
+		}
+		if (route.kind === 'ide') {
+			return 'IDE agent';
+		}
+		if (route.kind === 'engine') {
+			return 'Nexora engine';
+		}
+		return String(route.target || route.kind) + ' (terminal)';
+	}
+
+	/** Button text for a readiness fix such as "connect:github". */
+	function planFixLabel(fix) {
+		const at = fix.indexOf(':');
+		const kind = at < 0 ? fix : fix.slice(0, at);
+		const name = at < 0 ? '' : fix.slice(at + 1);
+		if (kind === 'connect') {
+			return 'Connect ' + name;
+		}
+		if (kind === 'oauth') {
+			return 'Sign in to ' + name;
+		}
+		if (kind === 'settings') {
+			return 'Add ' + name + ' key';
+		}
+		if (kind === 'install') {
+			return 'Install ' + name;
+		}
+		if (kind === 'open-folder') {
+			return 'Open a folder';
+		}
+		return fix;
+	}
+
+	/** One editable field for a needs_input step: string, number, boolean or enum; else JSON. */
+	function planInputField(name, schema, value, required) {
+		const id = 'nx-in-' + Math.random().toString(36).slice(2);
+		const label = `<label class="nx-stepInputLabel" for="${id}">${escapeHtml(name)}${required ? ' *' : ''}</label>`;
+		const attrs = `id="${id}" class="nx-stepInput" data-input="${escapeHtml(name)}"`;
+		const type = Array.isArray(schema.type) ? schema.type.find(t => t !== 'null') : schema.type;
+		if (Array.isArray(schema.enum)) {
+			const options = schema.enum.map(v =>
+				`<option value="${escapeHtml(String(v))}"${v === value ? ' selected' : ''}>${escapeHtml(String(v))}</option>`).join('');
+			return label + `<select ${attrs} data-kind="enum">${options}</select>`;
+		}
+		if (type === 'boolean') {
+			return `<label class="nx-stepInputLabel"><input type="checkbox" ${attrs} data-kind="boolean"${value === true ? ' checked' : ''}> ${escapeHtml(name)}</label>`;
+		}
+		if (type === 'number' || type === 'integer') {
+			const shown = typeof value === 'number' ? String(value) : '';
+			return label + `<input type="number" ${attrs} data-kind="${type}" value="${escapeHtml(shown)}">`;
+		}
+		if (type === 'string') {
+			const shown = typeof value === 'string' ? value : '';
+			return label + `<input type="text" ${attrs} data-kind="string" value="${escapeHtml(shown)}">`;
+		}
+		const shown = value === undefined ? '' : JSON.stringify(value, null, 2);
+		return label + `<textarea ${attrs} data-kind="json" rows="3">${escapeHtml(shown)}</textarea>`;
+	}
+
+	/** The input form for a step that cannot run until its inputs are fixed. */
+	function planNeedsInput(planId, task) {
+		const problems = (task.needs_input || []).map(p => `<div class="nx-needsMsg">${escapeHtml(p)}</div>`).join('');
+		const schema = task.input_schema || {};
+		const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
+		const required = Array.isArray(schema.required) ? schema.required : [];
+		const names = Object.keys(properties).sort((a, b) => (required.includes(b) ? 1 : 0) - (required.includes(a) ? 1 : 0));
+		const inputs = task.inputs || {};
+		const fields = names.map(name =>
+			`<div class="nx-stepField">${planInputField(name, properties[name] || {}, inputs[name], required.includes(name))}</div>`).join('');
+		const save = fields
+			? `<button type="button" class="nx-saveInputsBtn" data-plan-id="${escapeHtml(planId)}" data-task-id="${escapeHtml(task.task_id)}">Save inputs</button>`
+			: '';
+		return `<div class="nx-stepNeeds">${problems}${fields}${save}<div class="nx-stepInputError" hidden></div></div>`;
+	}
+
+	/** Capability, route, effects, undo, cost, readiness fixes and inputs for one step. */
+	function planStepDetails(planId, task) {
+		if (!task.capability) {
+			return '';
+		}
+		const meta = [`<span class="nx-stepCap">${escapeHtml(task.capability)}</span>`];
+		const route = planRouteLabel(task.route);
+		if (route) {
+			meta.push(`<span class="nx-stepRoute">${escapeHtml(route)}</span>`);
+		}
+		const kind = task.effects && task.effects.kind;
+		if (kind) {
+			meta.push(`<span class="nx-stepBadge nx-effect-${escapeHtml(kind)}">${EFFECT_LABELS[kind] || escapeHtml(kind)}</span>`);
+		}
+		if (task.undo_available) {
+			meta.push(`<span class="nx-stepUndo">undo: ${escapeHtml(task.undo_title || 'available')}</span>`);
+		} else if (kind && kind !== 'read') {
+			meta.push(`<span class="nx-stepBadge nx-noUndo" title="${escapeHtml(task.undo_reason || '')}">can't be undone</span>`);
+		}
+		meta.push(`<span class="nx-stepCost">${task.cost_known === false ? 'cost ?' : '$' + Number(task.estimated_cost || 0).toFixed(4)}</span>`);
+
+		let readiness = '';
+		const fixes = task.readiness && !task.readiness.ready && Array.isArray(task.readiness.fixes) ? task.readiness.fixes : [];
+		if (task.readiness && !task.readiness.ready) {
+			readiness = '<div class="nx-stepFixes"><span class="nx-stepNotReady">Not ready</span>' +
+				fixes.map(f => `<button type="button" class="nx-fixBtn" data-fix="${escapeHtml(f)}">${escapeHtml(planFixLabel(f))}</button>`).join('') +
+				'</div>';
+		}
+		const needs = Array.isArray(task.needs_input) && task.needs_input.length ? planNeedsInput(planId, task) : '';
+		return `<div class="nx-stepMeta">${meta.join('')}</div>${readiness}${needs}`;
+	}
+
+	/** The inputs typed into a step's form, or an error naming the field that is not valid. */
+	function readStepInputs(taskEl) {
+		const inputs = {};
+		for (const el of taskEl.querySelectorAll('.nx-stepInput')) {
+			const name = el.getAttribute('data-input');
+			const kind = el.getAttribute('data-kind');
+			if (kind === 'boolean') {
+				inputs[name] = el.checked;
+				continue;
+			}
+			const raw = String(el.value || '').trim();
+			if (!raw) {
+				continue;
+			}
+			if (kind === 'number' || kind === 'integer') {
+				const n = Number(raw);
+				if (!Number.isFinite(n) || (kind === 'integer' && !Number.isInteger(n))) {
+					return { error: name + ' must be a ' + (kind === 'integer' ? 'whole number' : 'number') };
+				}
+				inputs[name] = n;
+			} else if (kind === 'json') {
+				try {
+					inputs[name] = JSON.parse(raw);
+				} catch {
+					return { error: name + ' is not valid JSON' };
+				}
+			} else {
+				inputs[name] = raw;
+			}
+		}
+		return { inputs: inputs };
+	}
+
 	function createPlanApprovalCard(plan) {
 		if (welcome) {
 			welcome.style.display = 'none';
@@ -1669,6 +1824,7 @@
 				</div>
 				<div class="nx-taskInfo">
 					<div class="nx-taskName">${escapeHtml(task.name || task.task_id)}</div>
+					${planStepDetails(plan.plan_id, task)}
 				</div>
 			`;
 			taskList.appendChild(taskEl);
@@ -1822,7 +1978,7 @@
 		if (status === 'executing' || status === 'approved') {
 			showPlanExecuting(planId);
 		} else if (status === 'completed' || status === 'failed' || status === 'cancelled'
-			|| status === 'partially_completed' || status === 'timeout') {
+			|| status === 'partially_completed' || status === 'timeout' || status === 'skipped') {
 			const actual = typeof plan.actual_cost === 'number'
 				? plan.actual_cost
 				: typeof plan.actual_total_cost === 'number'
@@ -1853,6 +2009,21 @@
 		}
 	}
 
+	/** Approve was refused or failed: stop the spinner, show why, and offer Cancel again. */
+	function showPlanApproveFailed(planId, message) {
+		const actionsEl = document.getElementById('plan-actions-' + planId);
+		if (!actionsEl) {
+			return;
+		}
+		actionsEl.innerHTML = `
+			<div class="nx-planResult nx-planFailed nx-planApproveError">
+				<span class="nx-resultIcon">!</span>
+				<span class="nx-resultText">${escapeHtml(message || 'The plan could not start.')}</span>
+			</div>
+			<button class="nx-cancelBtn" data-plan-id="${escapeHtml(planId)}">Cancel</button>
+		`;
+	}
+
 	/** Links to what the run produced. The engine reads these off the task results. */
 	function planArtifactLinks(artifacts) {
 		if (!artifacts) {
@@ -1876,6 +2047,8 @@
 		const resolvedTasks = tasks || (currentPlan && currentPlan.plan_id === planId ? currentPlan.tasks : null);
 		if (actionsEl) {
 			const isSuccess = status === 'completed';
+			// every step was skipped (nothing connected): say so instead of "completed"
+			const isSkipped = status === 'skipped';
 			const successCount = resolvedTasks ? resolvedTasks.filter(t => t.status === 'success').length : 0;
 			const failedCount = resolvedTasks ? resolvedTasks.filter(t => t.status === 'failed').length : 0;
 
@@ -1883,7 +2056,7 @@
 				<div class="nx-planResult ${isSuccess ? 'nx-planSuccess' : 'nx-planFailed'}">
 					<span class="nx-resultIcon">${isSuccess ? 'ok' : '!'}</span>
 					<span class="nx-resultText">
-						${isSuccess ? 'Completed' : 'Completed with issues'}
+						${isSuccess ? 'Completed' : isSkipped ? 'Nothing ran: connect what the steps need, then retry them' : 'Completed with issues'}
 						${successCount > 0 ? ` • ${successCount} succeeded` : ''}
 						${failedCount > 0 ? ` • ${failedCount} failed` : ''}
 					</span>
@@ -2328,6 +2501,38 @@
 			}
 		}
 
+		if (target.classList.contains('nx-fixBtn')) {
+			const fix = target.getAttribute('data-fix');
+			if (fix) {
+				vscode.postMessage({ type: 'runFix', fix: fix });
+			}
+		}
+
+		if (target.classList.contains('nx-saveInputsBtn')) {
+			const taskEl = target.closest('.nx-planTask');
+			const planId = target.getAttribute('data-plan-id');
+			const taskId = target.getAttribute('data-task-id');
+			if (!taskEl || !planId || !taskId) {
+				return;
+			}
+			const read = readStepInputs(taskEl);
+			const errorEl = taskEl.querySelector('.nx-stepInputError');
+			if (read.error) {
+				if (errorEl) {
+					errorEl.textContent = read.error;
+					errorEl.hidden = false;
+				}
+				return;
+			}
+			if (errorEl) {
+				errorEl.hidden = true;
+			}
+			// the engine answers with the whole plan, which redraws this card
+			target.disabled = true;
+			target.textContent = 'Saving...';
+			vscode.postMessage({ type: 'updateStepInputs', planId: planId, taskId: taskId, inputs: read.inputs });
+		}
+
 		if (target.id === 'saveTplConfirm') {
 			const planId = target.getAttribute('data-plan-id');
 			const card = document.getElementById('save-template-' + planId);
@@ -2553,6 +2758,10 @@
 
 			case 'planExecutionStarted':
 				showPlanExecuting(data.planId);
+				break;
+
+			case 'planApproveFailed':
+				showPlanApproveFailed(data.planId, data.message);
 				break;
 
 			case 'planExecutionComplete':

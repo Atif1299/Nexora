@@ -1952,6 +1952,18 @@ body
 	color: var(--vscode-charts-red);
 }
 
+/* A refused approve: the reason takes the whole row, Cancel sits under it. */
+.nx-planActions:has(.nx-planApproveError)
+{
+	flex-wrap: wrap;
+}
+
+.nx-planApproveError
+{
+	flex-basis: 100%;
+	font-weight: 400;
+}
+
 .nx-resultIcon
 {
 	width: 20px;
@@ -3139,4 +3151,154 @@ body
 	color: var(--nx-muted);
 	font: inherit;
 	cursor: pointer;
+}
+
+/* --- capability step details on the plan card (spec section 8) --- */
+
+.nx-stepMeta
+{
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	margin-top: 4px;
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-stepCap
+{
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.nx-stepRoute::before,
+.nx-stepUndo::before,
+.nx-stepCost::before
+{
+	content: "-";
+	margin-right: 6px;
+	opacity: 0.6;
+}
+
+.nx-stepBadge
+{
+	padding: 0 6px;
+	border-radius: 999px;
+	border: 1px solid var(--nx-border);
+	line-height: 16px;
+}
+
+.nx-effect-read
+{
+	color: var(--vscode-charts-green);
+	border-color: color-mix(in srgb, var(--vscode-charts-green) 50%, transparent);
+}
+
+.nx-effect-write
+{
+	color: var(--vscode-charts-yellow);
+	border-color: color-mix(in srgb, var(--vscode-charts-yellow) 50%, transparent);
+}
+
+.nx-effect-destructive,
+.nx-noUndo
+{
+	color: var(--vscode-errorForeground);
+	border-color: color-mix(in srgb, var(--vscode-errorForeground) 50%, transparent);
+}
+
+.nx-stepFixes
+{
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	margin-top: 6px;
+	font-size: 11px;
+}
+
+.nx-stepNotReady
+{
+	color: var(--vscode-charts-yellow);
+}
+
+.nx-fixBtn,
+.nx-saveInputsBtn
+{
+	padding: 2px 8px;
+	font-size: 11px;
+	border: none;
+	border-radius: var(--nx-radius-1);
+	background: var(--nx-secondary);
+	color: var(--nx-secondaryFg);
+	cursor: pointer;
+}
+
+.nx-fixBtn:hover,
+.nx-saveInputsBtn:hover
+{
+	background: var(--nx-secondaryHover);
+}
+
+.nx-stepNeeds
+{
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 8px;
+	padding: 8px;
+	border-radius: var(--nx-radius-1);
+	border: 1px solid color-mix(in srgb, var(--vscode-charts-yellow) 40%, transparent);
+	font-size: 12px;
+}
+
+.nx-needsMsg
+{
+	color: var(--vscode-charts-yellow);
+}
+
+.nx-stepInputError
+{
+	color: var(--vscode-errorForeground);
+}
+
+.nx-stepField
+{
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.nx-stepInputLabel
+{
+	color: var(--nx-muted);
+	font-size: 11px;
+}
+
+.nx-stepInput
+{
+	padding: 3px 6px;
+	font: inherit;
+	color: var(--nx-inputFg);
+	background: var(--nx-inputBg);
+	border: 1px solid var(--nx-inputBorder, var(--nx-border));
+	border-radius: var(--nx-radius-1);
+}
+
+textarea.nx-stepInput
+{
+	font-family: var(--vscode-editor-font-family, monospace);
+	resize: vertical;
+}
+
+.nx-saveInputsBtn
+{
+	align-self: flex-start;
+	background: var(--nx-primary);
+	color: var(--nx-primaryFg);
+}
+
+.nx-saveInputsBtn:hover
+{
+	background: var(--nx-primaryHover);
 }

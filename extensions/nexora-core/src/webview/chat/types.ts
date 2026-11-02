@@ -41,6 +41,10 @@ export type WebviewInboundMessage =
 	| { type: 'approvePlan'; planId: string }
 	| { type: 'cancelPlan'; planId: string }
 	| { type: 'modifyPlan'; planId: string; modification: any }
+	/** A plan step's readiness fix, e.g. "connect:github" or "open-folder". */
+	| { type: 'runFix'; fix: string }
+	/** New inputs for a step that needs input; the engine validates them again. */
+	| { type: 'updateStepInputs'; planId: string; taskId: string; inputs: Record<string, unknown> }
 	| { type: 'getHistory' }
 	| { type: 'getRollbackable' }
 	| { type: 'rollback'; historyId: number }
@@ -114,6 +118,7 @@ export type WebviewOutboundMessage =
 	| { type: 'taskRetry'; planId: string; taskId: string; taskName?: string; attempt: number; maxAttempts: number; platform: string }
 	| { type: 'planCompleted'; planId: string; status: string; actualCost: number }
 	| { type: 'planExecutionStarted'; planId: string }
+	| { type: 'planApproveFailed'; planId: string; message: string }
 	| { type: 'planExecutionComplete'; planId: string; status: string; tasks: any[]; actualCost: number }
 	| { type: 'showSaveTemplate'; planId: string; parameters: any[] }
 	| { type: 'showSuggestion'; suggestion: any | null }

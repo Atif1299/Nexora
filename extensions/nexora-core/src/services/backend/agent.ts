@@ -34,6 +34,8 @@ export interface AgentTurnResponse {
 	content?: string;
 	tool_calls?: ToolCall[];
 	model_used: string;
+	/** What this turn cost, as the engine priced it (done event). */
+	cost_usd?: number;
 }
 
 export type AgentMode = 'ask' | 'agent';

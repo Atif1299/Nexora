@@ -126,6 +126,7 @@ export function createOrchestrateApi(transport: Transport) {
 			success: boolean;
 			summary: string;
 			files: string[];
+			cost_usd?: number;
 		}): Promise<{ ok?: boolean }> => {
 			return await transport.post('/api/orchestrate/task-result', payload);
 		},

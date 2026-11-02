@@ -672,6 +672,7 @@ export class BackendClient {
 		success: boolean;
 		summary: string;
 		files: string[];
+		cost_usd?: number;
 	}): Promise<any> {
 		return createOrchestrateApi(this.transport).submitTaskResult(payload);
 	}
