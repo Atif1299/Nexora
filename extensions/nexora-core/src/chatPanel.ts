@@ -3200,13 +3200,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._offerSaveAsTemplate(planId, result.status);
 
 		} catch (error) {
-			const reason = this._restorePlanAfterFailedApprove(planId, error);
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: `Error executing plan: ${reason}`,
-				isLoading: false
-			});
+			// the plan card shows the reason (planApproveFailed); a chat line would repeat it
+			this._restorePlanAfterFailedApprove(planId, error);
 		}
 	}
 

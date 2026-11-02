@@ -3223,7 +3223,8 @@ body
 }
 
 .nx-fixBtn,
-.nx-saveInputsBtn
+.nx-saveInputsBtn,
+.nx-removeStepBtn
 {
 	padding: 2px 8px;
 	font-size: 11px;
@@ -3235,7 +3236,8 @@ body
 }
 
 .nx-fixBtn:hover,
-.nx-saveInputsBtn:hover
+.nx-saveInputsBtn:hover,
+.nx-removeStepBtn:hover
 {
 	background: var(--nx-secondaryHover);
 }
@@ -3301,4 +3303,10 @@ textarea.nx-stepInput
 .nx-saveInputsBtn:hover
 {
 	background: var(--nx-primaryHover);
+}
+
+.nx-removeStepBtn
+{
+	margin-top: 6px;
+	color: var(--vscode-errorForeground);
 }

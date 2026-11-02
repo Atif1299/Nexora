@@ -1732,8 +1732,14 @@
 				fixes.map(f => `<button type="button" class="nx-fixBtn" data-fix="${escapeHtml(f)}">${escapeHtml(planFixLabel(f))}</button>`).join('') +
 				'</div>';
 		}
-		const needs = Array.isArray(task.needs_input) && task.needs_input.length ? planNeedsInput(planId, task) : '';
-		return `<div class="nx-stepMeta">${meta.join('')}</div>${readiness}${needs}`;
+		const needsInput = Array.isArray(task.needs_input) && task.needs_input.length > 0;
+		const needs = needsInput ? planNeedsInput(planId, task) : '';
+		// a step the plan should not have, or that cannot run, can be dropped before approving
+		const pending = !task.status || String(task.status).toLowerCase() === 'pending';
+		const remove = pending && (needsInput || (task.readiness && !task.readiness.ready))
+			? `<button type="button" class="nx-removeStepBtn" data-plan-id="${escapeHtml(planId)}" data-task-id="${escapeHtml(task.task_id)}">Remove step</button>`
+			: '';
+		return `<div class="nx-stepMeta">${meta.join('')}</div>${readiness}${needs}${remove}`;
 	}
 
 	/** The inputs typed into a step's form, or an error naming the field that is not valid. */
@@ -2498,6 +2504,16 @@
 			const planId = target.getAttribute('data-plan-id');
 			if (planId) {
 				vscode.postMessage({ type: 'approvePlan', planId: planId });
+			}
+		}
+
+		if (target.classList.contains('nx-removeStepBtn')) {
+			const planId = target.getAttribute('data-plan-id');
+			const taskId = target.getAttribute('data-task-id');
+			if (planId && taskId) {
+				// the engine answers with the plan without this step, which redraws the card
+				target.disabled = true;
+				vscode.postMessage({ type: 'modifyPlan', planId: planId, modification: { remove_tasks: [taskId] } });
 			}
 		}
 
