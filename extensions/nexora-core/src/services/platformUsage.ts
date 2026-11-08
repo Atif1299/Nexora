@@ -36,6 +36,30 @@ export interface PlatformUsage {
 
 export type PanelSection = 'main' | 'discover' | 'hidden';
 
+/** One tool of a connected server (engine `GET /api/capabilities/tools/{server}`). */
+export interface ServerTool {
+	name: string;
+	title: string;
+	description: string;
+	effect: 'read' | 'write' | 'destructive';
+	enabled: boolean;
+	required: string[];
+	/** Every required input is a string, so Try can ask for each in an input box. */
+	string_inputs_only: boolean;
+}
+
+export interface ServerTools {
+	server: string;
+	connected: boolean;
+	tools: ServerTool[];
+}
+
+/** The switched-off tool names after turning one tool on or off. */
+export function disabledAfterToggle(tools: ServerTool[], tool: string, enabled: boolean): string[] {
+	const off = tools.filter(t => !t.enabled).map(t => t.name).filter(name => name !== tool);
+	return enabled ? off : off.concat([tool]);
+}
+
 const LABELS: Record<string, string> = {
 	chat: 'Chat',
 	agent: 'Agent',

@@ -15,6 +15,8 @@
 		discoverOpen: saved.discoverOpen === true
 	};
 	let lastData = null;
+	/** The open detail view: the row's id and the tools the panel sent (null while loading). */
+	const detail = { id: '', data: null };
 
 	function saveView() {
 		vscode.setState({ filter: view.filter, collapsed: view.collapsed, discoverOpen: view.discoverOpen });
@@ -235,6 +237,106 @@
 		});
 	}
 
+	const EFFECT_LABEL = { read: 'Read', write: 'Write', destructive: 'Destructive' };
+
+	function findRow(id) {
+		if (!lastData) {
+			return null;
+		}
+		for (const group of lastData.categories || []) {
+			for (const p of group.platforms || []) {
+				if (p.id === id) {
+					return p;
+				}
+			}
+		}
+		const found = (lastData.discover || []).find((p) => p.id === id);
+		return found ? Object.assign({}, found, { discover: true }) : null;
+	}
+
+	function toolRow(tool) {
+		const effect = EFFECT_LABEL[tool.effect] || tool.effect;
+		const canTry = tool.string_inputs_only && tool.enabled;
+		const tryTitle = !tool.enabled ? 'Switch the tool on to try it' : (tool.string_inputs_only ? 'Run it once, with your approval' : 'Needs structured inputs; use it from chat');
+		return `
+			<div class="nx-tool${tool.enabled ? '' : ' is-off'}" data-tool="${escapeHtml(tool.name)}">
+				<div class="nx-tool-main">
+					<div class="nx-name-row">
+						<span class="nx-tool-name">${escapeHtml(tool.title || tool.name)}</span>
+						<span class="nx-effect nx-effect-${escapeHtml(tool.effect)}">${escapeHtml(effect)}</span>
+					</div>
+					<div class="nx-meta">${escapeHtml(tool.description || tool.name)}</div>
+				</div>
+				<button type="button" class="nx-btn nx-btn-secondary nx-try" data-try="${escapeHtml(tool.name)}" title="${escapeHtml(tryTitle)}" ${canTry ? '' : 'disabled'}>Try</button>
+				<label class="nx-switch" title="${tool.enabled ? 'On: agents and plans can use it' : 'Off: hidden from agents and plans'}">
+					<input type="checkbox" data-switch="${escapeHtml(tool.name)}" ${tool.enabled ? 'checked' : ''} aria-label="${escapeHtml((tool.title || tool.name) + ' on or off')}">
+					<span class="nx-switch-slider"></span>
+				</label>
+			</div>`;
+	}
+
+	function renderDetail() {
+		const root = document.getElementById('platforms-root');
+		const el = document.getElementById('platform-detail');
+		if (!root || !el) {
+			return;
+		}
+		const row = detail.id ? findRow(detail.id) : null;
+		if (!row) {
+			root.classList.remove('is-detail');
+			el.hidden = true;
+			el.innerHTML = '';
+			return;
+		}
+		root.classList.add('is-detail');
+		el.hidden = false;
+		const data = detail.data;
+		let tools;
+		if (!data) {
+			tools = '<div class="nx-empty">Loading tools...</div>';
+		} else if (!data.server) {
+			const where = useInLabels(row.usage).join(', ');
+			tools = `<div class="nx-empty">${where ? `Nexora uses this platform in: ${escapeHtml(where)}. It has no tool list of its own.` : 'This platform has no tool list.'}</div>`;
+		} else if (data.unavailable) {
+			tools = '<div class="nx-empty">The tool list needs a newer Nexora engine.</div>';
+		} else if (!data.connected) {
+			tools = '<div class="nx-empty">Connect to see its tools and choose which ones agents and plans may use.</div>';
+		} else if (!data.tools.length) {
+			tools = '<div class="nx-empty">No tools found yet. Refresh in a moment.</div>';
+		} else {
+			const on = data.tools.filter((t) => t.enabled).length;
+			tools = `<div class="nx-detail-sub">Tools <span class="nx-count">${on} of ${data.tools.length} on</span></div>
+				<div class="nx-list">${data.tools.map(toolRow).join('')}</div>`;
+		}
+		const chips = row.discover ? [] : useInLabels(row.usage);
+		const status = row.discover ? 'discover' : (row.capabilityStatus || '');
+		el.innerHTML = `
+			<button type="button" class="nx-back" data-back="1"><svg class="nx-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4 6 8l4 4"/></svg>Platforms</button>
+			<div class="nx-detail-head nx-platform${row.capabilityStatus === 'ready' && row.live ? ' is-connected' : ''}${row.capabilityStatus === 'failed' ? ' is-failed' : ''}" data-status="${escapeHtml(status)}">
+				<span class="nx-dot" aria-hidden="true"></span>
+				<div class="nx-platform-main">
+					<div class="nx-name-row"><span class="nx-detail-name">${escapeHtml(row.name || row.id)}</span><span class="nx-status">${escapeHtml(statusLabel(row))}</span></div>
+					<div class="nx-meta nx-meta-full">${escapeHtml(row.description || (row.usage && row.usage.reason) || '')}</div>
+					${chips.length ? `<div class="nx-useins">${chips.map((c) => `<span class="nx-chip">${escapeHtml(c)}</span>`).join('')}</div>` : ''}
+				</div>
+			</div>
+			${actionButtons(row)}
+			${tools}`;
+	}
+
+	function openDetail(id) {
+		detail.id = id;
+		detail.data = null;
+		renderDetail();
+		vscode.postMessage({ type: 'details', id });
+	}
+
+	function closeDetail() {
+		detail.id = '';
+		detail.data = null;
+		renderDetail();
+	}
+
 	function render(data) {
 		lastData = data;
 		const loading = document.getElementById('loading');
@@ -333,6 +435,11 @@
 
 		const count = categories.reduce((sum, group) => sum + ((group.platforms || []).length), 0);
 		announce(data.error ? data.error : (shown === count ? count + ' platforms' : shown + ' of ' + count + ' platforms'));
+		if (detail.id) {
+			// A sign-in or a key may have changed the row: show it, and ask for its tools again.
+			renderDetail();
+			vscode.postMessage({ type: 'details', id: detail.id });
+		}
 	}
 
 	function rerender() {
@@ -392,6 +499,10 @@
 		}
 		const btn = target.closest('button[data-action]');
 		if (!btn) {
+			const article = target.closest('.nx-platform');
+			if (article && article.getAttribute('data-id')) {
+				openDetail(article.getAttribute('data-id'));
+			}
 			return;
 		}
 		const action = btn.getAttribute('data-action');
@@ -401,10 +512,46 @@
 		}
 	});
 
+	document.getElementById('platform-detail')?.addEventListener('click', (event) => {
+		const target = event.target;
+		if (!target || typeof target.closest !== 'function') {
+			return;
+		}
+		if (target.closest('button[data-back]')) {
+			closeDetail();
+			return;
+		}
+		const tryBtn = target.closest('button[data-try]');
+		if (tryBtn && !tryBtn.disabled) {
+			vscode.postMessage({ type: 'tryTool', id: detail.id, tool: tryBtn.getAttribute('data-try') });
+			return;
+		}
+		const btn = target.closest('button[data-action]');
+		if (btn) {
+			vscode.postMessage({ type: btn.getAttribute('data-action'), id: btn.getAttribute('data-id') });
+		}
+	});
+
+	document.getElementById('platform-detail')?.addEventListener('change', (event) => {
+		const input = event.target;
+		if (input && input.getAttribute && input.getAttribute('data-switch')) {
+			vscode.postMessage({ type: 'setToolEnabled', id: detail.id, tool: input.getAttribute('data-switch'), enabled: !!input.checked });
+		}
+	});
+
+	document.addEventListener('keydown', (event) => {
+		if (event.key === 'Escape' && detail.id && event.target !== search) {
+			closeDetail();
+		}
+	});
+
 	window.addEventListener('message', (event) => {
 		const msg = event.data || {};
 		if (msg.type === 'updateData') {
 			render(msg.data || {});
+		} else if (msg.type === 'platformDetail' && msg.detail && msg.detail.id === detail.id) {
+			detail.data = msg.detail;
+			renderDetail();
 		}
 	});
 

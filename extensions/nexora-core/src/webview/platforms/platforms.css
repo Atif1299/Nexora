@@ -107,6 +107,221 @@ h1
 	outline-offset: 1px;
 }
 
+/* ---------- detail view ---------- */
+
+#platforms-root.is-detail > .nx-section-head,
+#platforms-root.is-detail > .nx-hint,
+#platforms-root.is-detail > .nx-tools,
+#platforms-root.is-detail > #platform-list,
+#platforms-root.is-detail > #loading
+{
+	display: none;
+}
+
+.nx-platform
+{
+	cursor: pointer;
+}
+
+.nx-detail
+{
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.nx-detail[hidden]
+{
+	display: none;
+}
+
+.nx-back
+{
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	align-self: flex-start;
+	padding: 2px 6px 2px 2px;
+	border: none;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--nx-muted);
+	font-family: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.nx-back .nx-chevron
+{
+	transform: none;
+}
+
+.nx-back:hover
+{
+	background: var(--s-hover);
+	color: var(--nx-fg);
+}
+
+.nx-detail-head
+{
+	padding: 0;
+	cursor: default;
+}
+
+.nx-detail-head:hover
+{
+	background: transparent;
+}
+
+.nx-detail-name
+{
+	font-size: 15px;
+	font-weight: 600;
+}
+
+.nx-meta-full
+{
+	display: block;
+	-webkit-line-clamp: unset;
+}
+
+.nx-detail > .nx-platform-actions
+{
+	justify-content: flex-start;
+}
+
+.nx-detail-sub
+{
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	margin-top: 6px;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.nx-tool
+{
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto auto;
+	gap: 10px;
+	align-items: center;
+	padding: 9px 12px;
+}
+
+.nx-tool + .nx-tool
+{
+	border-top: 1px solid var(--s-line);
+}
+
+.nx-tool.is-off .nx-tool-name,
+.nx-tool.is-off .nx-meta
+{
+	opacity: 0.55;
+}
+
+.nx-tool-main
+{
+	min-width: 0;
+}
+
+.nx-tool-name
+{
+	font-size: 12.5px;
+	font-weight: 500;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.nx-effect
+{
+	flex-shrink: 0;
+	font-size: 10.5px;
+	line-height: 16px;
+	padding: 0 6px;
+	border-radius: 999px;
+	border: 1px solid var(--s-card-border);
+	color: var(--nx-muted);
+}
+
+.nx-effect-write
+{
+	color: var(--nx-warn);
+	border-color: color-mix(in srgb, var(--nx-warn) 40%, transparent);
+}
+
+.nx-effect-destructive
+{
+	color: var(--nx-err);
+	border-color: color-mix(in srgb, var(--nx-err) 40%, transparent);
+}
+
+.nx-try:disabled
+{
+	opacity: 0.4;
+	cursor: default;
+}
+
+.nx-switch
+{
+	position: relative;
+	display: inline-block;
+	width: 30px;
+	height: 18px;
+	flex-shrink: 0;
+	cursor: pointer;
+}
+
+.nx-switch input
+{
+	position: absolute;
+	inset: 0;
+	opacity: 0;
+	margin: 0;
+	cursor: pointer;
+	z-index: 1;
+}
+
+.nx-switch-slider
+{
+	position: absolute;
+	inset: 0;
+	border-radius: 9px;
+	background: color-mix(in srgb, var(--s-ink) 18%, transparent);
+	transition: background-color 0.15s ease;
+	pointer-events: none;
+}
+
+.nx-switch-slider::before
+{
+	content: "";
+	position: absolute;
+	width: 14px;
+	height: 14px;
+	left: 2px;
+	top: 2px;
+	border-radius: 50%;
+	background: #ffffff;
+	transition: transform 0.15s ease;
+}
+
+.nx-switch input:checked + .nx-switch-slider
+{
+	background: var(--nx-ok);
+}
+
+.nx-switch input:checked + .nx-switch-slider::before
+{
+	transform: translateX(12px);
+}
+
+.nx-switch input:focus-visible + .nx-switch-slider
+{
+	outline: 1px solid var(--nx-focus);
+	outline-offset: 2px;
+}
+
 /* ---------- filter ---------- */
 
 .nx-tools

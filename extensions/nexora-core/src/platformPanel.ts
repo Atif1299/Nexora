@@ -41,7 +41,8 @@ import {
 	type LocalAgentProbe
 } from './services/agents/localAgents';
 import type { SaasConnector } from './services/backend/auth';
-import { section, usageFor, type PlatformUsage } from './services/platformUsage';
+import { disabledAfterToggle, section, usageFor, type PlatformUsage, type ServerTool } from './services/platformUsage';
+import { executePlatformTool } from './services/tools/platformTool';
 
 /**
  * Catalogue rows whose credential is the Settings > LLM API Keys entry in SecretStorage.
@@ -267,7 +268,19 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		view.webview.html = getPlatformsWebviewHtml(view.webview, this._extensionUri);
 
 		this._disposables = [
-			view.webview.onDidReceiveMessage(async (msg: { type?: string; id?: string }) => {
+			view.webview.onDidReceiveMessage(async (msg: { type?: string; id?: string; tool?: string; enabled?: boolean }) => {
+				if (msg?.type === 'details' && msg.id) {
+					await this._postDetails(msg.id);
+					return;
+				}
+				if (msg?.type === 'setToolEnabled' && msg.id && msg.tool) {
+					await this._setToolEnabled(msg.id, msg.tool, msg.enabled !== false);
+					return;
+				}
+				if (msg?.type === 'tryTool' && msg.id && msg.tool) {
+					await this._tryTool(msg.id, msg.tool);
+					return;
+				}
 				if (msg?.type === 'refresh') {
 					await this.refresh();
 					return;
@@ -329,6 +342,75 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 				discover: this.platforms.filter(p => section(p) === 'discover')
 			}
 		});
+	}
+
+	/**
+	 * The detail view: the row's tools (for a platform with an MCP server) with
+	 * their effects and switches. The webview already holds the row itself.
+	 */
+	private async _postDetails(platformId: string): Promise<void> {
+		const row = this._row(platformId);
+		if (!row || !this._view) {
+			return;
+		}
+		const server = row.mcpServerId;
+		const found = server ? await getBackendClient().getServerTools(server) : undefined;
+		void this._view.webview.postMessage({
+			type: 'platformDetail',
+			detail: {
+				id: row.id,
+				server: server || null,
+				connected: !!found?.connected,
+				tools: found?.tools || [],
+				unavailable: !!server && !found
+			}
+		});
+	}
+
+	private async _setToolEnabled(platformId: string, tool: string, enabled: boolean): Promise<void> {
+		const server = this._row(platformId)?.mcpServerId;
+		if (!server) {
+			return;
+		}
+		const client = getBackendClient();
+		try {
+			const current = await client.getServerTools(server);
+			await client.setDisabledTools(server, disabledAfterToggle(current?.tools || [], tool, enabled));
+		} catch {
+			void getNotificationService().showError(`Could not change ${tool}. Is the Nexora engine running?`);
+		}
+		await this._postDetails(platformId);
+		void this._syncUsage().then(() => this._pushState());
+	}
+
+	/**
+	 * Try one tool by hand: ask each required (string) input, then call it
+	 * through the same approval as chat, and show the result as JSON.
+	 */
+	private async _tryTool(platformId: string, tool: string): Promise<void> {
+		const server = this._row(platformId)?.mcpServerId;
+		if (!server) {
+			return;
+		}
+		const info: ServerTool | undefined = (await getBackendClient().getServerTools(server))?.tools.find(t => t.name === tool);
+		if (!info || !info.string_inputs_only) {
+			return;
+		}
+		const args: Record<string, unknown> = {};
+		for (const name of info.required) {
+			const value = await vscode.window.showInputBox({
+				title: `${info.title || tool}: ${name}`,
+				prompt: `Value for ${name}`,
+				ignoreFocusOut: true
+			});
+			if (value === undefined) {
+				return;
+			}
+			args[name] = value;
+		}
+		const result = await executePlatformTool(server, tool, args, info.effect === 'read');
+		const doc = await vscode.workspace.openTextDocument({ language: 'json', content: JSON.stringify(result, null, 2) });
+		await vscode.window.showTextDocument(doc, { preview: true });
 	}
 
 	private async _syncUsage(): Promise<void> {

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { Transport } from './transport';
-import type { PlatformUsage } from '../platformUsage';
+import type { PlatformUsage, ServerTools } from '../platformUsage';
 
 export function createPlatformsApi(transport: Transport) {
 	return {
@@ -44,6 +44,22 @@ export function createPlatformsApi(transport: Transport) {
 			} catch {
 				return undefined;
 			}
+		},
+
+		/** Every discovered tool of a connected server with its effect and switch; undefined when the engine has no such route. */
+		getServerTools: async (server: string): Promise<ServerTools | undefined> => {
+			try {
+				const response = await transport.get(`/api/capabilities/tools/${encodeURIComponent(server)}`);
+				return response && Array.isArray(response.tools) ? response as ServerTools : undefined;
+			} catch {
+				return undefined;
+			}
+		},
+
+		/** Replace a server's switched-off tools; returns the new tool list. */
+		setDisabledTools: async (server: string, disabled: string[]): Promise<ServerTools | undefined> => {
+			const response = await transport.put(`/api/capabilities/tools/${encodeURIComponent(server)}`, { disabled });
+			return response && Array.isArray(response.tools) ? response as ServerTools : undefined;
 		},
 
 		searchPlatforms: async (query: string): Promise<any[]> => {

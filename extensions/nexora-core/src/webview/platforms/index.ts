@@ -42,6 +42,7 @@ export function getPlatformsWebviewHtml(
 		<div id="embedding-banner" class="nx-banner nx-banner-info" role="status" hidden></div>
 		<div id="loading" class="nx-empty" hidden>Loading platforms...</div>
 		<div id="platform-list" class="nx-groups"></div>
+		<div id="platform-detail" class="nx-detail" hidden></div>
 
 		<div id="sr-live" class="sr-only" role="status" aria-live="polite"></div>
 	</div>`
