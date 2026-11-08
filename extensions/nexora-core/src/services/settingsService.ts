@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import type { ModelCatalog } from './backend/models';
 import type { Effort } from '../webview/chat/types';
 
-export type ApiKeyProvider = 'openai' | 'anthropic' | 'gemini' | 'openrouter';
+export type ApiKeyProvider = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'groq' | 'mistral';
 
 export interface NexoraPreferences {
 	defaultModel: string;
@@ -28,7 +28,7 @@ const DEFAULT_PREFERENCES: NexoraPreferences = {
 	theme: 'auto'
 };
 
-const PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'gemini', 'openrouter'];
+const PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'gemini', 'openrouter', 'groq', 'mistral'];
 const MAX_RECOMMENDED_PER_PROVIDER = 3;
 
 /**
@@ -93,7 +93,9 @@ export class SettingsService {
 			openai: false,
 			anthropic: false,
 			gemini: false,
-			openrouter: false
+			openrouter: false,
+			groq: false,
+			mistral: false
 		};
 		for (const provider of PROVIDERS) {
 			result[provider] = await this.hasApiKey(provider);

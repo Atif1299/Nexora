@@ -5,7 +5,7 @@
 
 import type { Transport } from './transport';
 
-export type ModelProviderId = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'nexora_cloud';
+export type ModelProviderId = 'openai' | 'anthropic' | 'gemini' | 'openrouter' | 'groq' | 'mistral' | 'nexora_cloud';
 export type ModelTier = 'free' | 'paid';
 
 export interface CatalogModel {
@@ -55,7 +55,8 @@ function normalizeTier(value: unknown): ModelTier {
 }
 
 function normalizeProviderId(value: unknown): ModelProviderId | undefined {
-	if (value === 'openai' || value === 'anthropic' || value === 'gemini' || value === 'openrouter' || value === 'nexora_cloud') {
+	if (value === 'openai' || value === 'anthropic' || value === 'gemini' || value === 'openrouter'
+		|| value === 'groq' || value === 'mistral' || value === 'nexora_cloud') {
 		return value;
 	}
 	return undefined;

@@ -50,7 +50,9 @@ const LLM_KEY_ROWS: Record<string, ApiKeyProvider> = {
 	openai: 'openai',
 	claude: 'anthropic',
 	gemini: 'gemini',
-	openrouter: 'openrouter'
+	openrouter: 'openrouter',
+	groq: 'groq',
+	mistral: 'mistral'
 };
 
 /** Rows with a real card in Settings, so Configure has somewhere to go. */

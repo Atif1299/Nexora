@@ -257,11 +257,13 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (cloudToken) {
 			headers['X-Nexora-Cloud-Token'] = cloudToken;
 		}
-		const [openai, anthropic, gemini, openrouter] = await Promise.all([
+		const [openai, anthropic, gemini, openrouter, groq, mistral] = await Promise.all([
 			settingsService.getApiKey('openai'),
 			settingsService.getApiKey('anthropic'),
 			settingsService.getApiKey('gemini'),
-			settingsService.getApiKey('openrouter')
+			settingsService.getApiKey('openrouter'),
+			settingsService.getApiKey('groq'),
+			settingsService.getApiKey('mistral')
 		]);
 		if (openai) {
 			headers['X-Nexora-OpenAI-Key'] = openai;
@@ -274,6 +276,12 @@ export async function activate(context: vscode.ExtensionContext) {
 		}
 		if (openrouter) {
 			headers['X-Nexora-OpenRouter-Key'] = openrouter;
+		}
+		if (groq) {
+			headers['X-Nexora-Groq-Key'] = groq;
+		}
+		if (mistral) {
+			headers['X-Nexora-Mistral-Key'] = mistral;
 		}
 		return headers;
 	});

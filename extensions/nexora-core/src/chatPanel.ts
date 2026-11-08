@@ -2788,7 +2788,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				'anthropic': 'Anthropic',
 				'claude': 'Anthropic',
 				'gemini': 'Gemini',
-				'openrouter': 'OpenRouter'
+				'openrouter': 'OpenRouter',
+				'groq': 'Groq',
+				'mistral': 'Mistral'
 			};
 			const connectorNames: Record<string, string> = {
 				'supabase': 'Supabase',

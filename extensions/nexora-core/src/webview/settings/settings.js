@@ -10,7 +10,9 @@
 		{ id: 'openai', label: 'OpenAI' },
 		{ id: 'anthropic', label: 'Anthropic' },
 		{ id: 'gemini', label: 'Gemini' },
-		{ id: 'openrouter', label: 'OpenRouter' }
+		{ id: 'openrouter', label: 'OpenRouter' },
+		{ id: 'groq', label: 'Groq' },
+		{ id: 'mistral', label: 'Mistral' }
 	];
 
 	const SAAS_PROVIDERS = [

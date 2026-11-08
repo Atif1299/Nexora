@@ -26,7 +26,7 @@ import {
 	type CapabilitiesReport
 } from './services/backend/capabilities';
 
-const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'gemini', 'openrouter'];
+const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'gemini', 'openrouter', 'groq', 'mistral'];
 const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0', 'elevenlabs', 'tavily'] as const;
 const OAUTH_APP_PROVIDERS = [
 	'github_client_id',
