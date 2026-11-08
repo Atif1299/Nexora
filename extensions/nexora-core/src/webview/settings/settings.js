@@ -1197,8 +1197,9 @@
 	}
 
 	/**
-	 * Rule files live in the repository and are edited there, so this card only
-	 * shows which ones the agent receives and whether the budget cut any.
+	 * Rule files are edited in the editor, so this card shows which ones the
+	 * agent receives and whether the budget cut any. Personal rules (one file in
+	 * NEXORA_HOME, used in every project) come first; project files follow.
 	 */
 	function renderProjectRules(data) {
 		const rules = data && data.rules;
@@ -1207,29 +1208,50 @@
 		}
 		const files = Array.isArray(rules.files) ? rules.files : [];
 		const omitted = Array.isArray(rules.omitted) ? rules.omitted : [];
+		const personal = files.find((file) => file.personal);
+		const project = files.filter((file) => !file.personal);
 		const off = data.rules_enabled === false
 			? '<p class="nx-hint">Turned off by <code>nexora.agent.projectRules</code>; these files are not sent.</p>'
 			: '';
-		const rows = files.map((file) => `
+		const row = (file) => `
 			<div class="nx-model-row">
 				<code>${escapeHtml(file.path)}</code>
 				<span class="nx-hint">${Number(file.chars).toLocaleString()} chars${file.truncated ? ', truncated' : ''}</span>
 			</div>
-		`).join('');
+		`;
 		const cut = omitted.length
 			? `<p class="nx-hint">Over the ${Number(rules.max_chars).toLocaleString()}-character budget, not sent: ${omitted.map((p) => `<code>${escapeHtml(p)}</code>`).join(', ')}</p>`
 			: '';
+		const personalPath = rules.personal_path ? `<code>${escapeHtml(rules.personal_path)}</code>` : 'the Nexora data folder';
+		const projectPart = data.has_workspace === false
+			? '<p class="nx-hint">Open a folder to add project rules.</p>'
+			: (project.length
+				? `<div class="nx-model-list">${project.map(row).join('')}</div>`
+				: '<p class="nx-hint">Add <code>AGENTS.md</code>, <code>CLAUDE.md</code> or files in <code>.nexora/rules/</code> at the workspace root, and the agent follows them on every turn.</p>');
 		return `
 			<div class="nx-card">
+				<label class="nx-label">Personal rules (all projects)</label>
+				${personal
+					? `<div class="nx-model-list">${row(personal)}</div>`
+					: `<p class="nx-hint">Your own rules for every project, kept in ${personalPath}. None yet.</p>`}
+				<div class="nx-row" style="margin-top:8px">
+					<button type="button" class="nx-btn nx-btn-secondary" id="open-personal-rules">${personal ? 'Edit personal rules' : 'Create personal rules'}</button>
+				</div>
+			</div>
+			<div class="nx-card">
 				<label class="nx-label">Project rules</label>
-				${files.length
-					? `<div class="nx-model-list">${rows}</div>
-						<p class="nx-hint">Sent with every Ask and Agent turn, ${Number(rules.total_chars).toLocaleString()} of ${Number(rules.max_chars).toLocaleString()} characters. Edit the files in the repository.</p>`
-					: '<p class="nx-hint">Add <code>AGENTS.md</code>, <code>CLAUDE.md</code> or files in <code>.nexora/rules/</code> at the workspace root, and the agent follows them on every turn.</p>'}
+				${projectPart}
+				${files.length ? `<p class="nx-hint">Sent with every Chat, Ask and Agent turn, ${Number(rules.total_chars).toLocaleString()} of ${Number(rules.max_chars).toLocaleString()} characters. Project rules win where they disagree with personal ones.</p>` : ''}
 				${cut}
 				${off}
 			</div>
 		`;
+	}
+
+	function bindProjectRules() {
+		document.getElementById('open-personal-rules')?.addEventListener('click', () => {
+			vscode.postMessage({ type: 'openPersonalRules' });
+		});
 	}
 
 	function renderProjectMemory() {
@@ -1246,7 +1268,9 @@
 				<div class="nx-card">
 					<p class="nx-hint">Open a folder to give this project its own memory.</p>
 				</div>
+				${renderProjectRules(data)}
 			`;
+			bindProjectRules();
 			return;
 		}
 
@@ -1313,6 +1337,7 @@
 			}
 		};
 		document.getElementById('fact-add')?.addEventListener('click', submit);
+		bindProjectRules();
 		for (const input of [valueInput, labelInput]) {
 			input?.addEventListener('keydown', (event) => {
 				if (event.key === 'Enter') {

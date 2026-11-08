@@ -25,11 +25,14 @@ export interface ProjectFactsResponse {
 
 /** GET /api/memory/rules: the rule files the agent adds to its prompt. */
 export interface ProjectRulesResponse {
-	files: Array<{ path: string; chars: number; truncated: boolean }>;
+	/** personal: the user's own rules file in NEXORA_HOME, used in every project. */
+	files: Array<{ path: string; chars: number; truncated: boolean; personal?: boolean }>;
 	/** Found but over the budget, so not sent. */
 	omitted: string[];
 	total_chars: number;
 	max_chars: number;
+	/** Where the personal rules file lives (it may not exist yet); '' if unknown. */
+	personal_path: string;
 }
 
 export interface MemorySuggestion {
@@ -170,19 +173,20 @@ export function createMemoryApi(transport: Transport) {
 			}
 		},
 
-		getRules: async (workspacePath: string): Promise<ProjectRulesResponse> => {
+		/** Without a folder, only the personal rules come back. */
+		getRules: async (workspacePath?: string): Promise<ProjectRulesResponse> => {
 			try {
-				const response = await transport.get(
-					`/api/memory/rules?workspace_path=${encodeURIComponent(workspacePath)}`
-				);
+				const query = workspacePath ? `?workspace_path=${encodeURIComponent(workspacePath)}` : '';
+				const response = await transport.get(`/api/memory/rules${query}`);
 				return {
 					files: Array.isArray(response?.files) ? response.files : [],
 					omitted: Array.isArray(response?.omitted) ? response.omitted : [],
 					total_chars: Number(response?.total_chars) || 0,
-					max_chars: Number(response?.max_chars) || 0
+					max_chars: Number(response?.max_chars) || 0,
+					personal_path: typeof response?.personal_path === 'string' ? response.personal_path : ''
 				};
 			} catch {
-				return { files: [], omitted: [], total_chars: 0, max_chars: 0 };
+				return { files: [], omitted: [], total_chars: 0, max_chars: 0, personal_path: '' };
 			}
 		},
 

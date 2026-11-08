@@ -38,6 +38,7 @@ import {
 	type CapabilitiesReport
 } from './services/backend/capabilities';
 import { deriveWorkspaceId } from './services/workspaceId';
+import { ChatSessionStore } from './services/sessionStore';
 import { agentCheckpoints } from './services/checkpoints';
 
 type ChatMode = 'chat' | 'ask' | 'plan' | 'execute' | 'agent';
@@ -120,6 +121,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	private _onSessionsChanged?: () => void;
 
 	private readonly _context: vscode.ExtensionContext;
+	/** This folder's chat list (workspaceState; globalState when no folder is open). */
+	private readonly _sessionStore: ChatSessionStore;
 	/** Selection tags from the composer, added to the next request by _injectAtMentionContext. */
 	private _pendingContextBlocks: string[] = [];
 	/** The same tags, stored on the user message by _recordUserMessage so a rewind can resend them. */
@@ -138,6 +141,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 	constructor(private readonly _extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
 		this._context = context;
+		this._sessionStore = new ChatSessionStore(context);
 		this._loadSessions();
 		onDidChangeCapabilities((report) => {
 			void this._pushFirstRunCard(report);
@@ -163,11 +167,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	private _loadSessions(): void {
-		const storedSessions = this._context.globalState.get<any[]>('nexora.chatSessions', []);
-		const storedActive = this._context.globalState.get<string>('nexora.activeSessionId', '');
-
-		this._sessions = Array.isArray(storedSessions) ? storedSessions.map(s => this._coerceSession(s)) : [];
-		this._activeSessionId = typeof storedActive === 'string' ? storedActive : '';
+		const stored = this._sessionStore.load();
+		this._sessions = stored.sessions.map(s => this._coerceSession(s));
+		this._activeSessionId = stored.activeId;
 		this._sessions.sort((a, b) => b.createdAt - a.createdAt);
 		const retitled = this._retitleDefaultSessions();
 
@@ -203,8 +205,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 	private async _persistSessions(): Promise<void> {
 		this._retitleDefaultSessions();
-		await this._context.globalState.update('nexora.chatSessions', this._sessions);
-		await this._context.globalState.update('nexora.activeSessionId', this._activeSessionId);
+		await this._sessionStore.save(this._sessions, this._activeSessionId);
 		this._onSessionsChanged?.();
 	}
 
@@ -3322,7 +3323,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 		try {
 			const client = getBackendClient();
-			const items = await client.getRollbackable('default');
+			// Only this folder's actions: an undo from folder B must not offer folder A's deploy.
+			const { workspaceId } = await this._workspaceContext();
+			const items = await client.getRollbackable('default', workspaceId);
 
 			let response = `**Rollbackable Actions**\n\n`;
 

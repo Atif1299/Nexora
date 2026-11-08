@@ -800,8 +800,8 @@ export class BackendClient {
 		return createMemoryApi(this.transport).getFacts(workspaceId);
 	}
 
-	/** Project rule files (AGENTS.md, CLAUDE.md, .nexora/rules/*.md) the agent receives. */
-	async getProjectRules(workspacePath: string): Promise<ProjectRulesResponse> {
+	/** Rule files the agent receives: personal AGENTS.md, then AGENTS.md, CLAUDE.md, .nexora/rules/*.md. */
+	async getProjectRules(workspacePath?: string): Promise<ProjectRulesResponse> {
 		return createMemoryApi(this.transport).getRules(workspacePath);
 	}
 
@@ -889,8 +889,8 @@ export class BackendClient {
 	 * @param userId User identifier
 	 * @returns List of rollbackable items
 	 */
-	async getRollbackable(userId: string = 'default'): Promise<RollbackableItem[]> {
-		return createHistoryApi(this.transport).getRollbackable(userId);
+	async getRollbackable(userId: string = 'default', workspaceId?: string): Promise<RollbackableItem[]> {
+		return createHistoryApi(this.transport).getRollbackable(userId, workspaceId);
 	}
 
 	/**
