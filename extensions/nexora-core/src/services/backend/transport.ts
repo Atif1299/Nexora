@@ -24,6 +24,10 @@ export type SSEEvent = {
 	cost_usd?: number;
 	/** chat/stream "remembered": the project fact this message just saved. */
 	value?: string;
+	/** agent "tool_delta": the next piece of an edit tool call's JSON arguments. */
+	index?: number;
+	name?: string;
+	arguments?: string;
 };
 
 export type Transport = {

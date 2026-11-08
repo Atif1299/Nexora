@@ -34,6 +34,7 @@ import {
 } from './services/engineProcess';
 import { enginePlaceholderHtml, engineStateLabel } from './services/editorPage';
 import { nexoraDiffProvider, NEXORA_DIFF_SCHEME } from './services/tools/diffProvider';
+import { agentEditHighlights } from './services/tools/editHighlights';
 import { openNexoraBrowser } from './services/browser';
 import { closeAgentBrowser } from './services/tools/browserSession';
 import { stopAllBackgroundCommands } from './services/tools/terminalCommand';
@@ -284,6 +285,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.registerTextDocumentContentProvider(NEXORA_DIFF_SCHEME, nexoraDiffProvider),
 		nexoraDiffProvider
 	);
+	agentEditHighlights.register(context);
 
 	const engineStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
 	engineStatusBar.name = 'Nexora Engine';

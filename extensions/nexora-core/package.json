@@ -532,7 +532,7 @@
         "nexora.agent.inlineDiffs": {
           "type": "boolean",
           "default": true,
-          "description": "When Auto-edit applies files, open a non-blocking diff preview. Ask mode still waits for Accept/Reject."
+          "description": "After the agent edits a file, mark the changed lines in the editor (green added, red removed) with Keep / Undo. The marks clear when you send the next message. Ask mode still waits for Accept/Reject."
         },
         "nexora.agent.autoFormat": {
           "type": "boolean",

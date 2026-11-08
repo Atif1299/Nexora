@@ -1008,7 +1008,7 @@
 				</div>
 			</div>
 			${execToggle('pref-include-editors', 'Include open editors', 'Attach the active editor and other open files on send (up to 5).', a.includeOpenEditors !== false)}
-			${execToggle('pref-inline-diffs', 'Inline diffs', 'Show a non-blocking diff when Auto-edit applies files. Ask mode still waits for Accept.', a.inlineDiffs !== false)}
+			${execToggle('pref-inline-diffs', 'Inline diffs', 'Mark the lines the agent changed in the editor, with Keep / Undo. Ask mode still waits for Accept.', a.inlineDiffs !== false)}
 			${execToggle('pref-auto-format', 'Auto-format', 'Format the file after a successful write, patch, or insert.', a.autoFormat !== false)}
 			${execToggle('pref-auto-approve', 'Auto-approve mode transitions', 'Skip Approve & Execute after Plan and run immediately.', !!a.autoApproveModeSwitch)}
 			${execToggle('pref-auto-close-term', 'Auto-close agent terminal', 'Close the Nexora Agent terminal shortly after a command finishes.', a.autoCloseTerminal !== false)}

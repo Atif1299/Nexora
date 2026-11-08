@@ -4,13 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as path from 'path';
-import { promises as fs } from 'fs';
-import * as vscode from 'vscode';
-import { shouldConfirmFileEdits } from '../agentRunMode';
 import type { ToolResult } from './executor';
 import { confirmOrPreviewDiff } from './diffProvider';
 import { formatAfterWrite } from './writeFile';
 import { agentCheckpoints } from '../checkpoints';
+import { readCurrentText, writeContent } from './documentWrite';
+import { agentEditHighlights } from './editHighlights';
+import { closestMatch, matchLineEndings, occurrenceLines } from './editMatching';
 
 const SKIP_PATTERNS = ['.env', '.pem', 'credentials', 'secret', '.key', 'node_modules', '.git'];
 
@@ -33,14 +33,25 @@ function isSensitivePath(filePath: string): boolean {
 /**
  * Apply a patch (find/replace) to a file.
  * Shows confirmation with diff preview before applying.
+ *
+ * The old text must match once, or every match is replaced with replaceAll.
+ * Line endings follow the file. When the text is not found, the error shows
+ * the closest lines with numbers; with several matches, where they are.
  */
 export async function applyPatchTool(
 	workspaceRoot: string,
 	filePath: string,
 	oldText: string,
 	newText: string,
-	requireConfirmation: boolean = true
+	requireConfirmation: boolean = true,
+	replaceAll: boolean = false
 ): Promise<ToolResult> {
+	if (typeof oldText !== 'string' || oldText.length === 0) {
+		return { success: false, error: 'old_text is empty. Use write_file for a new file, or insert_lines to add lines.' };
+	}
+	if (typeof newText !== 'string') {
+		return { success: false, error: 'new_text is missing.' };
+	}
 	// Validate path
 	if (!isPathSafe(workspaceRoot, filePath)) {
 		return {
@@ -59,28 +70,32 @@ export async function applyPatchTool(
 	const fullPath = path.resolve(workspaceRoot, filePath);
 
 	try {
-		// Read current content
-		const content = await fs.readFile(fullPath, 'utf8');
+		const content = await readCurrentText(fullPath);
+		const find = matchLineEndings(content, oldText);
+		const replacement = matchLineEndings(content, newText);
 
 		// Check if old text exists
-		if (!content.includes(oldText)) {
+		const at = occurrenceLines(content, find);
+		if (at.length === 0) {
+			const near = closestMatch(content, oldText);
 			return {
 				success: false,
-				error: `Could not find the text to replace in ${filePath}. The file may have changed.`
+				error: near
+					? `old_text was not found in ${filePath}. The closest lines are below (line|text); copy them exactly, without the numbers, and try again:\n${near}`
+					: `old_text was not found in ${filePath}, and no similar lines were found. Read the file again before editing.`
 			};
 		}
 
 		// Check for unique match
-		const occurrences = content.split(oldText).length - 1;
-		if (occurrences > 1) {
+		if (at.length > 1 && !replaceAll) {
 			return {
 				success: false,
-				error: `Found ${occurrences} occurrences of the text. Patch must match exactly once. Add more context.`
+				error: `old_text matches ${at.length} places in ${filePath} (lines ${at.slice(0, 10).join(', ')}). Add surrounding lines so it matches once, or pass replace_all: true to change every one.`
 			};
 		}
 
-		// Build new content
-		const newContent = content.replace(oldText, newText);
+		// Build new content (a function replacement keeps `$` in the new text literal)
+		const newContent = replaceAll ? content.split(find).join(replacement) : content.replace(find, () => replacement);
 
 		const accepted = await confirmOrPreviewDiff({
 			filePath,
@@ -97,21 +112,18 @@ export async function applyPatchTool(
 			};
 		}
 
-		// Write patched content
 		await agentCheckpoints.recordBeforeWrite(fullPath);
-		await fs.writeFile(fullPath, newContent, 'utf8');
+		await writeContent(fullPath, newContent);
 		await formatAfterWrite(fullPath);
-
-		if (requireConfirmation && !shouldConfirmFileEdits()) {
-			void vscode.window.showInformationMessage(`Applied edit to ${filePath}`);
-		}
+		await agentEditHighlights.recordEdit(fullPath, content, true);
 
 		return {
 			success: true,
 			data: {
 				path: filePath,
 				action: 'patched',
-				replacements: 1
+				replacements: replaceAll ? at.length : 1,
+				at_lines: replaceAll ? at.slice(0, 20) : at.slice(0, 1)
 			}
 		};
 	} catch (err: any) {
@@ -155,7 +167,7 @@ export async function insertLinesTool(
 	const fullPath = path.resolve(workspaceRoot, filePath);
 
 	try {
-		const content = await fs.readFile(fullPath, 'utf8');
+		const content = await readCurrentText(fullPath);
 		const contentLines = content.split('\n');
 
 		// Validate line number
@@ -181,12 +193,9 @@ export async function insertLinesTool(
 		}
 
 		await agentCheckpoints.recordBeforeWrite(fullPath);
-		await fs.writeFile(fullPath, newContent, 'utf8');
+		await writeContent(fullPath, newContent);
 		await formatAfterWrite(fullPath);
-
-		if (requireConfirmation && !shouldConfirmFileEdits()) {
-			void vscode.window.showInformationMessage(`Applied edit to ${filePath}`);
-		}
+		await agentEditHighlights.recordEdit(fullPath, content, true);
 
 		return {
 			success: true,

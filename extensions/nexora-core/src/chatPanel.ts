@@ -14,6 +14,8 @@ import { getOrchestrationWebSocket, type WebSocketMessage } from './services/web
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
 import { openUrlFromChat } from './services/browser';
 import { resetAgentCwd, type TerminalCommandProgress } from './services/tools/terminalCommand';
+import { LiveEditView } from './services/tools/liveEdit';
+import { agentEditHighlights } from './services/tools/editHighlights';
 import { getSettingsService } from './services/settingsService';
 import { oauthProviderLabel, onDidCompleteOAuth, startOAuthConnect, type OAuthProvider } from './services/oauthConnect';
 import { connectMcpServer, mcpServerLabel } from './services/mcpConnect';
@@ -933,52 +935,59 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		let usageCompletionTokens = 0;
 		let usageCachedTokens = 0;
 		let usageCostUsd = 0;
+		const liveEdit = workspacePath ? new LiveEditView(workspacePath) : undefined;
 
-		for await (const ev of client.agentTurnStream(
-			messages,
-			workspaceId,
-			workspacePath,
-			model,
-			mode,
-			sessionId,
-			reply?.signal,
-			getSettingsService(this._context).getPreferences().agentEffort
-		)) {
-			this._assertReply(reply);
-			if (ev.type === 'token' && ev.content) {
-				if (toolCalls && toolCalls.length > 0) {
-					continue;
+		try {
+			for await (const ev of client.agentTurnStream(
+				messages,
+				workspaceId,
+				workspacePath,
+				model,
+				mode,
+				sessionId,
+				reply?.signal,
+				getSettingsService(this._context).getPreferences().agentEffort
+			)) {
+				this._assertReply(reply);
+				if (ev.type === 'tool_delta') {
+					liveEdit?.push(ev.index ?? 0, ev.name || '', ev.arguments || '');
+				} else if (ev.type === 'token' && ev.content) {
+					if (toolCalls && toolCalls.length > 0) {
+						continue;
+					}
+					startedTokens = true;
+					assembled += ev.content;
+					if (this._hasChatSurface()) {
+						this._postToWebviews({ type: 'appendToken', content: ev.content });
+					}
+				} else if (ev.type === 'tool_calls' && Array.isArray(ev.tool_calls) && ev.tool_calls.length > 0) {
+					toolCalls = ev.tool_calls as ToolCall[];
+				} else if (ev.type === 'done') {
+					if (typeof ev.content === 'string' && ev.content.length > 0 && !(toolCalls && toolCalls.length > 0)) {
+						assembled = ev.content;
+					}
+					if (ev.model_used) {
+						modelUsed = ev.model_used;
+					}
+					if (ev.usage) {
+						usagePromptTokens = ev.usage.prompt_tokens || 0;
+						usageCompletionTokens = ev.usage.completion_tokens || 0;
+						usageCachedTokens = ev.usage.cached_tokens || 0;
+					}
+					usageCostUsd = typeof ev.cost_usd === 'number' ? ev.cost_usd : 0;
+				} else if (ev.type === 'model_unavailable') {
+					const failed = (ev.model || model || modelUsed || 'unknown').trim();
+					throw new ModelUnavailableSignal(failed);
+				} else if (ev.type === 'error') {
+					const unavailable = parseModelUnavailable(ev.message);
+					if (unavailable) {
+						throw new ModelUnavailableSignal(unavailable);
+					}
+					throw new Error(ev.message || 'Agent stream error');
 				}
-				startedTokens = true;
-				assembled += ev.content;
-				if (this._hasChatSurface()) {
-					this._postToWebviews({ type: 'appendToken', content: ev.content });
-				}
-			} else if (ev.type === 'tool_calls' && Array.isArray(ev.tool_calls) && ev.tool_calls.length > 0) {
-				toolCalls = ev.tool_calls as ToolCall[];
-			} else if (ev.type === 'done') {
-				if (typeof ev.content === 'string' && ev.content.length > 0 && !(toolCalls && toolCalls.length > 0)) {
-					assembled = ev.content;
-				}
-				if (ev.model_used) {
-					modelUsed = ev.model_used;
-				}
-				if (ev.usage) {
-					usagePromptTokens = ev.usage.prompt_tokens || 0;
-					usageCompletionTokens = ev.usage.completion_tokens || 0;
-					usageCachedTokens = ev.usage.cached_tokens || 0;
-				}
-				usageCostUsd = typeof ev.cost_usd === 'number' ? ev.cost_usd : 0;
-			} else if (ev.type === 'model_unavailable') {
-				const failed = (ev.model || model || modelUsed || 'unknown').trim();
-				throw new ModelUnavailableSignal(failed);
-			} else if (ev.type === 'error') {
-				const unavailable = parseModelUnavailable(ev.message);
-				if (unavailable) {
-					throw new ModelUnavailableSignal(unavailable);
-				}
-				throw new Error(ev.message || 'Agent stream error');
 			}
+		} finally {
+			await liveEdit?.finish();
 		}
 
 		// Per-turn cost. The engine prices it from its registry, cache reads included.
@@ -2319,6 +2328,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 				const executed = await executeToolCalls(response.tool_calls, workspacePath, {
 					cancellationToken: this._cancellationTokenFromReply(reply),
+					onTodos: (todos) => this._postToWebviews({ type: 'todoUpdate', todos }),
 					onToolProgress: (toolCallId, name, progress) => {
 						if (name !== 'run_terminal_command') {
 							return;
@@ -3772,6 +3782,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			const sessionId = session?.id;
 			// Files the agent edits from here on can be restored to how they are now.
 			const checkpointId = agentCheckpoints.begin(request);
+			agentEditHighlights.clearAll();
 			const sent = session?.messages[session.messages.length - 1];
 			if (sent?.role === 'user') {
 				sent.checkpointId = checkpointId;
@@ -4287,6 +4298,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 				const executed = await executeToolCalls(response.tool_calls, workspacePath, {
 					cancellationToken: this._cancellationTokenFromReply(reply),
+					onTodos: (todos) => this._postToWebviews({ type: 'todoUpdate', todos }),
 					onToolProgress: (toolCallId, name, progress) => {
 						if (name !== 'run_terminal_command') {
 							return;
