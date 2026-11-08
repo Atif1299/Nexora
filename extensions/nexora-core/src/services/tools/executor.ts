@@ -11,7 +11,12 @@ import { grepTool } from './grep';
 import { listFilesTool } from './listFiles';
 import { writeFileTool } from './writeFile';
 import { applyPatchTool, insertLinesTool } from './applyPatch';
-import { runTerminalCommandTool, type TerminalCommandProgress } from './terminalCommand';
+import {
+	readCommandOutputTool,
+	runTerminalCommandTool,
+	stopCommandTool,
+	type TerminalCommandProgress
+} from './terminalCommand';
 import { executePlatformTool } from './platformTool';
 import {
 	browserClickTool,
@@ -152,9 +157,18 @@ export async function executeToolCalls(
 							cancellationToken: options?.cancellationToken,
 							onProgress: options?.onToolProgress
 								? (progress) => options.onToolProgress!(tc.id, tc.name, progress)
-								: undefined
+								: undefined,
+							background: args.run_in_background === true
 						}
 					);
+					break;
+
+				case 'read_command_output':
+					result = readCommandOutputTool(args.id);
+					break;
+
+				case 'stop_command':
+					result = stopCommandTool(args.id);
 					break;
 
 				case 'open_browser':

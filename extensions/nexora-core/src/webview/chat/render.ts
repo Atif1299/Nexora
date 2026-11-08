@@ -84,7 +84,9 @@ function applyLists(html: string): string {
 		const items = block.replace(/\n$/, '').split('\n').map((line) => {
 			return '<li>' + line.replace(/^\d+\. /, '') + '</li>';
 		}).join('');
-		return lead + '<ol>' + items + '</ol>';
+		// Keep the model's own numbering when a list is split by other content.
+		const first = parseInt(block, 10);
+		return lead + (first > 1 ? '<ol start="' + first + '">' : '<ol>') + items + '</ol>';
 	});
 	return html;
 }

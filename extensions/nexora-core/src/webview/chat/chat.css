@@ -2747,6 +2747,27 @@ body
 	background: var(--vscode-toolbar-hoverBackground);
 }
 
+/* Run in Agent mode: under a Chat-mode reply, which has no tools. */
+.nx-agentOffer
+{
+	display: block;
+	margin-top: 8px;
+	padding: 2px 8px;
+	border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+	border-radius: 3px;
+	background: transparent;
+	color: var(--vscode-textLink-foreground);
+	font-size: 12px;
+	font-family: inherit;
+	cursor: pointer;
+}
+
+.nx-agentOffer:hover,
+.nx-agentOffer:focus-visible
+{
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
 /* Restore files: under an Agent message whose later edits can be undone. */
 /* Copy, edit and retry: hidden until the message is hovered or focused, never during a reply. */
 .nx-msg.nx-user

@@ -13,7 +13,7 @@ import type { ChatActivityItem, ChatInitialState, ContextTag, RunMode, WebviewIn
 import { getOrchestrationWebSocket, type WebSocketMessage } from './services/websocketClient';
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
 import { openUrlFromChat } from './services/browser';
-import type { TerminalCommandProgress } from './services/tools/terminalCommand';
+import { resetAgentCwd, type TerminalCommandProgress } from './services/tools/terminalCommand';
 import { getSettingsService } from './services/settingsService';
 import { oauthProviderLabel, onDidCompleteOAuth, startOAuthConnect, type OAuthProvider } from './services/oauthConnect';
 import { connectMcpServer, mcpServerLabel } from './services/mcpConnect';
@@ -2237,6 +2237,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	): Promise<string> {
 		const maxTurns = getAgentMaxTurns();
 		let turn = 0;
+		resetAgentCwd(workspacePath);
 
 		// Build initial messages
 		const messages: AgentMessage[] = [

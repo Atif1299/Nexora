@@ -36,6 +36,7 @@ import { enginePlaceholderHtml, engineStateLabel } from './services/editorPage';
 import { nexoraDiffProvider, NEXORA_DIFF_SCHEME } from './services/tools/diffProvider';
 import { openNexoraBrowser } from './services/browser';
 import { closeAgentBrowser } from './services/tools/browserSession';
+import { stopAllBackgroundCommands } from './services/tools/terminalCommand';
 
 /** Plan statuses after which the engine runs nothing more (backend PlanStatus). */
 const TERMINAL_PLAN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'partially_completed', 'timeout', 'skipped']);
@@ -710,6 +711,7 @@ async function checkBackendOnStartup(notifications: ReturnType<typeof getNotific
 
 export async function deactivate() {
 	console.log('Nexora Core extension deactivated');
+	stopAllBackgroundCommands();
 	await closeAgentBrowser();
 	disposeWebSocket();
 	await stopNexoraEngine();

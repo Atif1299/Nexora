@@ -80,6 +80,8 @@
 	let activeSessionId = null;
 	let messagesScrollBarTimer = null;
 	let replyInFlight = false;
+	/** A Chat-mode request whose reply gets a "Run in Agent mode" button. */
+	let agentOfferText = '';
 	let atCompleteTimer = null;
 	let atCompleteItems = [];
 	let atCompleteIndex = 0;
@@ -216,9 +218,14 @@
 	}
 
 	function setReplyInFlight(running) {
+		const finished = replyInFlight && !running;
 		replyInFlight = !!running;
 		document.body.classList.toggle('nx-replying', replyInFlight);
 		applySendButtonChrome();
+		if (finished && agentOfferText) {
+			offerAgentRun(agentOfferText);
+			agentOfferText = '';
+		}
 	}
 
 	function escapeHtml(text) {
@@ -684,7 +691,11 @@
 			const items = block.replace(/\n$/, '').split('\n').map(function (line) {
 				return '<li>' + line.replace(/^\d+\. /, '') + '</li>';
 			}).join('');
-			return lead + '<ol>' + items + '</ol>';
+			// Keep the model's own numbering: a list split by a code block or a
+			// paragraph continues at 4, not back at 1.
+			const first = parseInt(block, 10);
+			const start = first > 1 ? ' start="' + first + '"' : '';
+			return lead + '<ol' + start + '>' + items + '</ol>';
 		});
 		return html;
 	}
@@ -2230,6 +2241,34 @@
 		vscode.postMessage({ type: 'stopGeneration' });
 	}
 
+	/**
+	 * Chat mode has no tools. Under its reply, one click sends the same request
+	 * again in Agent mode, which can actually create, edit and run things.
+	 */
+	function offerAgentRun(text) {
+		const replies = messages.querySelectorAll('.nx-msg.nx-assistant');
+		const last = replies[replies.length - 1];
+		if (!last || last.classList.contains('nx-msgStopped') || last.querySelector('.nx-agentOffer')) {
+			return;
+		}
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'nx-agentOffer';
+		button.textContent = 'Run in Agent mode';
+		button.title = 'Send this request again in Agent mode, which can edit files and run commands';
+		button.addEventListener('click', function () {
+			if (replyInFlight || !modeSelect) {
+				return;
+			}
+			button.remove();
+			modeSelect.value = 'agent';
+			updateModeUI();
+			input.value = text;
+			handleSend();
+		});
+		last.appendChild(button);
+	}
+
 	/** resend: a rewound message replays with its own context tags, not the ones queued for the next message. */
 	function handleSend(resend) {
 		if (replyInFlight) {
@@ -2251,6 +2290,7 @@
 		const context = resend ? (resend.context || []) : extras.context;
 
 		addMessage('user', text, false);
+		agentOfferText = mode === 'chat' ? text : '';
 
 		if (mode === 'chat' || mode === 'ask' || mode === 'agent') {
 			setReplyInFlight(true);

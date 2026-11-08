@@ -547,7 +547,26 @@
         "nexora.agent.autoCloseTerminal": {
           "type": "boolean",
           "default": true,
-          "description": "Close the Nexora Agent terminal shortly after a command finishes."
+          "description": "Close the Nexora Agent tab shortly after a command finishes."
+        },
+        "nexora.agent.shell": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "bash",
+            "pwsh",
+            "powershell",
+            "cmd"
+          ],
+          "enumDescriptions": [
+            "Git Bash on Windows when installed, then PowerShell 7, then Windows PowerShell; your login shell elsewhere",
+            "Git Bash on Windows; bash elsewhere",
+            "PowerShell 7",
+            "Windows PowerShell 5.1",
+            "cmd.exe (the folder is not tracked between commands)"
+          ],
+          "default": "auto",
+          "description": "Shell the agent runs commands in."
         },
         "nexora.chat.submitWithCtrlEnter": {
           "type": "boolean",
