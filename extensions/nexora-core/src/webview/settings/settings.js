@@ -22,9 +22,15 @@
 		{ id: 'tavily', label: 'Tavily API Key', placeholder: 'tvly-...' }
 	];
 
-	const NAV_SECTIONS = ['keys', 'models', 'memory', 'saas', 'connections', 'analytics', 'approvals', 'browser', 'preferences', 'about'];
+	const NAV_SECTIONS = ['account', 'keys', 'models', 'memory', 'saas', 'connections', 'analytics', 'approvals', 'browser', 'preferences', 'about'];
 
 	const SECTION_ALIASES = {
+		cloud: 'account',
+		'nexora-cloud': 'account',
+		plan: 'account',
+		subscription: 'account',
+		billing: 'account',
+		profile: 'account',
 		llm: 'keys',
 		'llm-keys': 'keys',
 		'llm-api-keys': 'keys',
@@ -1452,6 +1458,122 @@
 		});
 	}
 
+	// --- Account (Nexora Cloud) -----------------------------------------------------------------
+
+	function accountInitial(name) {
+		const text = String(name || 'N').trim();
+		return escapeHtml((text.charAt(0) || 'N').toUpperCase());
+	}
+
+	function accountDate(iso) {
+		try {
+			return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+		} catch {
+			return String(iso || '');
+		}
+	}
+
+	function renderAccount(msg) {
+		const root = document.getElementById('account-root');
+		if (!root) {
+			return;
+		}
+		const account = msg && msg.account;
+		if (!account) {
+			if (msg && msg.signedIn) {
+				root.innerHTML = '<div class="nx-card nx-account">'
+					+ '<div class="nx-account-title">Nexora Cloud is not reachable right now</div>'
+					+ '<p class="nx-hint">You are signed in. Check your connection, then try again.</p>'
+					+ '<div class="nx-account-actions">'
+					+ '<button type="button" class="nx-btn" data-cloud="refresh">Try again</button>'
+					+ '<button type="button" class="nx-btn nx-btn-secondary" data-cloud="signout">Sign out</button>'
+					+ '</div></div>';
+				return;
+			}
+			root.innerHTML = '<div class="nx-card nx-account">'
+				+ '<div class="nx-account-title">Sign in to Nexora Cloud</div>'
+				+ '<p class="nx-hint">Use Nexora without your own API keys. Sign in with GitHub, Google or email in your browser and confirm. '
+				+ 'New accounts start with $1 of credit and free models every day; Pro is $15 a month with $5 of credit each month.</p>'
+				+ '<div class="nx-account-actions"><button type="button" class="nx-btn" data-cloud="signin">Sign in</button></div>'
+				+ '</div>';
+			return;
+		}
+		const plan = account.plan || { id: 'cloud', name: 'Nexora Cloud' };
+		const pro = plan.id === 'pro';
+		const name = account.name || account.login || 'Nexora user';
+		const avatar = account.avatar_url && String(account.avatar_url).indexOf('https://') === 0
+			? '<img class="nx-account-avatar" alt="" src="' + escapeHtml(account.avatar_url) + '">'
+			: '<span class="nx-account-avatar nx-account-initial" aria-hidden="true">' + accountInitial(name) + '</span>';
+		const month = account.month || { cost_usd: 0, calls: 0 };
+		const free = account.free_today;
+		let freeHtml = '';
+		if (free && free.limit > 0) {
+			const share = Math.min(100, Math.round((free.used / free.limit) * 100));
+			freeHtml = '<div class="nx-account-free">'
+				+ '<div class="nx-row"><span class="nx-label">Free models today</span><span class="nx-hint">' + Number(free.used) + ' / ' + Number(free.limit) + '</span></div>'
+				+ '<div class="nx-account-bar" role="progressbar" aria-label="Free model calls used today" aria-valuemin="0" aria-valuemax="' + Number(free.limit) + '" aria-valuenow="' + Number(free.used) + '">'
+				+ '<div class="nx-account-bar-fill' + (share >= 100 ? ' full' : '') + '" style="width:' + share + '%"></div></div>'
+				+ '</div>';
+		}
+		let planNote = pro
+			? 'Paid models at provider price plus 10%, $5 of credit every month.'
+			: 'Paid models at provider price plus 20%. Pro adds $5 of credit every month and lowers that to 10%.';
+		if (pro && plan.renews_at) {
+			planNote = plan.cancel_at_period_end
+				? 'Pro ends on ' + escapeHtml(accountDate(plan.renews_at)) + '. Your credit stays.'
+				: 'Renews on ' + escapeHtml(accountDate(plan.renews_at)) + ' with $5 of credit.';
+		}
+		root.innerHTML = '<div class="nx-card nx-account">'
+			+ '<div class="nx-account-head">' + avatar
+			+ '<div class="nx-account-who"><div class="nx-account-name">' + escapeHtml(name)
+			+ ' <span class="nx-plan-badge' + (pro ? ' pro' : '') + '">' + escapeHtml(plan.name || 'Nexora Cloud') + '</span></div>'
+			+ (account.email ? '<div class="nx-hint">' + escapeHtml(account.email) + '</div>' : '')
+			+ '</div></div>'
+			+ '<div class="nx-account-stats">'
+			+ '<div><div class="nx-label">Credit</div><div class="nx-account-value">$' + Number(account.credit_usd || 0).toFixed(2) + '</div></div>'
+			+ '<div><div class="nx-label">This month</div><div class="nx-account-value">$' + Number(month.cost_usd || 0).toFixed(2) + '</div>'
+			+ '<div class="nx-hint">' + Number(month.calls || 0) + ' model calls</div></div>'
+			+ '</div>'
+			+ freeHtml
+			+ '<p class="nx-hint nx-account-note">' + planNote + '</p>'
+			+ '<div class="nx-account-actions">'
+			+ '<button type="button" class="nx-btn" data-cloud="dashboard">Manage account</button>'
+			+ (pro ? '' : '<button type="button" class="nx-btn nx-btn-secondary" data-cloud="upgrade">Upgrade to Pro</button>')
+			+ '<button type="button" class="nx-btn nx-btn-secondary" data-cloud="credit">Buy credits</button>'
+			+ '<button type="button" class="nx-btn nx-btn-secondary" data-cloud="signout">Sign out</button>'
+			+ '</div></div>';
+	}
+
+	function bindAccount() {
+		const root = document.getElementById('account-root');
+		if (root) {
+			root.addEventListener('click', event => {
+				const button = event.target && event.target.closest ? event.target.closest('[data-cloud]') : null;
+				if (!button) {
+					return;
+				}
+				const action = button.getAttribute('data-cloud');
+				if (action === 'signin') {
+					vscode.postMessage({ type: 'cloudSignIn' });
+				} else if (action === 'signout') {
+					vscode.postMessage({ type: 'cloudSignOut' });
+				} else if (action === 'refresh') {
+					vscode.postMessage({ type: 'cloudRefresh' });
+				} else if (action === 'dashboard') {
+					vscode.postMessage({ type: 'openDashboard', page: '' });
+				} else if (action === 'upgrade') {
+					vscode.postMessage({ type: 'openDashboard', page: 'billing', query: 'upgrade=pro' });
+				} else if (action === 'credit') {
+					vscode.postMessage({ type: 'openDashboard', page: 'billing' });
+				}
+			});
+		}
+		const refresh = document.getElementById('account-refresh');
+		if (refresh) {
+			refresh.addEventListener('click', () => vscode.postMessage({ type: 'cloudRefresh' }));
+		}
+	}
+
 	function bindChrome() {
 		document.querySelectorAll('.nx-nav-item').forEach(btn => {
 			btn.addEventListener('click', () => {
@@ -1495,6 +1617,9 @@
 		switch (msg.type) {
 			case 'showSection':
 				showSection(msg.section);
+				break;
+			case 'cloudAccount':
+				renderAccount(msg);
 				break;
 			case 'init':
 			case 'updateState':
@@ -1637,6 +1762,7 @@
 	});
 
 	bindChrome();
+	bindAccount();
 	showSection(readInitialSection());
 	renderApiKeys();
 	renderModels();

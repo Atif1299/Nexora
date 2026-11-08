@@ -298,6 +298,11 @@
         "command": "nexora.cloudSignOut",
         "title": "Sign Out of Nexora Cloud",
         "category": "Nexora"
+      },
+      {
+        "command": "nexora.cloudOpenDashboard",
+        "title": "Open Nexora Cloud Dashboard",
+        "category": "Nexora"
       }
     ],
     "menus": {
@@ -593,6 +598,11 @@
           "type": "string",
           "default": "https://nexora-gateway-4idrhaffca-ew.a.run.app",
           "description": "Nexora Cloud gateway: sign-in, credit and models for users without their own API keys."
+        },
+        "nexora.cloud.webUrl": {
+          "type": "string",
+          "default": "https://nexora.visionscraft.tech",
+          "description": "Nexora website: where you sign in to Nexora Cloud and manage your plan, credit and devices."
         }
       }
     }

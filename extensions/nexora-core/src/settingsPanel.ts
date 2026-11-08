@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 import { getSettingsWebviewHtml } from './webview/settings';
 import { acquireEditorPanel, gateEditorPanel } from './services/editorPage';
 import { getSettingsService, type ApiKeyProvider, type NexoraPreferences } from './services/settingsService';
+import type { CloudAccount, CloudAccountInfo, DashboardPage } from './services/cloudAccount';
 import { getAgentUiSettings, type AgentRunMode } from './services/agentRunMode';
 import { getBrowserUiSettings } from './services/browser';
 import { getBackendClient } from './services/backendClient';
@@ -67,7 +68,8 @@ export class SettingsPanelProvider {
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
-		private readonly _context: vscode.ExtensionContext
+		private readonly _context: vscode.ExtensionContext,
+		private readonly _cloud?: CloudAccount
 	) { }
 
 	public async open(section?: string): Promise<void> {
@@ -132,6 +134,20 @@ export class SettingsPanelProvider {
 					case 'refreshStatus':
 						await this._pushState(msg.type === 'refreshStatus');
 						this._revealSection(this._pendingSection);
+						await this._postAccount();
+						void this._cloud?.refresh();
+						break;
+					case 'cloudSignIn':
+						await vscode.commands.executeCommand('nexora.cloudSignIn');
+						break;
+					case 'cloudSignOut':
+						await this._cloud?.signOut();
+						break;
+					case 'cloudRefresh':
+						await this._cloud?.refresh();
+						break;
+					case 'openDashboard':
+						await this._openDashboard(msg.page, msg.query);
 						break;
 					case 'refreshAnalytics':
 						await this._pushState(true);
@@ -217,6 +233,8 @@ export class SettingsPanelProvider {
 				}
 				this._view.postMessage({ type: 'updateState', capabilities: capabilities || null });
 			}),
+			// Signed in or out, a purchase seen on focus, or the 5-minute refresh: redraw Account.
+			...(this._cloud ? [this._cloud.onDidChangeAccount((account) => void this._postAccount(account))] : []),
 			onDidCompleteOAuth((provider) => {
 				this._view?.postMessage({
 					type: 'oauthResult',
@@ -237,6 +255,21 @@ export class SettingsPanelProvider {
 				}
 			})
 		];
+	}
+
+	private async _postAccount(account: CloudAccountInfo | undefined = this._cloud?.cached()): Promise<void> {
+		if (!this._view || !this._cloud) {
+			return;
+		}
+		const signedIn = Boolean(await this._cloud.token());
+		void this._view.postMessage({ type: 'cloudAccount', account: account || null, signedIn });
+	}
+
+	private async _openDashboard(page: unknown, query: unknown): Promise<void> {
+		const pages: DashboardPage[] = ['', 'billing', 'usage', 'devices', 'settings'];
+		const target = pages.find((candidate) => candidate === page) ?? '';
+		const search = query === 'upgrade=pro' ? 'upgrade=pro' : '';
+		await this._cloud?.openDashboard(target, search);
 	}
 
 	private _revealSection(section?: string): void {

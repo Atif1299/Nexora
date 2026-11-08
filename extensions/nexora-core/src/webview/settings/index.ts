@@ -33,6 +33,10 @@ export function getSettingsWebviewHtml(
 		body: /* html */ `	<div id="settings-root" role="main" aria-label="Nexora Settings">
 		<nav class="nx-settings-nav" aria-label="Settings sections">
 			<div class="nx-settings-nav-title">Settings</div>
+			<button type="button" class="nx-nav-item" data-section="account" title="Account" aria-label="Account">
+				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 1.5c-3 0-5.5 1.6-5.5 3.5v1h11v-1c0-1.9-2.5-3.5-5.5-3.5z"/></svg></span>
+				<span class="nx-nav-label">Account</span>
+			</button>
 			<button type="button" class="nx-nav-item selected" data-section="keys" aria-current="page" title="LLM Keys" aria-label="LLM Keys">
 				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 1a4 4 0 0 0-1.5 7.71V10H5v2H3v2h5V8.71A4 4 0 0 0 8 1zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></svg></span>
 				<span class="nx-nav-label">LLM Keys</span>
@@ -76,6 +80,15 @@ export function getSettingsWebviewHtml(
 		</nav>
 
 		<div class="nx-settings-detail">
+			<section class="nx-section" data-section="account" aria-labelledby="account-heading" hidden>
+				<div class="nx-section-head">
+					<h2 id="account-heading">Account</h2>
+					<button type="button" class="nx-btn nx-btn-secondary" id="account-refresh" aria-label="Refresh account">Refresh</button>
+				</div>
+				<p class="nx-hint">Nexora Cloud runs models without your own API keys, on your plan and credit. Plans, credit and devices are managed on the website.</p>
+				<div id="account-root" class="nx-stack" aria-live="polite"><div class="nx-card nx-hint">Loading your account...</div></div>
+			</section>
+
 			<section class="nx-section active" data-section="keys" aria-labelledby="api-keys-heading">
 				<h2 id="api-keys-heading">LLM API Keys</h2>
 				<div class="nx-banner" role="note">

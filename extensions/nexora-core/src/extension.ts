@@ -248,7 +248,8 @@ export async function activate(context: vscode.ExtensionContext) {
 		cloud.onDidChange(() => void refreshCapabilities()),
 		vscode.commands.registerCommand('nexora.cloudSignIn', () => cloud.signIn()),
 		vscode.commands.registerCommand('nexora.cloudSignOut', () => cloud.signOut()),
-		vscode.commands.registerCommand('nexora.cloudMenu', () => cloud.showMenu())
+		vscode.commands.registerCommand('nexora.cloudMenu', () => cloud.showMenu()),
+		vscode.commands.registerCommand('nexora.cloudOpenDashboard', () => cloud.openDashboard())
 	);
 	setApiKeyHeaderProvider(async () => {
 		const headers: Record<string, string> = {};
@@ -347,7 +348,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		)
 	);
 
-	const settingsProvider = new SettingsPanelProvider(context.extensionUri, context);
+	const settingsProvider = new SettingsPanelProvider(context.extensionUri, context, cloud);
 	const templatesProvider = new TemplatesPanelProvider(context.extensionUri);
 	const timelineProvider = new TimelinePanelProvider(context.extensionUri);
 	const platformProvider = new PlatformBrowserProvider(context.extensionUri);
