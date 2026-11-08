@@ -309,6 +309,43 @@ h1
 
 /* ---------- rows ---------- */
 
+.nx-useins
+{
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+	margin-top: 6px;
+}
+
+.nx-chip
+{
+	font-size: 10.5px;
+	line-height: 16px;
+	padding: 0 6px;
+	border-radius: 999px;
+	border: 1px solid var(--s-card-border);
+	background: var(--s-hover);
+	color: var(--nx-muted);
+}
+
+.nx-tools
+{
+	font-size: 11px;
+	color: var(--nx-muted);
+	margin-left: 2px;
+}
+
+.nx-platform.is-discover .nx-name
+{
+	color: var(--nx-muted);
+}
+
+.nx-discover .nx-group-head
+{
+	color: var(--nx-muted);
+}
+
 .nx-platform
 {
 	display: grid;
@@ -424,6 +461,13 @@ h1
 {
 	background: color-mix(in srgb, var(--s-ink) 30%, transparent);
 	border-color: transparent;
+}
+
+/* Two buttons get their own line under the text, so the name and description keep their width. */
+.nx-platform:has(.nx-platform-actions .nx-btn + .nx-btn) .nx-platform-actions
+{
+	grid-column: 2 / -1;
+	justify-content: flex-start;
 }
 
 .nx-platform-actions

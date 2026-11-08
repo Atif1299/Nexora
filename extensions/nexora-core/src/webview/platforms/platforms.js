@@ -11,12 +11,13 @@
 	const view = {
 		query: '',
 		filter: saved.filter === 'connected' || saved.filter === 'live' ? saved.filter : 'all',
-		collapsed: Array.isArray(saved.collapsed) ? saved.collapsed : []
+		collapsed: Array.isArray(saved.collapsed) ? saved.collapsed : [],
+		discoverOpen: saved.discoverOpen === true
 	};
 	let lastData = null;
 
 	function saveView() {
-		vscode.setState({ filter: view.filter, collapsed: view.collapsed });
+		vscode.setState({ filter: view.filter, collapsed: view.collapsed, discoverOpen: view.discoverOpen });
 	}
 
 	function escapeHtml(text) {
@@ -45,7 +46,35 @@
 		return !!platform.live && platform.capabilityStatus === 'ready';
 	}
 
+	const USE_IN = { chat: 'Chat', agent: 'Agent', plans: 'Plans', models: 'Models', code_steps: 'Code steps' };
+
+	/** Mirrors services/platformUsage.ts: the chips under a row. */
+	function useInLabels(usage) {
+		return usage && Array.isArray(usage.usable_in) ? usage.usable_in.map((key) => USE_IN[key] || key) : [];
+	}
+
+	/** Mirrors services/platformUsage.ts toolSummary. */
+	function toolSummary(usage) {
+		const tools = usage && usage.tools;
+		if (!tools || !tools.total) {
+			return '';
+		}
+		const changing = tools.write + tools.destructive;
+		const count = tools.enabled === tools.total ? `${tools.total} tools` : `${tools.enabled} of ${tools.total} tools on`;
+		return changing ? `${count}, ${changing} can change things` : `${count}, read only`;
+	}
+
 	function statusLabel(platform) {
+		if (platform.discover) {
+			return 'Not usable yet';
+		}
+		// Model rows: the key lives in Settings, so the only question is whether one is saved.
+		if (platform.keyProvider) {
+			if (platform.capabilityStatus === 'ready') {
+				return 'Ready';
+			}
+			return platform.capabilityStatus === 'failed' ? 'Failed' : 'Add a key';
+		}
 		if (!platform.live) {
 			return 'Catalogue';
 		}
@@ -72,6 +101,9 @@
 	}
 
 	function actionButtons(platform) {
+		if (platform.discover) {
+			return '';
+		}
 		const id = escapeHtml(platform.id || '');
 		// LLM rows: the key lives in Settings > LLM API Keys, so Configure is the only action.
 		if (platform.keyProvider) {
@@ -124,7 +156,9 @@
 		const live = !!platform.live;
 		const blocked = live && isBlocked(status);
 		const classes = ['nx-platform'];
-		if (!live) {
+		if (platform.discover) {
+			classes.push('is-discover');
+		} else if (!live && !platform.keyProvider) {
 			classes.push('is-catalogue');
 		}
 		if (blocked) {
@@ -136,7 +170,12 @@
 		if (isConnected(platform)) {
 			classes.push('is-connected');
 		}
-		const meta = !live
+		const usage = platform.usage;
+		const chips = platform.discover ? [] : useInLabels(usage);
+		const tools = toolSummary(usage);
+		const meta = platform.discover
+			? ((usage && usage.reason) || 'No way to use it in Nexora yet')
+			: !live
 			? (platform.description || 'Discovery only')
 			: (blocked && platform.capabilityReason
 				? platform.capabilityReason
@@ -150,6 +189,7 @@
 						<span class="nx-status">${escapeHtml(statusLabel(platform))}</span>
 					</div>
 					<div class="nx-meta">${escapeHtml(meta)}</div>
+					${chips.length || tools ? `<div class="nx-useins">${chips.map((c) => `<span class="nx-chip">${escapeHtml(c)}</span>`).join('')}${tools ? `<span class="nx-tools">${escapeHtml(tools)}</span>` : ''}</div>` : ''}
 				</div>
 				${actionButtons(platform)}
 			</article>
@@ -274,9 +314,22 @@
 			`;
 		}).join('');
 
+		const discover = view.filter === 'all'
+			? (data.discover || []).map((p) => Object.assign({}, p, { discover: true })).filter(matches)
+			: [];
+		const open = view.discoverOpen || view.query.trim() !== '';
+		const discoverGroup = discover.length ? `
+			<section class="nx-group nx-discover${open ? '' : ' is-collapsed'}" aria-label="Discover">
+				<button type="button" class="nx-group-head" data-discover="1" aria-expanded="${open ? 'true' : 'false'}">
+					<svg class="nx-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>
+					<span class="nx-group-name">Discover</span>
+					<span class="nx-count">${discover.length}, not usable in Nexora yet</span>
+				</button>
+				<div class="nx-list">${discover.map(renderPlatform).join('')}</div>
+			</section>` : '';
 		list.innerHTML = shown
-			? groups
-			: `<div class="nx-empty">${view.filter === 'connected' ? 'Nothing connected yet. Connect a platform from the All tab.' : 'No platforms match.'}</div>`;
+			? groups + discoverGroup
+			: (discoverGroup || `<div class="nx-empty">${view.filter === 'connected' ? 'Nothing connected yet. Connect a platform from the All tab.' : 'No platforms match.'}</div>`);
 
 		const count = categories.reduce((sum, group) => sum + ((group.platforms || []).length), 0);
 		announce(data.error ? data.error : (shown === count ? count + ' platforms' : shown + ' of ' + count + ' platforms'));
@@ -316,6 +369,12 @@
 	document.getElementById('platform-list')?.addEventListener('click', (event) => {
 		const target = event.target;
 		if (!target || typeof target.closest !== 'function') {
+			return;
+		}
+		if (target.closest('button[data-discover]')) {
+			view.discoverOpen = !view.discoverOpen;
+			saveView();
+			rerender();
 			return;
 		}
 		const head = target.closest('button[data-group]');

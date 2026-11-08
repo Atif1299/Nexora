@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { Transport } from './transport';
+import type { PlatformUsage } from '../platformUsage';
 
 export function createPlatformsApi(transport: Transport) {
 	return {
@@ -28,6 +29,21 @@ export function createPlatformsApi(transport: Transport) {
 				}
 			}
 			return rows;
+		},
+
+		/**
+		 * Where each platform can be used and its state (engine `GET /api/platforms/usage`).
+		 * Undefined when the engine is older than that route or unreachable, so the panel
+		 * keeps working as before.
+		 */
+		getPlatformUsage: async (): Promise<Record<string, PlatformUsage> | undefined> => {
+			try {
+				const response = await transport.get('/api/platforms/usage');
+				const platforms = response?.platforms;
+				return platforms && typeof platforms === 'object' ? platforms as Record<string, PlatformUsage> : undefined;
+			} catch {
+				return undefined;
+			}
 		},
 
 		searchPlatforms: async (query: string): Promise<any[]> => {

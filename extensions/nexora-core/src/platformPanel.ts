@@ -41,6 +41,7 @@ import {
 	type LocalAgentProbe
 } from './services/agents/localAgents';
 import type { SaasConnector } from './services/backend/auth';
+import { section, usageFor, type PlatformUsage } from './services/platformUsage';
 
 /**
  * Catalogue rows whose credential is the Settings > LLM API Keys entry in SecretStorage.
@@ -97,6 +98,8 @@ interface Platform {
 	configurable?: boolean;
 	/** Holds a credential that Disconnect can clear. */
 	disconnectable?: boolean;
+	/** Where the engine says this row works (GET /api/platforms/usage); absent from an older engine. */
+	usage?: PlatformUsage;
 }
 
 interface PlatformApiRow {
@@ -135,6 +138,8 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	private mcpClientIds: Record<string, boolean> = {};
 	/** Local coding agents found on PATH, keyed by platform id. */
 	private localAgents: Record<string, LocalAgentProbe> = {};
+	/** The engine's usage report, or undefined when it has none. */
+	private usage: Record<string, PlatformUsage> | undefined;
 
 	constructor(extensionUri: vscode.Uri) {
 		this._extensionUri = extensionUri;
@@ -149,6 +154,8 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			this.mcpConnections = { ...this.mcpConnections, [serverId]: true };
 			this._applyCapabilities(getCachedCapabilities());
 			this._pushState();
+			// Tools are discovered just after a sign-in; their counts arrive with the next report.
+			void this._syncUsage().then(() => this._pushState());
 		});
 		onDidChangeEngineState((state) => {
 			if (state === 'ready') {
@@ -213,6 +220,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			await this._syncOAuthApps();
 			await this._syncMcpConnections();
 			await this._syncLocalAgents();
+			this.usage = await client.getPlatformUsage();
 			const platformsData = await client.getPlatforms() as PlatformApiRow[];
 			if (!platformsData.some(p => (p.id || '').toLowerCase() === OPENROUTER_ROW.id)) {
 				platformsData.push(OPENROUTER_ROW);
@@ -287,7 +295,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			view.onDidChangeVisibility(() => {
 				if (view.visible && this._attached) {
 					// A key or sign-in may have landed in Settings meanwhile.
-					void Promise.all([this._syncOAuthApps(), this._syncMcpConnections()])
+					void Promise.all([this._syncOAuthApps(), this._syncMcpConnections(), this._syncUsage()])
 						.then(() => this._pushState());
 				}
 			}),
@@ -317,14 +325,35 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 				error: this.error,
 				embeddingInProgress: this.embeddingInProgress,
 				backendConnected: this.backendConnected,
-				categories: this._categoriesPayload()
+				categories: this._categoriesPayload(),
+				discover: this.platforms.filter(p => section(p) === 'discover')
 			}
 		});
 	}
 
+	private async _syncUsage(): Promise<void> {
+		if (getEngineState() !== 'ready' || !isBackendClientConfigured()) {
+			return;
+		}
+		this.usage = await getBackendClient().getPlatformUsage();
+		this.platforms = this.platforms.map(p => this._withUsage(p));
+	}
+
+	/**
+	 * Attach the engine's usage. A key-based row the engine finds missing from
+	 * this build shows Unavailable with the engine's reason instead of Ready.
+	 */
+	private _withUsage(p: Platform): Platform {
+		const usage = usageFor(p.id, this.usage);
+		if (usage && p.integration === 'rest' && !p.keyProvider && usage.state === 'unavailable') {
+			return { ...p, usage, capabilityStatus: 'unavailable', capabilityReason: usage.reason || p.capabilityReason };
+		}
+		return { ...p, usage };
+	}
+
 	private _mapPlatform(p: PlatformApiRow, report: CapabilitiesReport | undefined): Platform {
 		const id = String(p.id || '');
-		return {
+		return this._withUsage({
 			id,
 			name: p.name || id,
 			category: p.category || 'Other',
@@ -338,12 +367,12 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 				{ id, integration: p.integration, mcpServerId: p.mcp_server_id, isEnabled: p.is_enabled },
 				report
 			)
-		};
+		});
 	}
 
 	private _applyCapabilities(report: CapabilitiesReport | undefined): void {
 		this.embeddingInProgress = !!report?.vectors.embedding_in_progress;
-		this.platforms = this.platforms.map(p => ({
+		this.platforms = this.platforms.map(p => this._withUsage({
 			...p,
 			...this._statusFields(
 				{ id: p.id, integration: p.integration, mcpServerId: p.mcpServerId, isEnabled: p.is_enabled },
@@ -755,9 +784,10 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		);
 	}
 
+	/** The main list: rows the engine calls usable, or every row when it has no usage report. */
 	private _groupByCategory(): Record<string, Platform[]> {
 		const acc: Record<string, Platform[]> = {};
-		for (const p of this.platforms) {
+		for (const p of this.platforms.filter(row => section(row) === 'main')) {
 			const cat = p.category || 'Other';
 			if (!acc[cat]) {
 				acc[cat] = [];

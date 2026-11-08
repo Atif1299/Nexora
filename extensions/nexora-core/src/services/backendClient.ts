@@ -10,6 +10,7 @@ export interface BackendConfig {
 }
 
 import { createTransport, type HeaderProvider, type SSEEvent } from './backend/transport';
+import type { PlatformUsage } from './platformUsage';
 import { createPlatformsApi } from './backend/platforms';
 import { createMemoryApi, type MemorySuggestion, type ProjectFact, type ProjectFactsResponse, type ProjectRulesResponse, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
 import { createWorkflowsApi, type WorkflowTemplate, type TemplateListResponse, type SuggestFromPlanResponse, type SaveFromPlanRequest, type ImportPreview } from './backend/workflows';
@@ -127,6 +128,10 @@ export class BackendClient {
 
 	async getPlatforms(): Promise<any[]> {
 		return createPlatformsApi(this.transport).getPlatforms();
+	}
+
+	async getPlatformUsage(): Promise<Record<string, PlatformUsage> | undefined> {
+		return createPlatformsApi(this.transport).getPlatformUsage();
 	}
 
 	async searchPlatforms(query: string): Promise<any[]> {
