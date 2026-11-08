@@ -6,7 +6,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { promises as fs } from 'fs';
-import { getBackendClient, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode } from './services/backendClient';
+import { getBackendClient, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode, type TranscriptRound } from './services/backendClient';
 import { RequestCancelledError, isRequestCancelled } from './services/backend/transport';
 import { getChatWebviewHtml } from './webview/chat';
 import type { ChatActivityItem, ChatInitialState, ContextTag, RunMode, WebviewInboundMessage } from './webview/chat/types';
@@ -993,7 +993,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 
 		if (toolCalls && toolCalls.length > 0) {
-			return { type: 'tool_calls', tool_calls: toolCalls, model_used: modelUsed || 'unknown', cost_usd: usageCostUsd };
+			// Keep what the model said before calling tools ("First commit done, now the repo...").
+			return { type: 'tool_calls', content: assembled, tool_calls: toolCalls, model_used: modelUsed || 'unknown', cost_usd: usageCostUsd };
 		}
 
 		const unavailableFinal = parseModelUnavailable(assembled);
@@ -1729,16 +1730,34 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		workspaceId: string | undefined,
 		role: string,
 		content: string,
-		mode: string
+		mode: string,
+		rounds?: TranscriptRound[]
 	): Promise<void> {
 		if (!sessionId || !workspaceId) {
 			return;
 		}
 		try {
-			await getBackendClient().appendTranscript(workspaceId, sessionId, role, content, mode);
+			await getBackendClient().appendTranscript(workspaceId, sessionId, role, content, mode, rounds);
 		} catch {
 			// best-effort: local session persist is independent of jsonl
 		}
+	}
+
+	/**
+	 * A run that was stopped or failed before its answer still did work: save its
+	 * tool rounds so the next message knows which commands ran (G-46). Empties
+	 * `rounds`, so calling it after the answer was saved does nothing.
+	 */
+	private async _saveUnfinishedRounds(
+		ctx: { sessionId?: string; workspaceId?: string },
+		rounds: TranscriptRound[],
+		mode: string
+	): Promise<void> {
+		if (rounds.length === 0) {
+			return;
+		}
+		const pending = rounds.splice(0, rounds.length);
+		await this._appendTranscript(ctx.sessionId, ctx.workspaceId, 'assistant', '(Stopped before the answer.)', mode, pending);
 	}
 
 	private async _pushSuggestions(): Promise<void> {
@@ -2127,6 +2146,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		if (!reply) {
 			return;
 		}
+		// Tool rounds of this run, saved with the answer (or alone if it stops first).
+		const rounds: TranscriptRound[] = [];
+		const saveCtx: { sessionId?: string; workspaceId?: string } = {};
 
 		try {
 			this._paintWorking();
@@ -2178,6 +2200,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			const llmModel = this._mapUiModelToLiteLlm(model);
 			void this._appendTranscript(sessionId, workspaceId, 'user', message, 'ask');
+			saveCtx.sessionId = sessionId;
+			saveCtx.workspaceId = workspaceId;
 			const atContextMessage = await this._injectAtMentionContext(message);
 			this._assertReply(reply);
 			const finalAnswer = await this._runAgentLoop(
@@ -2186,7 +2210,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				workspacePath,
 				llmModel,
 				sessionId,
-				reply
+				reply,
+				rounds
 			);
 
 			const sessionAfter = this._getActiveSession();
@@ -2195,7 +2220,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await this._persistSessions();
 			}
 
-			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'ask');
+			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'ask', rounds.splice(0, rounds.length));
 
 			this._clearChatActivity();
 		} catch (error) {
@@ -2220,6 +2245,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				isLoading: false
 			});
 		} finally {
+			await this._saveUnfinishedRounds(saveCtx, rounds, 'ask');
 			this._endReply(reply);
 		}
 	}
@@ -2234,7 +2260,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		workspacePath: string,
 		model?: string,
 		sessionId?: string,
-		reply?: InFlightReply
+		reply?: InFlightReply,
+		roundsOut?: TranscriptRound[]
 	): Promise<string> {
 		const maxTurns = getAgentMaxTurns();
 		let turn = 0;
@@ -2316,18 +2343,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				}
 				this._emitChatActivity(activityItems);
 
-				// Add assistant message with tool_calls
+				// Add assistant message with tool_calls, keeping the text it wrote before them
+				const callMessages = response.tool_calls.map(tc => ({
+					id: tc.id,
+					type: 'function' as const,
+					function: {
+						name: tc.name,
+						arguments: JSON.stringify(tc.arguments)
+					}
+				}));
 				messages.push({
 					role: 'assistant',
-					content: '',
-					tool_calls: response.tool_calls.map(tc => ({
-						id: tc.id,
-						type: 'function',
-						function: {
-							name: tc.name,
-							arguments: JSON.stringify(tc.arguments)
-						}
-					}))
+					content: response.content || '',
+					tool_calls: callMessages
 				});
 
 				// Add tool result messages
@@ -2335,6 +2363,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				for (const tm of toolMessages) {
 					messages.push(tm);
 				}
+				// Saved with the answer, so the next message knows what already ran (G-46).
+				roundsOut?.push({
+					content: response.content || '',
+					tool_calls: callMessages,
+					results: toolMessages.map(tm => ({ tool_call_id: tm.tool_call_id, name: tm.name, content: tm.content }))
+				});
 			}
 		}
 
@@ -3730,6 +3764,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
+		// Tool rounds of this run, saved with the answer (or alone if it stops first).
+		const rounds: TranscriptRound[] = [];
+		const saveCtx: { sessionId?: string; workspaceId?: string } = {};
 		try {
 			const session = await this._recordUserMessage(request, 'agent');
 			const sessionId = session?.id;
@@ -3803,6 +3840,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 
 			const llmModel = this._mapUiModelToLiteLlm(model);
+			saveCtx.sessionId = sessionId;
+			saveCtx.workspaceId = workspaceId;
 			const atContextRequest = await this._injectAtMentionContext(request);
 			const finalAnswer = await this._runAgentLoopWithMode(
 				atContextRequest,
@@ -3810,7 +3849,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				workspacePath,
 				llmModel,
 				'agent',
-				sessionId
+				sessionId,
+				undefined,
+				{ roundsOut: rounds }
 			);
 
 			const sessionAfter = this._getActiveSession();
@@ -3818,7 +3859,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				sessionAfter.messages.push({ role: 'assistant', content: finalAnswer, mode: 'agent', timestamp: Date.now() });
 				await this._persistSessions();
 			}
-			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'agent');
+			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'agent', rounds.splice(0, rounds.length));
 			// The answer is already on screen: the agent loop streams it as it
 			// arrives and closes the bubble with finishMessage. Posting it here
 			// as well rendered every agent reply twice. Ask mode has always
@@ -3842,6 +3883,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				isLoading: false
 			});
 		} finally {
+			await this._saveUnfinishedRounds(saveCtx, rounds, 'agent');
 			// A stopped or failed run may still have edited files.
 			this._postCheckpoints();
 		}
@@ -4141,11 +4183,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		mode: AgentMode,
 		sessionId?: string,
 		reply?: InFlightReply,
-		options?: { maxTurns?: number; modifiedFilesOut?: Set<string>; costOut?: { usd: number } }
+		options?: { maxTurns?: number; modifiedFilesOut?: Set<string>; costOut?: { usd: number }; roundsOut?: TranscriptRound[] }
 	): Promise<string> {
 		const maxTurns = options?.maxTurns ?? getAgentMaxTurns();
 		let turn = 0;
 		let activeModel = model;
+		const roundsOut = options?.roundsOut;
+		resetAgentCwd(workspacePath);
 
 		// Build initial messages
 		const messages: AgentMessage[] = [
@@ -4267,18 +4311,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				}
 				this._emitChatActivity(activityItems);
 
-				// Add assistant message with tool_calls
+				// Add assistant message with tool_calls, keeping the text it wrote before them
+				const callMessages = response.tool_calls.map(tc => ({
+					id: tc.id,
+					type: 'function' as const,
+					function: {
+						name: tc.name,
+						arguments: JSON.stringify(tc.arguments)
+					}
+				}));
 				messages.push({
 					role: 'assistant',
-					content: '',
-					tool_calls: response.tool_calls.map(tc => ({
-						id: tc.id,
-						type: 'function',
-						function: {
-							name: tc.name,
-							arguments: JSON.stringify(tc.arguments)
-						}
-					}))
+					content: response.content || '',
+					tool_calls: callMessages
 				});
 
 				// Add tool result messages
@@ -4286,6 +4331,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				for (const tm of toolMessages) {
 					messages.push(tm);
 				}
+				// Saved with the answer, so the next message knows what already ran (G-46).
+				roundsOut?.push({
+					content: response.content || '',
+					tool_calls: callMessages,
+					results: toolMessages.map(tm => ({ tool_call_id: tm.tool_call_id, name: tm.name, content: tm.content }))
+				});
 
 				// Track modified files for multi-file awareness
 				const writeToolNames = new Set(['write_file', 'apply_patch', 'insert_lines']);

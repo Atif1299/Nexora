@@ -39,6 +39,13 @@ import type { Effort } from '../webview/chat/types';
 
 export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
 export type { SSEEvent };
+
+/** One agent turn that called tools: the text before the calls, the calls, and their results. */
+export interface TranscriptRound {
+	content: string;
+	tool_calls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+	results: Array<{ tool_call_id: string; name: string; content: string }>;
+}
 export type { ConnectionsResponse, TestResult, ProviderStatus };
 export type { CapabilitiesReport };
 export type { ModelCatalog };
@@ -315,19 +322,22 @@ export class BackendClient {
 		});
 	}
 
+	/** rounds: the tool rounds before an Agent/Ask answer, so later messages remember them (G-46). */
 	async appendTranscript(
 		workspaceId: string,
 		sessionId: string,
 		role: string,
 		content: string,
-		mode: string
+		mode: string,
+		rounds?: TranscriptRound[]
 	): Promise<void> {
 		await this.transport.post('/api/transcript/append', {
 			workspace_id: workspaceId,
 			session_id: sessionId,
 			role,
 			content,
-			mode
+			mode,
+			...(rounds && rounds.length > 0 ? { rounds } : {})
 		});
 	}
 
