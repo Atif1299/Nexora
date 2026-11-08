@@ -113,6 +113,24 @@
 		messages.addEventListener('wheel', showThumb, { passive: true });
 	}
 
+	// Follow new output (text, steps, to-do list) while the reader is at the
+	// bottom. Scrolling up stops it; scrolling back to the bottom resumes it.
+	let stickToBottom = true;
+
+	function wireStickToBottom() {
+		if (!messages) {
+			return;
+		}
+		messages.addEventListener('scroll', function () {
+			stickToBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 40;
+		}, { passive: true });
+		new MutationObserver(function () {
+			if (stickToBottom) {
+				messages.scrollTop = messages.scrollHeight;
+			}
+		}).observe(messages, { childList: true, subtree: true, characterData: true });
+	}
+
 	function ensureOfflineBanner() {
 		let banner = document.getElementById('offline-banner');
 		if (banner) {
@@ -630,15 +648,16 @@
 
 	function wrapFenceHtml(code, lang) {
 		const copyId = 'code-' + Math.random().toString(36).slice(2, 11);
-		const title = lang || 'Code';
 		return (
+			'<div class="nx-codeWrap">' +
 			'<div class="nx-codeHeader">' +
-			'<span class="nx-codeTitle">' + title + '</span>' +
+			'<span class="nx-codeTitle">' + (lang || '') + '</span>' +
 			'<button class="nx-copyBtn" data-copy-target="' + copyId + '">Copy</button>' +
 			'</div>' +
 			'<pre class="nx-codeBlock" id="' + copyId + '">' +
 			code +
-			'</pre>'
+			'</pre>' +
+			'</div>'
 		);
 	}
 
@@ -680,24 +699,120 @@
 		return out;
 	}
 
-	function applyMarkdownLists(html) {
-		html = html.replace(/(^|\n)((?:[*+-] .+(?:\n|$))+)/g, function (_match, lead, block) {
-			const items = block.replace(/\n$/, '').split('\n').map(function (line) {
-				return '<li>' + line.replace(/^[*+-] /, '') + '</li>';
-			}).join('');
-			return lead + '<ul>' + items + '</ul>';
+	const MD_LIST_RE = /^(\s*)([*+-]|\d+\.)\s+(.*)$/;
+
+	/** Inline Markdown for one piece of text: links, code, bold, italic. */
+	function mdInline(text) {
+		const links = [];
+		let s = String(text).replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_match, label, url) {
+			const href = safeMarkdownHref(url);
+			const inner = applyMarkdownInline(label);
+			links.push(href ? '<a href="' + href + '">' + inner + '</a>' : inner);
+			return '%%NXLK' + (links.length - 1) + '%%';
 		});
-		html = html.replace(/(^|\n)((?:\d+\. .+(?:\n|$))+)/g, function (_match, lead, block) {
-			const items = block.replace(/\n$/, '').split('\n').map(function (line) {
-				return '<li>' + line.replace(/^\d+\. /, '') + '</li>';
-			}).join('');
-			// Keep the model's own numbering: a list split by a code block or a
-			// paragraph continues at 4, not back at 1.
-			const first = parseInt(block, 10);
-			const start = first > 1 ? ' start="' + first + '"' : '';
-			return lead + '<ol' + start + '>' + items + '</ol>';
+		s = applyMarkdownInline(s);
+		return s.replace(/%%NXLK(\d+)%%/g, function (_match, n) { return links[Number(n)]; });
+	}
+
+	/** "[x] Done thing" / "[ ] Open thing" at the start of a list item. */
+	function mdTaskBox(html) {
+		return html.replace(/^\[( |x|X)\]\s+/, function (_match, mark) {
+			return '<span class="nx-mdTask' + (mark === ' ' ? '' : ' nx-mdTaskDone') + '" aria-hidden="true"></span>';
 		});
-		return html;
+	}
+
+	function mdIndent(spaces) {
+		return spaces.replace(/\t/g, '    ').length;
+	}
+
+	/**
+	 * A list starting at lines[start], with nesting by indentation. A blank line
+	 * between items keeps the same list, so "1. ... (blank) 2. ..." stays one
+	 * list; a list cut by other content keeps its numbers through `start`.
+	 */
+	function mdList(lines, start) {
+		function build(index, indent) {
+			const first = MD_LIST_RE.exec(lines[index]);
+			const ordered = /\d/.test(first[2]);
+			const startNum = ordered ? parseInt(first[2], 10) : 1;
+			let html = ordered ? '<ol' + (startNum > 1 ? ' start="' + startNum + '"' : '') + '>' : '<ul>';
+			let i = index;
+			let open = false;
+			while (i < lines.length) {
+				const line = lines[i];
+				if (!line.trim()) {
+					let j = i + 1;
+					while (j < lines.length && !lines[j].trim()) {
+						j++;
+					}
+					const next = j < lines.length ? MD_LIST_RE.exec(lines[j]) : null;
+					if (next && mdIndent(next[1]) >= indent) {
+						i = j;
+						continue;
+					}
+					break;
+				}
+				const m = MD_LIST_RE.exec(line);
+				if (!m) {
+					// An indented line under an item continues that item.
+					if (open && /^\s{2,}\S/.test(line) && !/^\s*%%NXCB\d+%%\s*$/.test(line)) {
+						html += '<br/>' + mdInline(line.trim());
+						i++;
+						continue;
+					}
+					break;
+				}
+				const ind = mdIndent(m[1]);
+				if (ind < indent) {
+					break;
+				}
+				if (ind > indent && open) {
+					const sub = build(i, ind);
+					html += sub.html;
+					i = sub.next;
+					continue;
+				}
+				if (/\d/.test(m[2]) !== ordered) {
+					break;
+				}
+				if (open) {
+					html += '</li>';
+				}
+				html += '<li>' + mdTaskBox(mdInline(m[3]));
+				open = true;
+				i++;
+			}
+			if (open) {
+				html += '</li>';
+			}
+			return { html: html + (ordered ? '</ol>' : '</ul>'), next: i };
+		}
+		return build(start, mdIndent(MD_LIST_RE.exec(lines[start])[1]));
+	}
+
+	function mdIsTableRow(line) {
+		const t = line.trim();
+		return t.length > 2 && t.charAt(0) === '|' && t.charAt(t.length - 1) === '|';
+	}
+
+	function mdTableCells(line) {
+		return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(function (c) { return mdInline(c.trim()); });
+	}
+
+	function mdTable(lines, start) {
+		const head = mdTableCells(lines[start]);
+		let i = start + 2;
+		let body = '';
+		while (i < lines.length && mdIsTableRow(lines[i])) {
+			body += '<tr>' + mdTableCells(lines[i]).map(function (c) { return '<td>' + c + '</td>'; }).join('') + '</tr>';
+			i++;
+		}
+		return {
+			html: '<div class="nx-mdTableWrap"><table class="nx-mdTable"><thead><tr>' +
+				head.map(function (c) { return '<th>' + c + '</th>'; }).join('') +
+				'</tr></thead><tbody>' + body + '</tbody></table></div>',
+			next: i
+		};
 	}
 
 	function applyMarkdownInline(html) {
@@ -718,40 +833,81 @@
 		return undefined;
 	}
 
+	/**
+	 * Markdown to HTML built from blocks (paragraphs, headings, lists, quotes,
+	 * tables, code), each with its own margins in chat.css. It used to turn
+	 * every newline into <br/>, so a blank line between paragraphs became a
+	 * full empty line and code blocks and lists sat between extra breaks.
+	 * Text is escaped first; code blocks are cut out before anything else, so
+	 * their whitespace is kept.
+	 */
 	function formatContent(content) {
 		const blocks = [];
-		let html = escapeHtml(String(content || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
-		html = extractMarkdownFences(html, blocks);
+		let src = escapeHtml(String(content || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+		src = extractMarkdownFences(src, blocks);
+		// A code block always stands on its own line, never inside a paragraph.
+		src = src.replace(/%%NXCB(\d+)%%/g, '\n%%NXCB$1%%\n');
 
-		// Every newline below becomes a <br/>, so runs of them become empty
-		// screen. Models pad their replies with trailing newlines, and a turn
-		// that ends in a tool call often adds several more, which is what put
-		// a wall of blank space between one agent turn and the next.
-		//
-		// This runs after the fences are stashed, so whitespace inside a code
-		// block is untouched: there, blank lines are content.
-		html = html.replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '');
-
-		html = html.replace(/^#{1,6}\s+(.+)$/gm, '<strong class="nx-mdH">$1</strong>');
-		html = html.replace(/^#{1,6}\s*/gm, '');
-		html = applyMarkdownLists(html);
-		html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_match, text, url) {
-			const href = safeMarkdownHref(url);
-			const label = applyMarkdownInline(text);
-			return stashMarkdownBlock(blocks, href ? '<a href="' + href + '">' + label + '</a>' : label);
-		});
-		html = applyMarkdownInline(html);
-		html = html.replace(/\n/g, '<br/>');
-
-		for (let i = 0; i < blocks.length; i++) {
-			html = html.split('%%NXCB' + i + '%%').join(blocks[i]);
+		const lines = src.split('\n');
+		const out = [];
+		let para = [];
+		const flush = function () {
+			if (para.length) {
+				out.push('<p>' + para.map(mdInline).join('<br/>') + '</p>');
+				para = [];
+			}
+		};
+		let i = 0;
+		while (i < lines.length) {
+			const line = lines[i];
+			const t = line.trim();
+			let m;
+			if (!t) {
+				flush();
+				i++;
+			} else if ((m = /^%%NXCB(\d+)%%$/.exec(t))) {
+				flush();
+				out.push(blocks[Number(m[1])]);
+				i++;
+			} else if ((m = /^(#{1,6})\s+(.*)$/.exec(t))) {
+				flush();
+				out.push('<div class="nx-mdH nx-mdH' + Math.min(m[1].length, 3) + '">' + mdInline(m[2]) + '</div>');
+				i++;
+			} else if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) {
+				flush();
+				out.push('<hr class="nx-mdHr"/>');
+				i++;
+			} else if (/^&gt;/.test(t)) {
+				flush();
+				const quote = [];
+				while (i < lines.length && /^&gt;/.test(lines[i].trim())) {
+					quote.push(lines[i].trim().replace(/^&gt;\s?/, ''));
+					i++;
+				}
+				out.push('<blockquote class="nx-mdQuote">' + quote.map(mdInline).join('<br/>') + '</blockquote>');
+			} else if (mdIsTableRow(line) && i + 1 < lines.length && /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/.test(lines[i + 1].trim())) {
+				flush();
+				const table = mdTable(lines, i);
+				out.push(table.html);
+				i = table.next;
+			} else if (MD_LIST_RE.test(line)) {
+				flush();
+				const list = mdList(lines, i);
+				out.push(list.html);
+				i = list.next;
+			} else {
+				para.push(t);
+				i++;
+			}
 		}
-		return html;
+		flush();
+		return out.join('');
 	}
 
 	// Ends the run's live state. When the run finished normally the total cost
 	// is left under the answer; when the view is being cleared it is dropped.
 	function clearChatActivityCard(showCost) {
+		finishTodoCard();
 		activityGroups.forEach(function (g) {
 			if (g.el.parentNode) {
 				g.el.remove();
@@ -1143,6 +1299,62 @@
 		lastLoadingMessage = null;
 	}
 
+	/** The agent's to-do list for the current request (todo_write); one card, updated in place. */
+	let todoCard = null;
+
+	function renderTodos(todos) {
+		if (!messages || !Array.isArray(todos) || todos.length === 0) {
+			return;
+		}
+		if (!todoCard || !todoCard.isConnected) {
+			todoCard = document.createElement('div');
+			todoCard.className = 'nx-todoCard';
+			todoCard.setAttribute('role', 'list');
+			todoCard.setAttribute('aria-label', 'Agent to-do list');
+			if (lastLoadingMessage && lastLoadingMessage.parentNode === messages) {
+				messages.insertBefore(todoCard, lastLoadingMessage);
+			} else {
+				messages.appendChild(todoCard);
+			}
+		}
+		todoItems = todos;
+		paintTodoCard(false);
+	}
+
+	let todoItems = [];
+
+	function paintTodoCard(ended) {
+		if (!todoCard) {
+			return;
+		}
+		const done = todoItems.filter(function (t) { return t.status === 'completed'; }).length;
+		const open = todoItems.length - done;
+		// After the run, an item still "in progress" is not running any more:
+		// show it as not done, and say plainly that the agent left it open.
+		const note = ended && open > 0
+			? '<div class="nx-todoNote">The agent finished without marking ' + (open === 1 ? 'this item' : 'these ' + open + ' items') + ' done.</div>'
+			: '';
+		todoCard.classList.toggle('nx-todoEnded', !!ended);
+		todoCard.innerHTML = '<div class="nx-todoHead">To-do <span class="nx-todoCount">' + done + ' of ' + todoItems.length + ' done</span></div>' +
+			todoItems.map(function (t) {
+				let status = t.status === 'completed' || t.status === 'in_progress' ? t.status : 'pending';
+				if (ended && status === 'in_progress') {
+					status = 'pending';
+				}
+				const label = status === 'completed' ? 'Done' : status === 'in_progress' ? 'In progress' : 'Not done';
+				return '<div class="nx-todoItem nx-todo-' + status + '" role="listitem" aria-label="' + label + ': ' + escapeHtml(t.content).replace(/"/g, '&quot;') + '">' +
+					'<span class="nx-todoMark" aria-hidden="true"></span>' +
+					'<span class="nx-todoText" aria-hidden="true">' + escapeHtml(t.content) + '</span></div>';
+			}).join('') + note;
+	}
+
+	/** The run is over: freeze the card (called when the activity card is cleared). */
+	function finishTodoCard() {
+		if (todoCard && todoCard.isConnected && todoItems.length) {
+			paintTodoCard(true);
+		}
+	}
+
 	function renderChatActivity(items, caption) {
 		if (!messages) {
 			return;
@@ -1154,7 +1366,6 @@
 			// placeholder reply below drew the same line twice.
 			lastActivityCaption = caption;
 		}
-		const follow = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 40;
 		const agentIt = list.find(function (it) { return it.id === 'agent'; });
 		const steps = list.filter(function (it) { return it.id !== 'agent'; });
 		const byId = {};
@@ -1196,9 +1407,6 @@
 			fillActivityBody(g.body, shown, true);
 			return true;
 		});
-		if (follow) {
-			messages.scrollTop = messages.scrollHeight;
-		}
 	}
 
 	function formatTokens(count) {
@@ -1484,13 +1692,7 @@
 		if (!body || body.getAttribute('data-nx-streaming') !== '1') {
 			return;
 		}
-		// Follow the new text only while the reader is at the bottom, so
-		// scrolling up to read earlier output is not pulled back down.
-		const follow = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 40;
 		body.innerHTML = formatContent(streamText);
-		if (follow) {
-			messages.scrollTop = messages.scrollHeight;
-		}
 	}
 
 	function finishMessage() {
@@ -2291,6 +2493,8 @@
 
 		addMessage('user', text, false);
 		agentOfferText = mode === 'chat' ? text : '';
+		todoCard = null;
+		todoItems = [];
 
 		if (mode === 'chat' || mode === 'ask' || mode === 'agent') {
 			setReplyInFlight(true);
@@ -2363,6 +2567,7 @@
 		}
 	});
 	wireMessagesScrollbarFlash();
+	wireStickToBottom();
 	wireAtContextComposer();
 	input.addEventListener('keydown', function (e) {
 		if (e.key !== 'Enter') {
@@ -2745,6 +2950,10 @@
 
 			case 'finishMessage':
 				finishMessage();
+				break;
+
+			case 'todoUpdate':
+				renderTodos(data.todos);
 				break;
 
 			case 'generationRunning':
