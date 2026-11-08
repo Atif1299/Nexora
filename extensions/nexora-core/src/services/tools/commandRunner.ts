@@ -197,8 +197,24 @@ export function truncateMiddle(text: string, head = MODEL_HEAD_CHARS, tail = MOD
 	};
 }
 
-/** Environment for a non-interactive agent command. */
-export function agentProcessEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+/**
+ * Folders put first on PATH for agent commands, set by runtimeProbe.ts: the
+ * project's virtual environment, node_modules/.bin, and uv's Python when the
+ * system python is a broken shortcut. One window has one workspace, so this
+ * is module state.
+ */
+let agentPathPrefix: string[] = [];
+
+export function setAgentPathPrefix(dirs: string[]): void {
+	agentPathPrefix = dirs.filter((d) => !!d);
+}
+
+export function getAgentPathPrefix(): string[] {
+	return [...agentPathPrefix];
+}
+
+/** Environment for a non-interactive agent command. withPrefix false: the plain PATH, for probing. */
+export function agentProcessEnv(base: NodeJS.ProcessEnv = process.env, withPrefix: boolean = true): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {};
 	for (const [key, value] of Object.entries(base)) {
 		// The extension host runs Electron as Node; a child must not inherit that.
@@ -206,6 +222,10 @@ export function agentProcessEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.P
 			continue;
 		}
 		env[key] = value;
+	}
+	if (withPrefix && agentPathPrefix.length > 0) {
+		const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') || 'PATH';
+		env[key] = [...agentPathPrefix, env[key] || ''].filter((p) => p.length > 0).join(path.delimiter);
 	}
 	return {
 		...env,

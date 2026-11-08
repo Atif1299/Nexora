@@ -11,6 +11,7 @@ import * as os from 'os';
 import type { SSEEvent, Transport } from './transport';
 import type { Effort } from '../../webview/chat/types';
 import { agentCwd, agentShell, backgroundCommands } from '../tools/terminalCommand';
+import { ensureRuntimeProbe, runtimesForPrompt } from '../tools/runtimeProbe';
 
 /** Agent turns call LiteLLM with tools; 30s aborts a healthy first completion. */
 const AGENT_TURN_TIMEOUT_MS = 120000;
@@ -142,6 +143,11 @@ export async function agentEnvironment(workspacePath?: string): Promise<Record<s
 		env.cwd = agentCwd(workspacePath);
 		env.git = await gitFacts(workspacePath);
 		env.top_level = topLevel(workspacePath);
+		// Checked by running each tool (cached 2 min); a failed check just leaves it out.
+		const runtimes = await ensureRuntimeProbe(workspacePath).catch(() => undefined);
+		if (runtimes) {
+			env.runtimes = runtimesForPrompt(runtimes);
+		}
 	}
 	return env;
 }

@@ -20,6 +20,7 @@ import {
 	runCommand,
 	truncateMiddle
 } from './commandRunner';
+import { ensureRuntimeProbe, noteCommandRan, notFoundHint } from './runtimeProbe';
 
 /** Installs get the full ten minutes without the model having to ask. */
 const LONG_TIMEOUT_MS = MAX_TIMEOUT_MS;
@@ -308,6 +309,8 @@ export async function runTerminalCommandTool(
 		return { success: false, error: cancelled ? 'Command cancelled.' : 'The user denied this command. Ask what to do instead, or take another approach.' };
 	}
 
+	// What works on this PC (and the PATH fixes for it) before anything runs.
+	const runtimes = await ensureRuntimeProbe(workspaceRoot).catch(() => undefined);
 	const shell = agentShell();
 	const controller = new AbortController();
 	const cancelSub = token?.onCancellationRequested(() => controller.abort());
@@ -338,6 +341,8 @@ export async function runTerminalCommandTool(
 			}
 			const { job, output } = started;
 			const running = job.status === 'running';
+			noteCommandRan(workspaceRoot, command);
+			const bgHint = running ? undefined : notFoundHint(command, output, job.exitCode, runtimes);
 			view.end(running ? `started in the background as ${job.id}` : `exited ${job.exitCode}`);
 			emit(running || job.exitCode === 0 ? 'succeeded' : 'failed', lastLines(output, PREVIEW_LINE_COUNT), job.exitCode ?? undefined);
 			return {
@@ -349,13 +354,16 @@ export async function runTerminalCommandTool(
 					exit_code: job.exitCode,
 					cwd: startCwd,
 					output,
-					note: running ? `Running as ${job.id}. Use read_command_output("${job.id}") to see new output and stop_command("${job.id}") to stop it.` : undefined
+					note: running ? `Running as ${job.id}. Use read_command_output("${job.id}") to see new output and stop_command("${job.id}") to stop it.` : undefined,
+					hint: bgHint
 				}
 			};
 		}
 
 		const result = await runCommand({ shell, command, cwd: startCwd, timeoutMs: effectiveTimeout, signal: controller.signal, onOutput });
 		clearInterval(ticker);
+		noteCommandRan(workspaceRoot, command);
+		const hint = notFoundHint(command, result.output, result.exitCode, runtimes);
 
 		let endCwd = result.finalCwd ?? startCwd;
 		let cwdNote: string | undefined;
@@ -381,7 +389,8 @@ export async function runTerminalCommandTool(
 				cwd: endCwd,
 				shell: shell.label,
 				output: forModel.text || '(no output)',
-				note: cwdNote
+				note: cwdNote,
+				hint
 			},
 			truncated: forModel.truncated
 		};
