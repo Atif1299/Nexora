@@ -6,6 +6,19 @@
 (function () {
 	const vscode = acquireVsCodeApi();
 
+	/** Filter text, the All / Connected / Available tab, and collapsed groups; kept while the panel is hidden. */
+	const saved = vscode.getState() || {};
+	const view = {
+		query: '',
+		filter: saved.filter === 'connected' || saved.filter === 'live' ? saved.filter : 'all',
+		collapsed: Array.isArray(saved.collapsed) ? saved.collapsed : []
+	};
+	let lastData = null;
+
+	function saveView() {
+		vscode.setState({ filter: view.filter, collapsed: view.collapsed });
+	}
+
 	function escapeHtml(text) {
 		const div = document.createElement('div');
 		div.textContent = text === null || text === undefined ? '' : String(text);
@@ -26,6 +39,10 @@
 	/** Rows whose Connect is a browser sign-in (GitHub, Vercel). Key rows open Settings instead. */
 	function isBrowserOAuth(platform) {
 		return platform.id === 'github' || platform.id === 'vercel';
+	}
+
+	function isConnected(platform) {
+		return !!platform.live && platform.capabilityStatus === 'ready';
 	}
 
 	function statusLabel(platform) {
@@ -82,7 +99,7 @@
 			const label = platform.setupHint ? 'Set up' : 'Connect';
 			buttons.push(`<button type="button" class="nx-btn" data-action="connect" data-id="${id}">${label}</button>`);
 		}
-		return `<div class="nx-platform-actions">${buttons.join('')}</div>`;
+		return buttons.length ? `<div class="nx-platform-actions">${buttons.join('')}</div>` : '';
 	}
 
 	function tooltip(platform) {
@@ -116,7 +133,7 @@
 		if (status === 'failed') {
 			classes.push('is-failed');
 		}
-		if (live && status === 'ready') {
+		if (isConnected(platform)) {
 			classes.push('is-connected');
 		}
 		const meta = !live
@@ -127,19 +144,59 @@
 		return `
 			<article class="${classes.join(' ')}" data-status="${escapeHtml(status || (live ? 'not_configured' : 'catalogue'))}" data-id="${escapeHtml(platform.id || '')}" data-live="${live ? '1' : '0'}" title="${escapeHtml(tooltip(platform))}">
 				<span class="nx-dot" aria-hidden="true"></span>
-				<div>
-					<div class="nx-name">${escapeHtml(platform.name || platform.id || '')}</div>
+				<div class="nx-platform-main">
+					<div class="nx-name-row">
+						<span class="nx-name">${escapeHtml(platform.name || platform.id || '')}</span>
+						<span class="nx-status">${escapeHtml(statusLabel(platform))}</span>
+					</div>
 					<div class="nx-meta">${escapeHtml(meta)}</div>
 				</div>
-				<div class="nx-aside">
-					<span class="nx-status">${escapeHtml(statusLabel(platform))}</span>
-					${actionButtons(platform)}
-				</div>
+				${actionButtons(platform)}
 			</article>
 		`;
 	}
 
+	function matches(platform) {
+		if (view.filter === 'connected' && !isConnected(platform)) {
+			return false;
+		}
+		if (view.filter === 'live' && !platform.live) {
+			return false;
+		}
+		const q = view.query.trim().toLowerCase();
+		if (!q) {
+			return true;
+		}
+		const text = [platform.name, platform.id, platform.description, platform.category].join(' ').toLowerCase();
+		return text.indexOf(q) !== -1;
+	}
+
+	function renderTabs(categories) {
+		let connected = 0;
+		let live = 0;
+		let all = 0;
+		categories.forEach((group) => (group.platforms || []).forEach((platform) => {
+			all++;
+			if (platform.live) {
+				live++;
+			}
+			if (isConnected(platform)) {
+				connected++;
+			}
+		}));
+		const counts = { all, connected, live };
+		document.querySelectorAll('.nx-seg button[data-filter]').forEach((btn) => {
+			const filter = btn.getAttribute('data-filter');
+			btn.setAttribute('aria-pressed', filter === view.filter ? 'true' : 'false');
+			const count = btn.querySelector('.nx-seg-count');
+			if (count) {
+				count.textContent = String(counts[filter] || 0);
+			}
+		});
+	}
+
 	function render(data) {
+		lastData = data;
 		const loading = document.getElementById('loading');
 		const list = document.getElementById('platform-list');
 		const banner = document.getElementById('offline-banner');
@@ -157,7 +214,7 @@
 
 		if (embedding) {
 			if (data.embeddingInProgress) {
-				embedding.textContent = 'Preparing semantic search… Embedding platforms in the background.';
+				embedding.textContent = 'Preparing semantic search. Platforms are being indexed in the background.';
 				embedding.hidden = false;
 			} else {
 				embedding.textContent = '';
@@ -186,17 +243,30 @@
 		}
 
 		const categories = data.categories || [];
+		renderTabs(categories);
 		if (!categories.length) {
 			list.innerHTML = '<div class="nx-empty">No platforms loaded.</div>';
 			announce(data.error || 'No platforms loaded');
 			return;
 		}
 
-		list.innerHTML = categories.map((group) => {
-			const platforms = group.platforms || [];
+		let shown = 0;
+		const groups = categories.map((group) => {
+			const platforms = (group.platforms || []).filter(matches);
+			if (!platforms.length) {
+				return '';
+			}
+			shown += platforms.length;
+			// While filtering, every group with a match stays open so nothing is hidden behind a fold.
+			const open = view.query.trim() !== '' || view.collapsed.indexOf(group.category) === -1;
+			const ready = platforms.filter(isConnected).length;
 			return `
-				<section class="nx-group" aria-label="${escapeHtml(group.category)}">
-					<h2>${escapeHtml(group.category)} <span class="nx-count">(${platforms.length})</span></h2>
+				<section class="nx-group${open ? '' : ' is-collapsed'}" aria-label="${escapeHtml(group.category)}">
+					<button type="button" class="nx-group-head" data-group="${escapeHtml(group.category)}" aria-expanded="${open ? 'true' : 'false'}">
+						<svg class="nx-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4"/></svg>
+						<span class="nx-group-name">${escapeHtml(group.category)}</span>
+						<span class="nx-count">${ready ? `${ready} of ${platforms.length} ready` : platforms.length}</span>
+					</button>
 					<div class="nx-list">
 						${platforms.map(renderPlatform).join('')}
 					</div>
@@ -204,17 +274,61 @@
 			`;
 		}).join('');
 
+		list.innerHTML = shown
+			? groups
+			: `<div class="nx-empty">${view.filter === 'connected' ? 'Nothing connected yet. Connect a platform from the All tab.' : 'No platforms match.'}</div>`;
+
 		const count = categories.reduce((sum, group) => sum + ((group.platforms || []).length), 0);
-		announce(data.error ? data.error : count + ' platforms');
+		announce(data.error ? data.error : (shown === count ? count + ' platforms' : shown + ' of ' + count + ' platforms'));
+	}
+
+	function rerender() {
+		if (lastData) {
+			render(lastData);
+		}
 	}
 
 	document.getElementById('refreshBtn')?.addEventListener('click', () => {
 		vscode.postMessage({ type: 'refresh' });
 	});
 
+	const search = document.getElementById('platform-search');
+	search?.addEventListener('input', () => {
+		view.query = search.value;
+		rerender();
+	});
+	search?.addEventListener('keydown', (event) => {
+		if (event.key === 'Escape') {
+			search.value = '';
+			view.query = '';
+			rerender();
+		}
+	});
+
+	document.querySelectorAll('.nx-seg button[data-filter]').forEach((btn) => {
+		btn.addEventListener('click', () => {
+			view.filter = btn.getAttribute('data-filter') || 'all';
+			saveView();
+			rerender();
+		});
+	});
+
 	document.getElementById('platform-list')?.addEventListener('click', (event) => {
 		const target = event.target;
 		if (!target || typeof target.closest !== 'function') {
+			return;
+		}
+		const head = target.closest('button[data-group]');
+		if (head) {
+			const name = head.getAttribute('data-group') || '';
+			const at = view.collapsed.indexOf(name);
+			if (at === -1) {
+				view.collapsed.push(name);
+			} else {
+				view.collapsed.splice(at, 1);
+			}
+			saveView();
+			rerender();
 			return;
 		}
 		const btn = target.closest('button[data-action]');

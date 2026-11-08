@@ -3,18 +3,31 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+/*
+* Platforms panel: the same quiet card-and-row language as Settings, sized
+* for a side bar. Each category is a collapsible group holding one card of
+* rows; a row is a status dot, the name with a small status word, one line of
+* description, and its action on the right. Tones are mixed from the theme's
+* own ink so every theme looks right.
+*/
+
+#platforms-root
+{
+	--s-ink: var(--vscode-editor-foreground, var(--vscode-foreground, #cccccc));
+	--s-card: color-mix(in srgb, var(--s-ink) 3.5%, var(--nx-bg));
+	--s-card-border: color-mix(in srgb, var(--s-ink) 9%, transparent);
+	--s-line: color-mix(in srgb, var(--s-ink) 8%, transparent);
+	--s-hover: color-mix(in srgb, var(--s-ink) 6%, transparent);
+	--s-selected: color-mix(in srgb, var(--s-ink) 11%, transparent);
+	padding: 14px 12px 24px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
 
 *
 {
 	box-sizing: border-box;
-	scrollbar-width: none;
-}
-
-*::-webkit-scrollbar
-{
-	width: 0;
-	height: 0;
-	display: none;
 }
 
 body
@@ -25,15 +38,8 @@ body
 	font-size: var(--vscode-font-size);
 	color: var(--nx-fg);
 	background: var(--nx-bg);
-}
-
-#platforms-root
-{
-	padding: 12px;
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-	max-width: none;
+	-webkit-font-smoothing: antialiased;
+	scrollbar-width: thin;
 }
 
 h1
@@ -56,159 +62,356 @@ h1
 	margin: 0;
 	font-size: 12px;
 	color: var(--nx-muted);
-	line-height: 1.4;
+	line-height: 1.5;
 }
 
-.nx-btn
+.nx-icon-btn
 {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
 	border: none;
-	border-radius: 4px;
-	padding: 4px 10px;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--nx-muted);
 	cursor: pointer;
+}
+
+.nx-icon-btn:hover
+{
+	background: var(--s-hover);
+	color: var(--nx-fg);
+}
+
+.nx-icon-btn svg,
+.nx-search svg,
+.nx-chevron
+{
+	width: 15px;
+	height: 15px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.4;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.nx-icon-btn:focus-visible,
+.nx-seg button:focus-visible,
+.nx-group-head:focus-visible,
+.nx-btn:focus-visible
+{
+	outline: 1px solid var(--nx-focus);
+	outline-offset: 1px;
+}
+
+/* ---------- filter ---------- */
+
+.nx-tools
+{
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 2px;
+}
+
+.nx-search
+{
+	position: relative;
+}
+
+.nx-search svg
+{
+	position: absolute;
+	left: 9px;
+	top: 50%;
+	width: 13px;
+	height: 13px;
+	transform: translateY(-50%);
+	color: var(--nx-muted);
+	pointer-events: none;
+}
+
+.nx-search input
+{
+	width: 100%;
+	height: 30px;
+	padding: 0 10px 0 28px;
+	border: 1px solid var(--s-card-border);
+	border-radius: 6px;
+	background: var(--s-card);
+	color: var(--nx-fg);
+	font-family: inherit;
+	font-size: 12.5px;
+	outline: none;
+}
+
+.nx-search input::placeholder
+{
+	color: var(--nx-muted);
+}
+
+.nx-search input:focus
+{
+	border-color: var(--nx-focus);
+}
+
+.nx-seg
+{
+	display: flex;
+	gap: 2px;
+	padding: 2px;
+	border: 1px solid var(--s-card-border);
+	border-radius: 7px;
+	background: var(--s-card);
+}
+
+.nx-seg button
+{
+	flex: 1;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	height: 24px;
+	padding: 0 6px;
+	border: none;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--nx-muted);
+	font-family: inherit;
 	font-size: 12px;
+	white-space: nowrap;
+	cursor: pointer;
 }
 
-.nx-btn-secondary
+.nx-seg button:hover
 {
-	background: var(--nx-btn2-bg);
-	color: var(--nx-btn2-fg);
+	color: var(--nx-fg);
 }
 
-.nx-btn-secondary:hover
+.nx-seg button[aria-pressed="true"]
 {
-	background: var(--nx-btn-hover);
-	color: var(--nx-btn-fg);
+	background: var(--s-selected);
+	color: var(--nx-fg);
+	font-weight: 500;
 }
+
+.nx-seg-count
+{
+	font-size: 11px;
+	opacity: 0.7;
+	font-variant-numeric: tabular-nums;
+}
+
+/* ---------- banners ---------- */
 
 .nx-banner
 {
 	margin: 0;
-	padding: 8px 10px;
-	border-radius: 4px;
+	padding: 9px 11px;
+	border-radius: 8px;
 	font-size: 12px;
-	background: var(--vscode-inputValidation-warningBackground, rgba(255, 190, 80, 0.15));
-	border: 1px solid var(--vscode-inputValidation-warningBorder, rgba(255, 190, 80, 0.5));
-	color: var(--vscode-foreground);
+	line-height: 1.5;
+	background: color-mix(in srgb, var(--nx-warn) 10%, var(--nx-bg));
+	border: 1px solid color-mix(in srgb, var(--nx-warn) 35%, transparent);
+	color: var(--nx-fg);
 }
 
 .nx-banner-info
 {
-	background: var(--vscode-textBlockQuote-background, rgba(80, 160, 255, 0.12));
-	border-color: var(--vscode-focusBorder, rgba(80, 160, 255, 0.4));
+	background: color-mix(in srgb, var(--nx-accent) 9%, var(--nx-bg));
+	border-color: color-mix(in srgb, var(--nx-accent) 30%, transparent);
 }
+
+/* ---------- groups ---------- */
 
 .nx-groups
 {
 	display: flex;
 	flex-direction: column;
-	gap: 18px;
+	gap: 10px;
+	margin-top: 4px;
 }
 
-.nx-group h2
+.nx-group-head
 {
-	margin: 0 0 8px 0;
-	font-size: 13px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	padding: 4px 2px;
+	margin-bottom: 4px;
+	border: none;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--nx-fg);
+	font-family: inherit;
+	font-size: 12px;
 	font-weight: 600;
+	text-align: left;
+	cursor: pointer;
+}
+
+.nx-group-head:hover
+{
+	background: var(--s-hover);
+}
+
+.nx-chevron
+{
+	width: 12px;
+	height: 12px;
+	flex-shrink: 0;
+	color: var(--nx-muted);
+	transform: rotate(90deg);
+	transition: transform var(--nx-transition);
+}
+
+.nx-group.is-collapsed .nx-chevron
+{
+	transform: rotate(0deg);
+}
+
+.nx-group.is-collapsed .nx-list
+{
+	display: none;
+}
+
+.nx-group-name
+{
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .nx-count
 {
+	font-size: 11px;
 	font-weight: 400;
 	color: var(--nx-muted);
+	font-variant-numeric: tabular-nums;
 }
 
 .nx-list
 {
 	display: flex;
 	flex-direction: column;
-	gap: 6px;
+	border: 1px solid var(--s-card-border);
+	border-radius: 9px;
+	background: var(--s-card);
+	overflow: hidden;
 }
+
+/* ---------- rows ---------- */
 
 .nx-platform
 {
 	display: grid;
-	grid-template-columns: 12px minmax(0, 1fr) auto;
+	grid-template-columns: 8px minmax(0, 1fr) auto;
 	gap: 10px;
-	align-items: start;
-	border: 1px solid var(--nx-border);
-	border-radius: 6px;
-	background: var(--nx-surface);
+	align-items: center;
 	padding: 10px 12px;
+	transition: background-color var(--nx-transition);
+}
+
+.nx-platform + .nx-platform
+{
+	border-top: 1px solid var(--s-line);
+}
+
+.nx-platform:hover
+{
+	background: var(--s-hover);
+}
+
+.nx-platform-main
+{
+	min-width: 0;
+}
+
+.nx-name-row
+{
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	min-width: 0;
+}
+
+.nx-name
+{
+	font-size: 13px;
+	font-weight: 500;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /*
-* A row that is not connected should read as calmer, not as damaged.
-*
-* Both states used to dim the whole card to 55%, which took the status badge
-* and the action button down with it -- the two things a person actually
-* needs to read and click. On the description it compounded, because that
-* text is already muted, leaving it far below a comfortable contrast.
-*
-* A blocked row is the most actionable row on the page: it has a Connect or
-* Set up button waiting. So it is not dimmed at all. Only a catalogue row,
-* which offers nothing to click, steps back -- and it does so by muting its
-* name rather than by fading the whole card, so its state stays readable.
+* A catalogue row offers nothing to click, so it steps back by muting its
+* name; a blocked row is the most actionable one on the page and is not
+* dimmed at all.
 */
 .nx-platform.is-catalogue .nx-name
 {
 	color: var(--nx-muted);
-	font-weight: 500;
 }
 
-.nx-platform.is-catalogue .nx-meta
+.nx-meta
 {
-	opacity: 0.85;
+	margin-top: 2px;
+	font-size: 11.5px;
+	color: var(--nx-muted);
+	line-height: 1.45;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
 }
 
-.nx-aside
+.nx-status
 {
-	display: flex;
-	flex-direction: column;
-	align-items: flex-end;
-	gap: 6px;
-}
-
-.nx-platform-actions
-{
-	display: flex;
-	flex-wrap: wrap;
-	justify-content: flex-end;
-	gap: 4px;
-}
-
-.nx-platform .nx-btn
-{
-	padding: 2px 8px;
+	flex-shrink: 0;
 	font-size: 11px;
-	background: var(--nx-btn-bg);
-	color: var(--nx-btn-fg);
+	color: var(--nx-muted);
+	white-space: nowrap;
 }
 
-.nx-platform .nx-btn:hover
+.nx-platform.is-connected .nx-status
 {
-	background: var(--nx-btn-hover);
+	color: var(--nx-ok);
 }
 
-.nx-platform .nx-btn-secondary
+.nx-platform.is-failed .nx-status
 {
-	background: var(--nx-btn2-bg);
-	color: var(--nx-btn2-fg);
+	color: var(--nx-err);
+}
+
+.nx-platform.is-catalogue .nx-status
+{
+	opacity: 0.7;
 }
 
 .nx-dot
 {
-	width: 10px;
-	height: 10px;
-	margin-top: 4px;
+	width: 7px;
+	height: 7px;
 	border-radius: 50%;
-	border: 1px solid var(--nx-muted);
 	background: transparent;
+	border: 1px solid color-mix(in srgb, var(--s-ink) 35%, transparent);
+	align-self: start;
+	margin-top: 6px;
 }
 
 .nx-platform.is-connected .nx-dot
 {
 	background: var(--nx-ok);
 	border-color: var(--nx-ok);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--nx-ok) 18%, transparent);
 }
 
 .nx-platform.is-failed .nx-dot
@@ -219,59 +422,60 @@ h1
 
 .nx-platform.is-blocked:not(.is-failed) .nx-dot
 {
-	background: var(--nx-disabled);
-	border-color: var(--nx-disabled);
+	background: color-mix(in srgb, var(--s-ink) 30%, transparent);
+	border-color: transparent;
 }
 
-.nx-name
+.nx-platform-actions
 {
-	font-size: 13px;
-	font-weight: 600;
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 4px;
 }
 
-.nx-meta
+.nx-btn
 {
-	margin-top: 2px;
-	font-size: 11px;
-	color: var(--nx-muted);
-	line-height: 1.4;
-}
-
-.nx-status
-{
-	font-size: 10px;
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
-	color: var(--nx-muted);
-	border: 1px solid var(--nx-border);
-	border-radius: 4px;
-	padding: 1px 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 24px;
+	padding: 0 10px;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	font-family: inherit;
+	font-size: 12px;
+	font-weight: 500;
 	white-space: nowrap;
+	cursor: pointer;
+	background: var(--nx-btn-bg);
+	color: var(--nx-btn-fg);
+	transition: background-color var(--nx-transition);
 }
 
-/*
-* The badge repeats what the dot already says, so it should say it the same
-* way. Only the two states worth a colour get one: connected, and failed.
-* "Not set up yet" stays neutral, because it is an ordinary fact about a row
-* the user has not reached yet, not a problem to be warned about.
-*/
-.nx-platform.is-connected .nx-status
+.nx-btn:hover
 {
-	color: var(--nx-ok);
-	border-color: var(--nx-ok);
+	background: var(--nx-btn-hover);
 }
 
-.nx-platform.is-failed .nx-status
+.nx-btn-secondary
 {
-	color: var(--nx-err);
-	border-color: var(--nx-err);
+	background: var(--s-hover);
+	border-color: var(--s-card-border);
+	color: var(--nx-fg);
+}
+
+.nx-btn-secondary:hover
+{
+	background: var(--s-selected);
+	color: var(--nx-fg);
 }
 
 .nx-empty
 {
 	font-size: 12px;
 	color: var(--nx-muted);
-	padding: 8px 0;
+	padding: 10px 2px;
 }
 
 .sr-only

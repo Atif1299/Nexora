@@ -56,6 +56,12 @@ export interface CloudAccountInfo {
 	dashboard_url?: string;
 }
 
+/** GET /account/usage: spend and calls per day (oldest first) and per model (most spent first). */
+export interface CloudUsage {
+	days: { date: string; cost_usd: number; calls: number }[];
+	models: { model: string; cost_usd: number; calls: number; tokens_in: number; tokens_out: number }[];
+}
+
 export type DashboardPage = '' | 'billing' | 'usage' | 'devices' | 'settings';
 
 function cloudUrl(): string {
@@ -69,6 +75,15 @@ function webUrl(): string {
 /** Where the browser signs in for the IDE; the website returns to `callback` with a one-time code. */
 export function signInUrl(site: string, callback: string): string {
 	return `${site}/sign-in?client=ide&return_to=${encodeURIComponent(callback)}`;
+}
+
+/**
+ * Opens an address in the browser exactly as written. Going through vscode.Uri decodes and
+ * re-encodes the query, which broke the IDE link carried in return_to (v0.1.5: "?n=" arrived
+ * as "%3Fn=" and windowId was split off). openExternal accepts the string itself at run time.
+ */
+function openExact(address: string): Thenable<boolean> {
+	return vscode.env.openExternal(address as unknown as vscode.Uri);
 }
 
 export function dashboardUrl(site: string, page: DashboardPage = '', query = ''): string {
@@ -162,10 +177,11 @@ export class CloudAccount implements vscode.Disposable {
 		const nonce = randomUUID();
 		const pending: PendingSignIn = { nonce, expires: Date.now() + PENDING_MS };
 		await this.context.globalState.update(PENDING_KEY, pending);
+		// asExternalUri adds windowId, so the browser's answer comes back to this window.
 		const callback = await vscode.env.asExternalUri(
 			vscode.Uri.parse(`${vscode.env.uriScheme}://${this.context.extension.id}/cloud-auth?n=${nonce}`)
 		);
-		await vscode.env.openExternal(vscode.Uri.parse(signInUrl(webUrl(), callback.toString(true))));
+		await openExact(signInUrl(webUrl(), callback.toString(true)));
 	}
 
 	/** The website's redirect after the person confirmed in the browser: swap the one-time code for a token. */
@@ -215,7 +231,7 @@ export class CloudAccount implements vscode.Disposable {
 	}
 
 	async openDashboard(page: DashboardPage = '', query = ''): Promise<void> {
-		await vscode.env.openExternal(vscode.Uri.parse(dashboardUrl(webUrl(), page, query)));
+		await openExact(dashboardUrl(webUrl(), page, query));
 	}
 
 	/** Signed out: sign in. Signed in: dashboard, credit, upgrade, sign out. */
@@ -257,6 +273,15 @@ export class CloudAccount implements vscode.Disposable {
 				await this.context.secrets.delete(TOKEN_KEY);
 				this.changed.fire();
 			}
+			return undefined;
+		}
+	}
+
+	/** Usage for Settings > Plan & Usage; undefined when signed out, unreachable, or the gateway is older. */
+	async usage(days = 30): Promise<CloudUsage | undefined> {
+		try {
+			return await this.call<CloudUsage>(`/account/usage?days=${days}`);
+		} catch {
 			return undefined;
 		}
 	}

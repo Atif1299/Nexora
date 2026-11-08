@@ -32,61 +32,92 @@ export function getSettingsWebviewHtml(
 		bodyAttributes: `data-section="${escapeAttr(section || '')}"`,
 		body: /* html */ `	<div id="settings-root" role="main" aria-label="Nexora Settings">
 		<nav class="nx-settings-nav" aria-label="Settings sections">
-			<div class="nx-settings-nav-title">Settings</div>
-			<button type="button" class="nx-nav-item" data-section="account" title="Account" aria-label="Account">
-				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 1.5c-3 0-5.5 1.6-5.5 3.5v1h11v-1c0-1.9-2.5-3.5-5.5-3.5z"/></svg></span>
-				<span class="nx-nav-label">Account</span>
+			<button type="button" class="nx-nav-profile" id="nav-profile" data-section="account" title="Account" aria-label="Account">
+				<span class="nx-nav-avatar" id="nav-avatar" aria-hidden="true">N</span>
+				<span class="nx-nav-who">
+					<span class="nx-nav-name" id="nav-name">Nexora Cloud</span>
+					<span class="nx-nav-plan" id="nav-plan">Not signed in</span>
+				</span>
 			</button>
-			<button type="button" class="nx-nav-item selected" data-section="keys" aria-current="page" title="LLM Keys" aria-label="LLM Keys">
-				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 1a4 4 0 0 0-1.5 7.71V10H5v2H3v2h5V8.71A4 4 0 0 0 8 1zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></svg></span>
-				<span class="nx-nav-label">LLM Keys</span>
-			</button>
-			<button type="button" class="nx-nav-item" data-section="models" title="Models" aria-label="Models">
-				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M2 3h5v2H2V3zm7 0h5v2H9V3zM2 7h12v2H2V7zm0 4h8v2H2v-2z"/></svg></span>
-				<span class="nx-nav-label">Models</span>
-			</button>
-			<button type="button" class="nx-nav-item" data-section="memory" title="Project Memory" aria-label="Project Memory">
-				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M4 2h6l3 3v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm5 1.5V6h2.5L9 3.5zM5 8h6v1.5H5V8zm0 3h6v1.5H5V11z"/></svg></span>
-				<span class="nx-nav-label">Project Memory</span>
-			</button>
-			<button type="button" class="nx-nav-item" data-section="saas" title="SaaS Connectors" aria-label="SaaS Connectors">
-				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M2 3h5v5H2V3zm7 0h5v5H9V3zM2 10h5v5H2v-5zm7 0h5v5H9v-5z"/></svg></span>
-				<span class="nx-nav-label">SaaS Connectors</span>
-			</button>
-			<button type="button" class="nx-nav-item" data-section="connections" title="Connections" aria-label="Connections">
-				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M6.5 9.5a3.5 3.5 0 0 1 0-5l1.2 1.2a1.8 1.8 0 0 0 0 2.6L6.5 9.5zm3 0 1.2-1.2a1.8 1.8 0 0 0 0-2.6L12 4.5a3.5 3.5 0 0 1 0 5L10.8 10.7 9.5 9.5zm-4.2.8L3.5 12a3.5 3.5 0 0 0 5 0l1.2-1.2-1.2-1.2-1.2 1.2a1.8 1.8 0 0 1-2.6 0z"/></svg></span>
-				<span class="nx-nav-label">Connections</span>
-			</button>
-			<button type="button" class="nx-nav-item" data-section="analytics" title="Cost &amp; Analytics" aria-label="Cost and Analytics">
-				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M2 14V2h1.5v10.5H14V14H2zm3.5-2V8H7v4H5.5zm3 0V5H10v7H8.5zm3 0V3H13v9h-1.5z"/></svg></span>
-				<span class="nx-nav-label">Cost &amp; Analytics</span>
-			</button>
-			<button type="button" class="nx-nav-item" data-section="approvals" title="Execution" aria-label="Execution">
-				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M3 2.5v11l10-5.5L3 2.5z"/></svg></span>
-				<span class="nx-nav-label">Execution</span>
-			</button>
-			<button type="button" class="nx-nav-item" data-section="browser" title="Browser" aria-label="Browser">
-				<span class="nx-nav-icon nx-nav-icon-browser" aria-hidden="true"></span>
-				<span class="nx-nav-label">Browser</span>
-			</button>
-			<button type="button" class="nx-nav-item" data-section="preferences" title="Preferences" aria-label="Preferences">
-				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 5.5A2.5 2.5 0 1 0 8 10.5 2.5 2.5 0 0 0 8 5.5zM1 7.5h2.1a5 5 0 0 1 .6-1.5L2.3 4.6l1.4-1.4 1.4 1.4A5 5 0 0 1 6.5 4V2h2v2a5 5 0 0 1 1.4.6l1.4-1.4 1.4 1.4-1.4 1.4a5 5 0 0 1 .6 1.5H15v2h-2.1a5 5 0 0 1-.6 1.5l1.4 1.4-1.4 1.4-1.4-1.4a5 5 0 0 1-1.4.6v2h-2v-2a5 5 0 0 1-1.5-.6L4.6 13.7 3.2 12.3l1.4-1.4A5 5 0 0 1 4 9.5H1v-2z"/></svg></span>
-				<span class="nx-nav-label">Preferences</span>
-			</button>
-			<button type="button" class="nx-nav-item" data-section="about" title="About" aria-label="About">
-				<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 3a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm-.8 3h1.5v5H7.2V7z"/></svg></span>
-				<span class="nx-nav-label">About</span>
-			</button>
+			<div class="nx-nav-search">
+				<svg class="nx-nav-search-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+				<input id="nav-search" type="search" placeholder="Search settings" aria-label="Search settings" spellcheck="false" autocomplete="off">
+			</div>
+			<div class="nx-nav-group">
+				<button type="button" class="nx-nav-item" data-section="account" data-keywords="profile sign in sign out cloud devices" title="Account" aria-label="Account">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c.8-2.3 2.7-3.5 5-3.5s4.2 1.2 5 3.5"/></svg></span>
+					<span class="nx-nav-label">Account</span>
+				</button>
+				<button type="button" class="nx-nav-item" data-section="plan" data-keywords="plan usage credit billing subscription pro free calls spend" title="Plan &amp; Usage" aria-label="Plan and Usage">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M2 6.5h12M4.5 10h2.5"/></svg></span>
+					<span class="nx-nav-label">Plan &amp; Usage</span>
+				</button>
+			</div>
+			<div class="nx-nav-group">
+				<button type="button" class="nx-nav-item selected" data-section="keys" aria-current="page" data-keywords="api keys openai anthropic gemini openrouter" title="LLM Keys" aria-label="LLM Keys">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="5.5" cy="10.5" r="2.5"/><path d="M7.3 8.7 13 3M11 5l1.5 1.5M9.5 6.5 11 8"/></svg></span>
+					<span class="nx-nav-label">LLM Keys</span>
+				</button>
+				<button type="button" class="nx-nav-item" data-section="models" data-keywords="models picker auto catalog" title="Models" aria-label="Models">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 2.5 13.5 5.5 8 8.5 2.5 5.5z"/><path d="M2.5 8.5 8 11.5l5.5-3M2.5 11 8 14l5.5-3"/></svg></span>
+					<span class="nx-nav-label">Models</span>
+				</button>
+				<button type="button" class="nx-nav-item" data-section="memory" data-keywords="memory facts remember rules agents.md claude.md" title="Project Memory" aria-label="Project Memory">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M4 2h5.5l3 3v8.5a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5v-11A.5.5 0 0 1 4 2z"/><path d="M9.5 2v3h3M5.5 8.5h5M5.5 11h3.5"/></svg></span>
+					<span class="nx-nav-label">Project Memory</span>
+				</button>
+			</div>
+			<div class="nx-nav-group">
+				<button type="button" class="nx-nav-item" data-section="approvals" data-keywords="execution approvals run mode agent terminal turns" title="Execution" aria-label="Execution">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M5 6.5 7 8.5 5 10.5M8.5 10.5H11"/></svg></span>
+					<span class="nx-nav-label">Execution</span>
+				</button>
+				<button type="button" class="nx-nav-item" data-section="browser" data-keywords="browser localhost simple browser" title="Browser" aria-label="Browser">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M2.5 8h11M8 2.5c1.6 1.6 2.3 3.4 2.3 5.5S9.6 11.9 8 13.5C6.4 11.9 5.7 10.1 5.7 8S6.4 4.1 8 2.5z"/></svg></span>
+					<span class="nx-nav-label">Browser</span>
+				</button>
+				<button type="button" class="nx-nav-item" data-section="connections" data-keywords="connections oauth github vercel mcp database deployment" title="Connections" aria-label="Connections">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/></svg></span>
+					<span class="nx-nav-label">Connections</span>
+				</button>
+				<button type="button" class="nx-nav-item" data-section="saas" data-keywords="saas connectors supabase stripe v0 elevenlabs tavily" title="SaaS Connectors" aria-label="SaaS Connectors">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></svg></span>
+					<span class="nx-nav-label">SaaS Connectors</span>
+				</button>
+			</div>
+			<div class="nx-nav-group">
+				<button type="button" class="nx-nav-item" data-section="analytics" data-keywords="cost analytics spend executions history" title="Cost &amp; Analytics" aria-label="Cost and Analytics">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M2.5 13.5h11M4.5 11V8M8 11V4.5M11.5 11V6.5"/></svg></span>
+					<span class="nx-nav-label">Cost &amp; Analytics</span>
+				</button>
+				<button type="button" class="nx-nav-item" data-section="preferences" data-keywords="preferences default model index theme cost estimates" title="Preferences" aria-label="Preferences">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M2.5 4.5H9M12 4.5h1.5M2.5 11.5H4M7 11.5h6.5"/><circle cx="10.5" cy="4.5" r="1.5"/><circle cx="5.5" cy="11.5" r="1.5"/></svg></span>
+					<span class="nx-nav-label">Preferences</span>
+				</button>
+				<button type="button" class="nx-nav-item" data-section="about" data-keywords="about version shortcuts a2a agent card" title="About" aria-label="About">
+					<span class="nx-nav-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 7.5V11M8 5.1v.1"/></svg></span>
+					<span class="nx-nav-label">About</span>
+				</button>
+			</div>
+			<p class="nx-nav-empty" id="nav-empty" hidden>No settings match.</p>
 		</nav>
 
 		<div class="nx-settings-detail">
 			<section class="nx-section" data-section="account" aria-labelledby="account-heading" hidden>
 				<div class="nx-section-head">
 					<h2 id="account-heading">Account</h2>
-					<button type="button" class="nx-btn nx-btn-secondary" id="account-refresh" aria-label="Refresh account">Refresh</button>
+					<button type="button" class="nx-btn nx-btn-ghost" id="account-refresh" aria-label="Refresh account">Refresh</button>
 				</div>
-				<p class="nx-hint">Nexora Cloud runs models without your own API keys, on your plan and credit. Plans, credit and devices are managed on the website.</p>
+				<p class="nx-lede">Your Nexora Cloud account in this IDE. Profile, billing and devices are managed on the website.</p>
 				<div id="account-root" class="nx-stack" aria-live="polite"><div class="nx-card nx-hint">Loading your account...</div></div>
+			</section>
+
+			<section class="nx-section" data-section="plan" aria-labelledby="plan-heading" hidden>
+				<div class="nx-section-head">
+					<h2 id="plan-heading">Plan &amp; Usage</h2>
+					<button type="button" class="nx-btn nx-btn-ghost" id="plan-refresh" aria-label="Refresh plan and usage">Refresh</button>
+				</div>
+				<div id="plan-root" class="nx-stack" aria-live="polite"><div class="nx-card nx-hint">Loading your plan...</div></div>
 			</section>
 
 			<section class="nx-section active" data-section="keys" aria-labelledby="api-keys-heading">
@@ -103,7 +134,7 @@ export function getSettingsWebviewHtml(
 			<section class="nx-section" data-section="models" aria-labelledby="models-heading" hidden>
 				<div class="nx-section-head">
 					<h2 id="models-heading">Models</h2>
-					<button type="button" class="nx-btn nx-btn-secondary" id="refresh-models" aria-label="Refresh model catalog">Refresh</button>
+					<button type="button" class="nx-btn nx-btn-ghost" id="refresh-models" aria-label="Refresh model catalog">Refresh</button>
 				</div>
 				<p class="nx-hint">Toggle which models appear in the chat picker. Auto is always available.</p>
 				<div id="models-root" class="nx-stack" aria-live="polite"></div>
@@ -112,7 +143,7 @@ export function getSettingsWebviewHtml(
 			<section class="nx-section" data-section="memory" aria-labelledby="memory-facts-heading" hidden>
 				<div class="nx-section-head">
 					<h2 id="memory-facts-heading">Project Memory</h2>
-					<button type="button" class="nx-btn nx-btn-secondary" id="facts-refresh" aria-label="Refresh project memory">Refresh</button>
+					<button type="button" class="nx-btn nx-btn-ghost" id="facts-refresh" aria-label="Refresh project memory">Refresh</button>
 				</div>
 				<p class="nx-hint">
 					Standing facts about this project. Nexora adds a fact when you say
@@ -131,7 +162,7 @@ export function getSettingsWebviewHtml(
 			<section class="nx-section" data-section="connections" aria-labelledby="connections-heading" hidden>
 				<div class="nx-section-head">
 					<h2 id="connections-heading">Connections</h2>
-					<button type="button" class="nx-btn nx-btn-secondary" id="refresh-status" aria-label="Refresh connection status">Refresh</button>
+					<button type="button" class="nx-btn nx-btn-ghost" id="refresh-status" aria-label="Refresh connection status">Refresh</button>
 				</div>
 				<div id="connections" class="nx-stack" aria-live="polite"></div>
 			</section>
@@ -139,7 +170,7 @@ export function getSettingsWebviewHtml(
 			<section class="nx-section nx-section-analytics" data-section="analytics" aria-labelledby="analytics-heading" hidden>
 				<div class="nx-section-head">
 					<h2 id="analytics-heading">Cost &amp; Analytics</h2>
-					<button type="button" class="nx-btn nx-btn-secondary" id="refresh-analytics" aria-label="Refresh analytics">Refresh</button>
+					<button type="button" class="nx-btn nx-btn-ghost" id="refresh-analytics" aria-label="Refresh analytics">Refresh</button>
 				</div>
 				<p class="nx-hint">Totals come from execution history. Memory retrievals are tracked separately and do not inflate cost.</p>
 				<div class="nx-analytics">

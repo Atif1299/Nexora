@@ -263,6 +263,11 @@ export class SettingsPanelProvider {
 		}
 		const signedIn = Boolean(await this._cloud.token());
 		void this._view.postMessage({ type: 'cloudAccount', account: account || null, signedIn });
+		// Plan & Usage: the last 30 days by day and by model, sent after the account so the page fills at once.
+		if (account) {
+			const usage = await this._cloud.usage(30);
+			void this._view?.postMessage({ type: 'cloudUsage', usage: usage || null });
+		}
 	}
 
 	private async _openDashboard(page: unknown, query: unknown): Promise<void> {
