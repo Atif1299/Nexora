@@ -18,6 +18,7 @@ import {
 	type TerminalCommandProgress
 } from './terminalCommand';
 import { executePlatformTool } from './platformTool';
+import { getDiagnosticsTool, withErrorsAfterEdit } from './diagnostics';
 import {
 	browserClickTool,
 	browserPressTool,
@@ -37,6 +38,8 @@ export interface ToolResult {
 export interface ExecuteToolCallsOptions {
 	cancellationToken?: vscode.CancellationToken;
 	onToolProgress?: (toolCallId: string, name: string, progress: TerminalCommandProgress) => void;
+	/** todo_write: the agent's current checklist, for the chat to show. */
+	onTodos?: (todos: TodoItem[]) => void;
 }
 
 export interface ExecutedToolCall {
@@ -56,15 +59,49 @@ export async function executeToolCalls(
 	options?: ExecuteToolCallsOptions
 ): Promise<ExecutedToolCall[]> {
 	const results: ExecutedToolCall[] = [];
+	let i = 0;
+	while (i < toolCalls.length) {
+		// Reads next to each other run at the same time; edits, commands and
+		// platform calls run one by one, in the order the model asked for them.
+		if (isParallelSafe(toolCalls[i])) {
+			let j = i;
+			while (j < toolCalls.length && isParallelSafe(toolCalls[j])) {
+				j++;
+			}
+			results.push(...await Promise.all(toolCalls.slice(i, j).map((tc) => executeOne(tc, workspaceRoot, options))));
+			i = j;
+		} else {
+			results.push(await executeOne(toolCalls[i], workspaceRoot, options));
+			i++;
+		}
+	}
+	return results;
+}
 
-	for (const tc of toolCalls) {
+/** Tools that only read, so several can run at once. */
+const PARALLEL_SAFE = new Set(['read_file', 'grep', 'list_files', 'get_diagnostics', 'read_command_output']);
+
+function isParallelSafe(tc: ToolCall): boolean {
+	const args = tc.arguments || {};
+	if (typeof args._platform === 'string') {
+		return false;
+	}
+	return PARALLEL_SAFE.has(tc.name) || (args._executed === true && !!args._result);
+}
+
+async function executeOne(
+	tc: ToolCall,
+	workspaceRoot: string,
+	options?: ExecuteToolCallsOptions
+): Promise<ExecutedToolCall> {
+	{
 		const args = tc.arguments;
 
 		// A connected platform's tool. The engine deliberately did not run it:
 		// the call leaves the machine, so the user approves it here first and
 		// the engine then makes the call with the credential it holds.
 		if (typeof args._platform === 'string' && typeof args._platform_tool === 'string') {
-			results.push({
+			return {
 				id: tc.id,
 				name: tc.name,
 				result: await executePlatformTool(
@@ -73,19 +110,17 @@ export async function executeToolCalls(
 					args as Record<string, unknown>,
 					args._read_only_hint === true
 				)
-			});
-			continue;
+			};
 		}
 
 		// Already run by the engine, because that is where the data lives:
-		// the memory and codebase-search tools.
+		// the memory, codebase-search and web tools.
 		if (args._executed && args._result) {
-			results.push({
+			return {
 				id: tc.id,
 				name: tc.name,
 				result: args._result as ToolResult
-			});
-			continue;
+			};
 		}
 
 		let result: ToolResult;
@@ -106,7 +141,8 @@ export async function executeToolCalls(
 						workspaceRoot,
 						args.pattern,
 						args.glob || '**/*',
-						args.max_results || 20
+						args.max_results || 50,
+						{ mode: args.output_mode, context: args.context, caseInsensitive: args.case_insensitive === true }
 					);
 					break;
 
@@ -114,37 +150,43 @@ export async function executeToolCalls(
 					result = await listFilesTool(
 						workspaceRoot,
 						args.glob || '**/*',
-						args.max_results || 50
+						args.max_results || 100
 					);
 					break;
 
+				// Each edit comes back with the editor's errors in that file (errors_after_edit).
 				case 'write_file':
-					result = await writeFileTool(
+					result = await withErrorsAfterEdit(await writeFileTool(
 						workspaceRoot,
 						args.path,
 						args.content,
 						true
-					);
+					), path.resolve(workspaceRoot, String(args.path || '')));
 					break;
 
 				case 'apply_patch':
-					result = await applyPatchTool(
+					result = await withErrorsAfterEdit(await applyPatchTool(
 						workspaceRoot,
 						args.path,
 						args.old_text,
 						args.new_text,
-						true
-					);
+						true,
+						args.replace_all === true
+					), path.resolve(workspaceRoot, String(args.path || '')));
 					break;
 
 				case 'insert_lines':
-					result = await insertLinesTool(
+					result = await withErrorsAfterEdit(await insertLinesTool(
 						workspaceRoot,
 						args.path,
 						args.line_number,
 						args.lines,
 						true
-					);
+					), path.resolve(workspaceRoot, String(args.path || '')));
+					break;
+
+				case 'get_diagnostics':
+					result = await getDiagnosticsTool(workspaceRoot, args.path, args.include_warnings !== false);
 					break;
 
 				case 'run_terminal_command':
@@ -195,6 +237,10 @@ export async function executeToolCalls(
 					result = await browserPressTool(args.key);
 					break;
 
+				case 'todo_write':
+					result = todoWriteTool(args.todos, options?.onTodos);
+					break;
+
 				default:
 					result = {
 						success: false,
@@ -208,14 +254,59 @@ export async function executeToolCalls(
 			};
 		}
 
-		results.push({
+		return {
 			id: tc.id,
 			name: tc.name,
 			result
-		});
+		};
 	}
+}
 
-	return results;
+export type TodoStatus = 'pending' | 'in_progress' | 'completed';
+export interface TodoItem {
+	content: string;
+	status: TodoStatus;
+}
+
+const TODO_STATUSES = new Set<TodoStatus>(['pending', 'in_progress', 'completed']);
+
+/**
+ * todo_write: the agent's checklist for a task of several steps. Each call
+ * sends the whole list; the chat shows it as a checklist (onTodos).
+ */
+export function todoWriteTool(raw: unknown, onTodos?: (todos: TodoItem[]) => void): ToolResult {
+	if (!Array.isArray(raw)) {
+		return { success: false, error: 'todos must be a list of { content, status }.' };
+	}
+	const todos: TodoItem[] = [];
+	for (const item of raw.slice(0, 20)) {
+		const content = typeof item?.content === 'string' ? item.content.trim().slice(0, 200) : '';
+		const status = TODO_STATUSES.has(item?.status) ? item.status as TodoStatus : 'pending';
+		if (content) {
+			todos.push({ content, status });
+		}
+	}
+	if (todos.length === 0) {
+		return { success: false, error: 'todos is empty.' };
+	}
+	onTodos?.(todos);
+	const done = todos.filter((t) => t.status === 'completed').length;
+	const current = todos.find((t) => t.status === 'in_progress');
+	const notes: string[] = [];
+	if (todos.filter((t) => t.status === 'in_progress').length > 1) {
+		notes.push('Keep only one item in_progress at a time.');
+	}
+	if (done < todos.length) {
+		// The 8 Nov test ended with "3 of 4 done" while the answer said all done.
+		notes.push('Before your final answer, call todo_write again with every finished item marked completed.');
+	}
+	return {
+		success: true,
+		data: {
+			summary: `${done} of ${todos.length} done${current ? `; now: ${current.content}` : ''}`,
+			note: notes.length ? notes.join(' ') : undefined
+		}
+	};
 }
 
 /**
