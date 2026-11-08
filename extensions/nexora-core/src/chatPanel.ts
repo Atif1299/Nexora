@@ -1740,13 +1740,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		role: string,
 		content: string,
 		mode: string,
-		rounds?: TranscriptRound[]
+		rounds?: TranscriptRound[],
+		usage?: { model: string; cost_usd: number }
 	): Promise<void> {
 		if (!sessionId || !workspaceId) {
 			return;
 		}
 		try {
-			await getBackendClient().appendTranscript(workspaceId, sessionId, role, content, mode, rounds);
+			await getBackendClient().appendTranscript(workspaceId, sessionId, role, content, mode, rounds, usage);
 		} catch {
 			// best-effort: local session persist is independent of jsonl
 		}
@@ -3854,6 +3855,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			saveCtx.sessionId = sessionId;
 			saveCtx.workspaceId = workspaceId;
 			const atContextRequest = await this._injectAtMentionContext(request);
+			const runCost = { usd: 0 };
+			const runModel = { id: '' };
 			const finalAnswer = await this._runAgentLoopWithMode(
 				atContextRequest,
 				workspaceId,
@@ -3862,7 +3865,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				'agent',
 				sessionId,
 				undefined,
-				{ roundsOut: rounds }
+				{ roundsOut: rounds, costOut: runCost, modelOut: runModel }
 			);
 
 			const sessionAfter = this._getActiveSession();
@@ -3870,7 +3873,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				sessionAfter.messages.push({ role: 'assistant', content: finalAnswer, mode: 'agent', timestamp: Date.now() });
 				await this._persistSessions();
 			}
-			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'agent', rounds.splice(0, rounds.length));
+			await this._appendTranscript(sessionId, workspaceId, 'assistant', finalAnswer, 'agent', rounds.splice(0, rounds.length),
+				{ model: runModel.id, cost_usd: runCost.usd });
 			// The answer is already on screen: the agent loop streams it as it
 			// arrives and closes the bubble with finishMessage. Posting it here
 			// as well rendered every agent reply twice. Ask mode has always
@@ -4194,7 +4198,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		mode: AgentMode,
 		sessionId?: string,
 		reply?: InFlightReply,
-		options?: { maxTurns?: number; modifiedFilesOut?: Set<string>; costOut?: { usd: number }; roundsOut?: TranscriptRound[] }
+		options?: { maxTurns?: number; modifiedFilesOut?: Set<string>; costOut?: { usd: number }; modelOut?: { id: string }; roundsOut?: TranscriptRound[] }
 	): Promise<string> {
 		const maxTurns = options?.maxTurns ?? getAgentMaxTurns();
 		let turn = 0;
@@ -4263,6 +4267,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			this._assertReply(reply);
 			if (options?.costOut && typeof response.cost_usd === 'number') {
 				options.costOut.usd += response.cost_usd;
+			}
+			if (options?.modelOut && response.model_used && response.model_used !== 'unknown') {
+				options.modelOut.id = response.model_used;
 			}
 
 			const unavailableContent = response.type === 'final'

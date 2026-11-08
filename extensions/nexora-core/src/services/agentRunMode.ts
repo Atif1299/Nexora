@@ -79,7 +79,8 @@ export function shouldConfirmTerminal(command: string): boolean {
 	return true;
 }
 
-const MAX_TURNS = [10, 15, 25, 40] as const;
+const MAX_TURNS = [10, 15, 25, 50, 100] as const;
+const DEFAULT_MAX_TURNS = 50;
 
 export type AgentUiSettings = {
 	runMode: AgentRunMode;
@@ -97,8 +98,8 @@ function agentCfg(): vscode.WorkspaceConfiguration {
 }
 
 export function getAgentMaxTurns(): number {
-	const n = agentCfg().get<number>('agent.maxTurns', 25);
-	return (MAX_TURNS as readonly number[]).includes(n) ? n : 25;
+	const n = agentCfg().get<number>('agent.maxTurns', DEFAULT_MAX_TURNS);
+	return (MAX_TURNS as readonly number[]).includes(n) ? n : DEFAULT_MAX_TURNS;
 }
 
 /** 'nexora' means the built-in loop; anything else is a local agent id. */

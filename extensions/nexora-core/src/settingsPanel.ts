@@ -557,7 +557,7 @@ export class SettingsPanelProvider {
 		const cfg = vscode.workspace.getConfiguration('nexora');
 		if (key === 'agent.maxTurns') {
 			const n = Number(value);
-			if (n === 10 || n === 15 || n === 25 || n === 40) {
+			if (n === 10 || n === 15 || n === 25 || n === 50 || n === 100) {
 				await cfg.update('agent.maxTurns', n, vscode.ConfigurationTarget.Global);
 			} else {
 				return;

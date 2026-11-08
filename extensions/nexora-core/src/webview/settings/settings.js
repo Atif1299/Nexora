@@ -113,7 +113,7 @@
 		},
 		runMode: 'auto-edit',
 		agentSettings: {
-			maxTurns: 25,
+			maxTurns: 50,
 			includeOpenEditors: true,
 			inlineDiffs: true,
 			autoFormat: true,
@@ -979,7 +979,7 @@
 		const current = modes.some(m => m.id === state.runMode) ? state.runMode : 'auto-edit';
 		const selected = modes.find(m => m.id === current) || modes[1];
 		const a = state.agentSettings || {};
-		const maxTurns = [10, 15, 25, 40].indexOf(a.maxTurns) >= 0 ? a.maxTurns : 25;
+		const maxTurns = [10, 15, 25, 50, 100].indexOf(a.maxTurns) >= 0 ? a.maxTurns : 50;
 
 		root.innerHTML = `
 			<div class="nx-card">
@@ -1003,7 +1003,8 @@
 						<option value="10">10</option>
 						<option value="15">15</option>
 						<option value="25">25</option>
-						<option value="40">40</option>
+						<option value="50">50</option>
+						<option value="100">100</option>
 					</select>
 				</div>
 			</div>

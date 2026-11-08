@@ -14,6 +14,8 @@ import { agentCwd, agentShell, backgroundCommands } from '../tools/terminalComma
 
 /** Agent turns call LiteLLM with tools; 30s aborts a healthy first completion. */
 const AGENT_TURN_TIMEOUT_MS = 120000;
+/** Room for a whole file in one write_file call; the engine caps it at the model's own limit. */
+const AGENT_MAX_TOKENS = 8192;
 
 export interface AgentMessage {
 	role: 'system' | 'user' | 'assistant' | 'tool';
@@ -173,7 +175,7 @@ export function createAgentApi(transport: Transport) {
 				workspace_path: workspacePath,
 				model,
 				mode,
-				max_tokens: 2048,
+				max_tokens: AGENT_MAX_TOKENS,
 				effort,
 				session_id: sessionId,
 				shell: currentShell(),
@@ -202,7 +204,7 @@ export function createAgentApi(transport: Transport) {
 					workspace_path: workspacePath,
 					model,
 					mode,
-					max_tokens: 2048,
+					max_tokens: AGENT_MAX_TOKENS,
 					effort,
 					session_id: sessionId,
 					shell: currentShell(),

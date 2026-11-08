@@ -329,7 +329,8 @@ export class BackendClient {
 		role: string,
 		content: string,
 		mode: string,
-		rounds?: TranscriptRound[]
+		rounds?: TranscriptRound[],
+		usage?: { model: string; cost_usd: number }
 	): Promise<void> {
 		await this.transport.post('/api/transcript/append', {
 			workspace_id: workspaceId,
@@ -337,7 +338,8 @@ export class BackendClient {
 			role,
 			content,
 			mode,
-			...(rounds && rounds.length > 0 ? { rounds } : {})
+			...(rounds && rounds.length > 0 ? { rounds } : {}),
+			...(usage ? { usage } : {})
 		});
 	}
 
