@@ -3,7 +3,6 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { getSettingsWebviewHtml } from './webview/settings';
 import { acquireEditorPanel, gateEditorPanel } from './services/editorPage';
@@ -17,7 +16,7 @@ import { oauthProviderLabel, onDidCompleteOAuth, startOAuthConnect } from './ser
 import type { SaasConnector } from './services/backend/auth';
 import type { McpServerRow } from './services/backend/mcp';
 import type { ModelCatalog } from './services/backend/models';
-import type { ProjectFactsResponse, ProjectRulesResponse } from './services/backend/memory';
+import type { ProjectFactsResponse } from './services/backend/memory';
 import { currentWorkspaceId } from './services/workspaceId';
 import {
 	getCachedCapabilities,
@@ -217,8 +216,8 @@ export class SettingsPanelProvider {
 					case 'forgetFact':
 						await this._forgetFact(msg.factId);
 						break;
-					case 'openPersonalRules':
-						await this._openPersonalRules();
+					case 'openCustomize':
+						await vscode.commands.executeCommand('nexora.openCustomize', typeof msg.section === 'string' ? msg.section : undefined);
 						break;
 				}
 			}),
@@ -417,57 +416,14 @@ export class SettingsPanelProvider {
 	 * transcript uses. With no folder open there is no project to remember
 	 * about, so the section says that rather than showing an empty list.
 	 */
-	private async _loadFacts(): Promise<ProjectFactsResponse & {
-		has_workspace: boolean;
-		rules?: ProjectRulesResponse;
-		rules_enabled?: boolean;
-	}> {
+	private async _loadFacts(): Promise<ProjectFactsResponse & { has_workspace: boolean }> {
 		const workspaceId = currentWorkspaceId();
 		const workspacePath = this._workspacePath();
-		const client = getBackendClient();
-		const rulesEnabled = vscode.workspace.getConfiguration('nexora.agent').get<boolean>('projectRules', true);
 		if (!workspaceId || !workspacePath) {
-			// No project memory without a folder, but personal rules still apply.
-			const rules = await client.getProjectRules();
-			return { workspace_id: '', facts: [], total: 0, injected: '', has_workspace: false, rules, rules_enabled: rulesEnabled };
+			return { workspace_id: '', facts: [], total: 0, injected: '', has_workspace: false };
 		}
-		const [facts, rules] = await Promise.all([
-			client.getProjectFacts(workspaceId),
-			client.getProjectRules(workspacePath)
-		]);
-		return { ...facts, has_workspace: true, rules, rules_enabled: rulesEnabled };
-	}
-
-	/**
-	 * Opens the personal rules file (NEXORA_HOME/AGENTS.md), creating it with a
-	 * short starter text the first time. The path is asked from the engine
-	 * (/api/memory/rules), never taken from the webview, so it always matches
-	 * where the engine reads it.
-	 */
-	private async _openPersonalRules(): Promise<void> {
-		const filePath = (await getBackendClient().getProjectRules()).personal_path;
-		if (!filePath || path.basename(filePath) !== 'AGENTS.md') {
-			void vscode.window.showWarningMessage('Nexora engine is not reachable, so the personal rules file could not be found.');
-			return;
-		}
-		const uri = vscode.Uri.file(filePath);
-		try {
-			await vscode.workspace.fs.stat(uri);
-		} catch {
-			const starter = [
-				'# Personal rules',
-				'',
-				'Nexora sends these to the agent in every project, before the project\'s own',
-				'AGENTS.md, CLAUDE.md and .nexora/rules/. Project rules win where they disagree.',
-				'',
-				'- Example: explain changes in plain, simple English.',
-				''
-			].join('\n');
-			await vscode.workspace.fs.createDirectory(vscode.Uri.file(path.dirname(filePath)));
-			await vscode.workspace.fs.writeFile(uri, Buffer.from(starter, 'utf8'));
-		}
-		await vscode.window.showTextDocument(uri);
-		await this._pushFacts();
+		const facts = await getBackendClient().getProjectFacts(workspaceId);
+		return { ...facts, has_workspace: true };
 	}
 
 	private async _pushFacts(): Promise<void> {

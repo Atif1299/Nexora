@@ -214,6 +214,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		this._onSessionsChanged?.();
 	}
 
+	private _pendingPrefill: { text: string; mode: string } | undefined;
+
+	/** Text for the chat box, not sent (Customize's Try); kept until the chat view is ready. */
+	public prefillInput(text: string, mode: 'agent' | 'ask' | 'chat'): void {
+		this._pendingPrefill = { text, mode };
+		if (this._hasChatSurface()) {
+			this._postToWebviews({ type: 'prefillInput', text, mode });
+			this._pendingPrefill = undefined;
+		}
+	}
+
 	private _hasChatSurface(): boolean {
 		return !!(this._view || this._editorPanel);
 	}
@@ -637,6 +648,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			void this._pushFirstRunCard();
 			this._pushComposerState();
 			void this._refreshCustomCommands();
+			if (this._pendingPrefill) {
+				this._postToWebviews({ type: 'prefillInput', ...this._pendingPrefill });
+				this._pendingPrefill = undefined;
+			}
 			return;
 		}
 		if (data.type === 'requestCustomCommands') {
@@ -1535,6 +1550,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			case 'customize':
 				await vscode.commands.executeCommand('nexora.openCustomize');
 				return;
+			case 'newCommand':
+				await vscode.commands.executeCommand('nexora.openCustomize', 'commands', true);
+				return;
 			case 'help':
 				this._postToWebviews({
 					type: 'addMessage',
@@ -1549,41 +1567,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return;
 			default:
 				return;
-		}
-	}
-
-	private async _openProjectRules(): Promise<void> {
-		const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-		if (!root) {
-			void vscode.window.showInformationMessage('Open a folder to use project rules.');
-			return;
-		}
-		for (const name of ['AGENTS.md', 'CLAUDE.md']) {
-			const uri = vscode.Uri.joinPath(root, name);
-			try {
-				await vscode.workspace.fs.stat(uri);
-				await vscode.window.showTextDocument(uri);
-				return;
-			} catch {
-				// Try the next rules file.
-			}
-		}
-		const rulesDir = vscode.Uri.joinPath(root, '.nexora', 'rules');
-		try {
-			const entries = await vscode.workspace.fs.readDirectory(rulesDir);
-			const first = entries.find(([name, type]) => type === vscode.FileType.File && name.endsWith('.md'));
-			if (first) {
-				await vscode.window.showTextDocument(vscode.Uri.joinPath(rulesDir, first[0]));
-				return;
-			}
-		} catch {
-			// No rules folder.
-		}
-		const create = 'Create AGENTS.md';
-		if (await vscode.window.showInformationMessage('This project has no rules file yet.', create) === create) {
-			const uri = vscode.Uri.joinPath(root, 'AGENTS.md');
-			await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode('# Project rules\n\nWrite how Nexora should work in this project.\n'));
-			await vscode.window.showTextDocument(uri);
 		}
 	}
 

@@ -164,6 +164,12 @@
         "icon": "$(plug)"
       },
       {
+        "command": "nexora.openCustomize",
+        "title": "Customize (Skills, Subagents, Commands, Rules)",
+        "category": "Nexora",
+        "icon": "$(settings-gear)"
+      },
+      {
         "command": "nexora.refreshPlatforms",
         "title": "Refresh Platforms",
         "category": "Nexora",

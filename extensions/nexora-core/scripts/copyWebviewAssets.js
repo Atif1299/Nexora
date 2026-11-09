@@ -60,6 +60,9 @@ function main() {
 
 	// Platforms editor page assets
 	copyWebviewFolder(root, 'platforms', ['platforms.css', 'platforms.js']);
+
+	// Customize editor page assets (Phase 3)
+	copyWebviewFolder(root, 'customize', ['customize.css', 'model.js', 'customize.js']);
 }
 
 main();

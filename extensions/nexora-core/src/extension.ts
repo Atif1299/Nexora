@@ -11,6 +11,7 @@ import { TaskTreeProvider } from './taskTreeProvider';
 import { WorkflowPanelProvider, workflowPlanFromSnapshot } from './workflowPanel';
 import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { SettingsPanelProvider } from './settingsPanel';
+import { CustomizePanelProvider } from './customizePanel';
 import { WorkspaceIndexService } from './services/workspaceIndex';
 import { CloudAccount } from './services/cloudAccount';
 import { refreshCapabilities } from './services/backend/capabilities';
@@ -360,6 +361,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	const templatesProvider = new TemplatesPanelProvider(context.extensionUri);
 	const timelineProvider = new TimelinePanelProvider(context.extensionUri);
 	const platformProvider = new PlatformBrowserProvider(context.extensionUri);
+	const customizeProvider = new CustomizePanelProvider(context.extensionUri);
 
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
@@ -509,6 +511,15 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.openChat', async () => {
 			await vscode.commands.executeCommand('nexora.chatPanel.focus');
 			await setChatFocused(true);
+		}),
+		// Customize (Phase 3): skills, subagents, commands and rules; 'new' opens the section's New form.
+		vscode.commands.registerCommand('nexora.openCustomize', async (section?: unknown, startNew?: unknown) => {
+			await customizeProvider.open(typeof section === 'string' ? section : undefined, startNew === true);
+		}),
+		// Puts text in the chat box (Customize's Try) without sending it.
+		vscode.commands.registerCommand('nexora.prefillChat', async (text?: unknown, mode?: unknown) => {
+			await vscode.commands.executeCommand('nexora.chatPanel.focus');
+			chatProvider.prefillInput(typeof text === 'string' ? text : '', mode === 'ask' || mode === 'chat' ? mode : 'agent');
 		}),
 		vscode.commands.registerCommand('nexora.openChatInEditor', async () => {
 			await chatProvider.openInEditor();

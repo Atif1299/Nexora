@@ -422,6 +422,9 @@
 		customCommands.filter(function (c) { return c.name.indexOf(q) === 0; }).forEach(function (c) {
 			items.push({ label: '/' + c.name, desc: c.description || 'Your command', hint: c.argument_hint || '', pick: function () { insertCustomCommand(c); } });
 		});
+		if (q === '') {
+			items.push({ label: 'New command...', desc: 'Write your own /command in Customize', hint: '', pick: function () { host.input.value = ''; closeMenu(); host.post({ type: 'runSlash', command: 'newCommand', rest: '' }); } });
+		}
 		if (!items.length) {
 			items.push({ note: 'No matching command' });
 		}

@@ -3148,6 +3148,17 @@
 				}
 				break;
 
+			case 'prefillInput':
+				if (data.mode && modeSelect.value !== data.mode) {
+					modeSelect.value = data.mode;
+					updateModeUI();
+				}
+				input.value = String(data.text || '');
+				input.focus();
+				input.setSelectionRange(input.value.length, input.value.length);
+				input.dispatchEvent(new Event('input', { bubbles: true }));
+				break;
+
 			case 'customCommands':
 				window.NexoraComposer.setCustomCommands(data.commands);
 				break;
