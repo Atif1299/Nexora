@@ -3429,6 +3429,71 @@ textarea.nx-stepInput
 	color: var(--vscode-errorForeground);
 }
 
+/* Subagent cards (delegate): open while running, folded when done. */
+.nx-subagentCard
+{
+	margin: 6px 0;
+	padding: 6px 10px;
+	border: 1px solid var(--nx-border);
+	border-left: 3px solid var(--vscode-focusBorder, var(--nx-primary));
+	border-radius: var(--nx-radius-1);
+	background: var(--nx-surface-2);
+	font-size: 12px;
+}
+
+.nx-subagentCard[data-state="failed"]
+{
+	border-left-color: var(--vscode-errorForeground);
+}
+
+.nx-subagentCard[data-state="stopped"]
+{
+	border-left-color: var(--nx-muted);
+}
+
+.nx-subagentHead
+{
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.nx-subagentTask
+{
+	margin: 4px 0;
+	color: var(--nx-muted);
+}
+
+.nx-subagentTool
+{
+	display: flex;
+	gap: 6px;
+	padding: 1px 0;
+}
+
+.nx-subagentMark
+{
+	flex: 0 0 22px;
+	color: var(--nx-muted);
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.nx-subagentToolFailed
+{
+	color: var(--vscode-errorForeground);
+}
+
+.nx-subagentAnswer:not(:empty)
+{
+	margin-top: 6px;
+	padding-top: 6px;
+	border-top: 1px solid var(--nx-border);
+}
+
+.nx-subagentError
+{
+	color: var(--vscode-errorForeground);
+}
+
 /* Agent to-do list (todo_write): one card per request, updated in place. */
 .nx-todoCard
 {

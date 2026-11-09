@@ -1302,6 +1302,56 @@
 	/** The agent's to-do list for the current request (todo_write); one card, updated in place. */
 	let todoCard = null;
 
+	/** Subagents started with delegate in the current request: one folding card each, by id. */
+	let subagentCards = {};
+
+	function renderSubagent(data) {
+		if (!messages || !data || !data.id) {
+			return;
+		}
+		let card = subagentCards[data.id];
+		if (!card || !card.isConnected) {
+			card = document.createElement('details');
+			card.className = 'nx-subagentCard';
+			card.open = true;
+			card.innerHTML = '<summary class="nx-subagentHead"></summary><div class="nx-subagentTask"></div><div class="nx-subagentTools" role="list"></div><div class="nx-subagentAnswer"></div>';
+			if (lastLoadingMessage && lastLoadingMessage.parentNode === messages) {
+				messages.insertBefore(card, lastLoadingMessage);
+			} else {
+				messages.appendChild(card);
+			}
+			subagentCards[data.id] = card;
+		}
+		const state = String(data.state || 'running');
+		const wasRunning = card.getAttribute('data-state') === 'running';
+		card.setAttribute('data-state', state);
+		card.querySelector('.nx-subagentHead').textContent = String(data.title || ('Subagent ' + data.agent));
+		const task = String(data.task || '');
+		const taskEl = card.querySelector('.nx-subagentTask');
+		taskEl.textContent = task.length > 160 ? task.slice(0, 157) + '...' : task;
+		taskEl.title = task;
+		const items = Array.isArray(data.activity) ? data.activity : [];
+		card.querySelector('.nx-subagentTools').innerHTML = items.map(function (a) {
+			const failed = a.status === 'failed';
+			const mark = failed ? 'x' : (a.done ? 'ok' : '...');
+			return '<div class="nx-subagentTool' + (failed ? ' nx-subagentToolFailed' : '') + '" role="listitem"><span class="nx-subagentMark">' + mark + '</span>' + escapeHtml(String(a.label || '')) + '</div>';
+		}).join('');
+		const answerEl = card.querySelector('.nx-subagentAnswer');
+		if (data.error) {
+			answerEl.textContent = String(data.error);
+			answerEl.className = 'nx-subagentAnswer nx-subagentError';
+		} else if (data.answer) {
+			answerEl.innerHTML = formatContent(String(data.answer));
+			answerEl.className = 'nx-subagentAnswer';
+		} else {
+			answerEl.textContent = '';
+		}
+		// Open while it works; fold once when it ends, so the main answer stays in view.
+		if (wasRunning && state !== 'running') {
+			card.open = false;
+		}
+	}
+
 	function renderTodos(todos) {
 		if (!messages || !Array.isArray(todos) || todos.length === 0) {
 			return;
@@ -2495,6 +2545,7 @@
 		agentOfferText = mode === 'chat' ? text : '';
 		todoCard = null;
 		todoItems = [];
+		subagentCards = {};
 
 		if (mode === 'chat' || mode === 'ask' || mode === 'agent') {
 			setReplyInFlight(true);
@@ -2954,6 +3005,10 @@
 
 			case 'todoUpdate':
 				renderTodos(data.todos);
+				break;
+
+			case 'subagentUpdate':
+				renderSubagent(data);
 				break;
 
 			case 'generationRunning':

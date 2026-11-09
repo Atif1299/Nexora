@@ -18,6 +18,7 @@ import {
 	type TerminalCommandProgress
 } from './terminalCommand';
 import { executePlatformTool } from './platformTool';
+import { delegateCall, runLimited, SUBAGENT_MAX_PARALLEL, type DelegateCall } from '../subagents';
 import { getDiagnosticsTool, withErrorsAfterEdit } from './diagnostics';
 import {
 	browserClickTool,
@@ -40,6 +41,8 @@ export interface ExecuteToolCallsOptions {
 	onToolProgress?: (toolCallId: string, name: string, progress: TerminalCommandProgress) => void;
 	/** todo_write: the agent's current checklist, for the chat to show. */
 	onTodos?: (todos: TodoItem[]) => void;
+	/** delegate: runs a subagent and returns its answer; absent inside a subagent (depth 1). */
+	runSubagent?: (call: DelegateCall) => Promise<ToolResult>;
 }
 
 export interface ExecutedToolCall {
@@ -63,7 +66,15 @@ export async function executeToolCalls(
 	while (i < toolCalls.length) {
 		// Reads next to each other run at the same time; edits, commands and
 		// platform calls run one by one, in the order the model asked for them.
-		if (isParallelSafe(toolCalls[i])) {
+		// Subagents next to each other run together too, at most 3 at once.
+		if (isSubagentCall(toolCalls[i])) {
+			let j = i;
+			while (j < toolCalls.length && isSubagentCall(toolCalls[j])) {
+				j++;
+			}
+			results.push(...await runLimited(toolCalls.slice(i, j), SUBAGENT_MAX_PARALLEL, (tc) => executeOne(tc, workspaceRoot, options)));
+			i = j;
+		} else if (isParallelSafe(toolCalls[i])) {
 			let j = i;
 			while (j < toolCalls.length && isParallelSafe(toolCalls[j])) {
 				j++;
@@ -76,6 +87,11 @@ export async function executeToolCalls(
 		}
 	}
 	return results;
+}
+
+/** A delegate call the engine left for the IDE (an unknown agent comes back already answered). */
+function isSubagentCall(tc: ToolCall): boolean {
+	return tc.name === 'delegate' && !(tc.arguments || {})._executed;
 }
 
 /** Tools that only read, so several can run at once. */
@@ -121,6 +137,15 @@ async function executeOne(
 				name: tc.name,
 				result: args._result as ToolResult
 			};
+		}
+
+		// A subagent: a second agent loop run by the chat panel, which shows it as a card.
+		if (tc.name === 'delegate') {
+			const call = delegateCall(tc);
+			if (!call || !options?.runSubagent) {
+				return { id: tc.id, name: tc.name, result: { success: false, error: 'Subagents are not available here.' } };
+			}
+			return { id: tc.id, name: tc.name, result: await options.runSubagent(call) };
 		}
 
 		let result: ToolResult;

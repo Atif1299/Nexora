@@ -12,6 +12,8 @@ import { getChatWebviewHtml } from './webview/chat';
 import type { ChatActivityItem, ChatInitialState, ContextTag, RunMode, WebviewInboundMessage } from './webview/chat/types';
 import { getOrchestrationWebSocket, type WebSocketMessage } from './services/websocketClient';
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
+import type { ToolResult } from './services/tools/executor';
+import { subagentCardTitle, subagentResult, SUBAGENT_MAX_TURNS, type DelegateCall, type SubagentState } from './services/subagents';
 import { openUrlFromChat } from './services/browser';
 import { resetAgentCwd, type TerminalCommandProgress } from './services/tools/terminalCommand';
 import { LiveEditView } from './services/tools/liveEdit';
@@ -4063,6 +4065,86 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	 * Run the agent loop with specified mode.
 	 * mode='ask' for read-only, mode='agent' for read+write.
 	 */
+	/**
+	 * Runs one delegate call as a subagent: a second agent loop with its own messages,
+	 * whose turns carry the agent's name so the engine uses its prompt, tools and model.
+	 * Shown as a card (subagentUpdate) with its tools and cost; its edits count as the
+	 * main run's edits and its cost in the turn. Stop cancels it through the shared reply.
+	 */
+	private async _runSubagent(
+		call: DelegateCall,
+		ctx: {
+			workspaceId: string;
+			workspacePath: string;
+			mode: AgentMode;
+			reply?: InFlightReply;
+			model: string | undefined;
+			modifiedFiles: Set<string>;
+			costOut?: { usd: number };
+		}
+	): Promise<ToolResult> {
+		const cost = { usd: 0 };
+		const files = new Set<string>();
+		let activity: ChatActivityItem[] = [];
+		let turns = 0;
+		const post = (state: SubagentState, answer?: string, error?: string) => {
+			const tools = activity.filter((a) => a.id !== 'agent');
+			this._postToWebviews({
+				type: 'subagentUpdate',
+				id: 'sub-' + call.id,
+				agent: call.agent,
+				task: call.task,
+				state,
+				title: subagentCardTitle(call.agent, state, tools.length, cost.usd),
+				activity: tools,
+				answer,
+				error
+			});
+		};
+		post('running');
+		try {
+			const answer = await this._runAgentLoopWithMode(
+				call.task,
+				ctx.workspaceId,
+				ctx.workspacePath,
+				call.model || ctx.model,
+				ctx.mode,
+				undefined,
+				ctx.reply,
+				{
+					maxTurns: Math.min(getAgentMaxTurns(), SUBAGENT_MAX_TURNS),
+					modifiedFilesOut: files,
+					costOut: cost,
+					subagent: {
+						name: call.agent,
+						onActivity: (items) => {
+							activity = items.map((a) => ({ ...a }));
+							turns = Math.max(turns, items.find((a) => a.id === 'agent')?.turn || 0);
+							post('running');
+						}
+					}
+				}
+			);
+			post('done', answer);
+			return subagentResult({ agent: call.agent, answer, turns, costUsd: cost.usd, files: Array.from(files) });
+		} catch (error) {
+			const stopped = error instanceof RequestCancelledError || !!ctx.reply?.isCancelled();
+			const message = error instanceof Error ? error.message : String(error);
+			post(stopped ? 'stopped' : 'failed', undefined, stopped ? undefined : message);
+			if (stopped) {
+				throw error;
+			}
+			return { success: false, error: `Subagent ${call.agent} failed: ${message}` };
+		} finally {
+			for (const f of files) {
+				ctx.modifiedFiles.add(f);
+			}
+			if (ctx.costOut) {
+				ctx.costOut.usd += cost.usd;
+			}
+		}
+	}
+
 	private async _runAgentLoopWithMode(
 		userMessage: string,
 		workspaceId: string,
@@ -4193,6 +4275,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				const executed = await executeToolCalls(response.tool_calls, workspacePath, {
 					cancellationToken: this._cancellationTokenFromReply(reply),
 					onTodos: (todos) => this._postToWebviews({ type: 'todoUpdate', todos }),
+					// Depth 1: a subagent cannot start another one.
+					runSubagent: subagent ? undefined : (call) => this._runSubagent(call, {
+						workspaceId, workspacePath, mode, reply, model: activeModel, modifiedFiles, costOut: options?.costOut
+					}),
 					onToolProgress: (toolCallId, name, progress) => {
 						if (name !== 'run_terminal_command') {
 							return;
