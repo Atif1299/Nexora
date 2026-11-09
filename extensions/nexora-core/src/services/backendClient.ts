@@ -138,8 +138,8 @@ export class BackendClient {
 		return createPlatformsApi(this.transport).getServerTools(server);
 	}
 
-	async setDisabledTools(server: string, disabled: string[]): Promise<ServerTools | undefined> {
-		return createPlatformsApi(this.transport).setDisabledTools(server, disabled);
+	async setToolEnabled(server: string, tool: string, enabled: boolean): Promise<ServerTools | undefined> {
+		return createPlatformsApi(this.transport).setToolEnabled(server, tool, enabled);
 	}
 
 	async searchPlatforms(query: string): Promise<any[]> {

@@ -56,9 +56,15 @@ export function createPlatformsApi(transport: Transport) {
 			}
 		},
 
-		/** Replace a server's switched-off tools; returns the new tool list. */
-		setDisabledTools: async (server: string, disabled: string[]): Promise<ServerTools | undefined> => {
-			const response = await transport.put(`/api/capabilities/tools/${encodeURIComponent(server)}`, { disabled });
+		/**
+		 * Turn one tool on or off. The engine changes only that tool, under a lock,
+		 * so a slow or failed read can never rewrite the other switches. Throws on failure.
+		 */
+		setToolEnabled: async (server: string, tool: string, enabled: boolean): Promise<ServerTools | undefined> => {
+			const response = await transport.patch(
+				`/api/capabilities/tools/${encodeURIComponent(server)}/${encodeURIComponent(tool)}`,
+				{ enabled }
+			);
 			return response && Array.isArray(response.tools) ? response as ServerTools : undefined;
 		},
 

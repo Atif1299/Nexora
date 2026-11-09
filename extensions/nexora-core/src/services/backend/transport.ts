@@ -39,6 +39,7 @@ export type Transport = {
 	post: (endpoint: string, data: any, timeoutMs?: number, signal?: AbortSignal) => Promise<any>;
 	postStream: (endpoint: string, data: any, signal?: AbortSignal, timeoutMs?: number) => AsyncIterable<SSEEvent>;
 	put: (endpoint: string, data?: any) => Promise<any>;
+	patch: (endpoint: string, data?: any) => Promise<any>;
 	delete: (endpoint: string) => Promise<any>;
 };
 
@@ -301,6 +302,21 @@ export function createTransport(
 
 			const response = await fetchWithTimeout(url, {
 				method: 'PUT',
+				headers: await buildHeaders(),
+				body: data ? JSON.stringify(data) : undefined
+			}, config.timeout);
+
+			if (!response.ok) {
+				throw new Error(`HTTP ${response.status}`);
+			}
+
+			return await response.json();
+		},
+		patch: async (endpoint: string, data?: any) => {
+			const url = `${config.baseUrl}${endpoint}`;
+
+			const response = await fetchWithTimeout(url, {
+				method: 'PATCH',
 				headers: await buildHeaders(),
 				body: data ? JSON.stringify(data) : undefined
 			}, config.timeout);

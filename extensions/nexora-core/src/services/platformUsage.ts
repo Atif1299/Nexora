@@ -54,11 +54,6 @@ export interface ServerTools {
 	tools: ServerTool[];
 }
 
-/** The switched-off tool names after turning one tool on or off. */
-export function disabledAfterToggle(tools: ServerTool[], tool: string, enabled: boolean): string[] {
-	const off = tools.filter(t => !t.enabled).map(t => t.name).filter(name => name !== tool);
-	return enabled ? off : off.concat([tool]);
-}
 
 const LABELS: Record<string, string> = {
 	chat: 'Chat',

@@ -41,7 +41,7 @@ import {
 	type LocalAgentProbe
 } from './services/agents/localAgents';
 import type { SaasConnector } from './services/backend/auth';
-import { disabledAfterToggle, section, usageFor, type PlatformUsage, type ServerTool } from './services/platformUsage';
+import { section, usageFor, type PlatformUsage, type ServerTool } from './services/platformUsage';
 import { executePlatformTool } from './services/tools/platformTool';
 
 /**
@@ -372,10 +372,8 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		if (!server) {
 			return;
 		}
-		const client = getBackendClient();
 		try {
-			const current = await client.getServerTools(server);
-			await client.setDisabledTools(server, disabledAfterToggle(current?.tools || [], tool, enabled));
+			await getBackendClient().setToolEnabled(server, tool, enabled);
 		} catch {
 			void getNotificationService().showError(`Could not change ${tool}. Is the Nexora engine running?`);
 		}
