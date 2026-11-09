@@ -322,6 +322,192 @@ h1
 	outline-offset: 2px;
 }
 
+/* ---------- your MCP servers ---------- */
+
+.nx-mine-head
+{
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 2px;
+	margin-bottom: 4px;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.nx-mine-head .nx-group-name
+{
+	flex: 0 1 auto;
+}
+
+.nx-mine-head .nx-count
+{
+	flex: 1;
+}
+
+.nx-icon-text
+{
+	border: 1px solid var(--s-card-border);
+	border-radius: 6px;
+	background: var(--s-hover);
+	color: var(--nx-fg);
+	font-family: inherit;
+	font-size: 11.5px;
+	padding: 2px 8px;
+	cursor: pointer;
+}
+
+.nx-icon-text:hover
+{
+	background: var(--s-selected);
+}
+
+.nx-mine-empty
+{
+	border: 1px dashed var(--s-card-border);
+	border-radius: 9px;
+	padding: 12px;
+	line-height: 1.5;
+}
+
+.nx-meta-error
+{
+	color: var(--nx-err);
+}
+
+.nx-form
+{
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 12px;
+	margin-bottom: 8px;
+	border: 1px solid var(--s-card-border);
+	border-radius: 9px;
+	background: var(--s-card);
+}
+
+.nx-form-title
+{
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.nx-field
+{
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 12px;
+}
+
+.nx-field > span
+{
+	color: var(--nx-muted);
+}
+
+.nx-field small
+{
+	color: var(--nx-muted);
+	font-size: 11px;
+	line-height: 1.4;
+}
+
+.nx-field input[type="text"],
+.nx-field textarea,
+.nx-field select
+{
+	width: 100%;
+	padding: 5px 8px;
+	border: 1px solid var(--s-card-border);
+	border-radius: 6px;
+	background: var(--vscode-input-background, var(--nx-bg));
+	color: var(--nx-fg);
+	font-family: var(--vscode-editor-font-family);
+	font-size: 12px;
+	outline: none;
+	resize: vertical;
+}
+
+.nx-field input:focus,
+.nx-field textarea:focus,
+.nx-field select:focus
+{
+	border-color: var(--nx-focus);
+}
+
+.nx-radios
+{
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	color: var(--nx-fg);
+}
+
+.nx-form-errors
+{
+	padding: 7px 9px;
+	border-radius: 6px;
+	font-size: 12px;
+	color: var(--nx-fg);
+	background: color-mix(in srgb, var(--nx-err) 12%, var(--nx-bg));
+	border: 1px solid color-mix(in srgb, var(--nx-err) 40%, transparent);
+}
+
+.nx-form-actions
+{
+	display: flex;
+	gap: 6px;
+}
+
+.nx-trust
+{
+	margin-top: 2px;
+}
+
+.nx-import-source
+{
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.nx-import-source .nx-count
+{
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 60%;
+}
+
+.nx-import-row
+{
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 8px;
+	align-items: start;
+	padding: 8px 12px;
+	cursor: pointer;
+}
+
+.nx-import-row + .nx-import-row
+{
+	border-top: 1px solid var(--s-line);
+}
+
+.nx-import-row.is-added
+{
+	opacity: 0.6;
+	cursor: default;
+}
+
+.nx-import-main
+{
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
 /* ---------- filter ---------- */
 
 .nx-tools

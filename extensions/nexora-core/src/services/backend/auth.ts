@@ -22,6 +22,7 @@ export interface AuthStatus {
 	v0_configured?: boolean;
 	elevenlabs_configured?: boolean;
 	tavily_configured?: boolean;
+	perplexity_configured?: boolean;
 	supabase_enabled?: boolean;
 	stripe_enabled?: boolean;
 	v0_enabled?: boolean;

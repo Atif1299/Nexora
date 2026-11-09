@@ -42,6 +42,7 @@ import {
 } from './services/agents/localAgents';
 import type { SaasConnector } from './services/backend/auth';
 import { section, usageFor, type PlatformUsage, type ServerTool } from './services/platformUsage';
+import { validateForm, type MyServer, type MyServers, type ServerForm } from './services/mcpServers';
 import { executePlatformTool } from './services/tools/platformTool';
 
 /**
@@ -141,9 +142,15 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	private localAgents: Record<string, LocalAgentProbe> = {};
 	/** The engine's usage report, or undefined when it has none. */
 	private usage: Record<string, PlatformUsage> | undefined;
+	/** Your own MCP servers, or undefined when the engine has no such route (older build). */
+	private myServers: MyServers | undefined;
 
 	constructor(extensionUri: vscode.Uri) {
 		this._extensionUri = extensionUri;
+		// Another folder means another .nexora/mcp.json.
+		vscode.workspace.onDidChangeWorkspaceFolders(() => {
+			void this.loadPlatforms();
+		});
 		getSettingsService().onDidChangeApiKeys(() => {
 			void this._syncLlmKeys().then(() => this._pushState());
 		});
@@ -222,6 +229,8 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			await this._syncMcpConnections();
 			await this._syncLocalAgents();
 			this.usage = await client.getPlatformUsage();
+			await client.setMcpWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+			this.myServers = await client.getMyServers();
 			const platformsData = await client.getPlatforms() as PlatformApiRow[];
 			if (!platformsData.some(p => (p.id || '').toLowerCase() === OPENROUTER_ROW.id)) {
 				platformsData.push(OPENROUTER_ROW);
@@ -268,7 +277,14 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		view.webview.html = getPlatformsWebviewHtml(view.webview, this._extensionUri);
 
 		this._disposables = [
-			view.webview.onDidReceiveMessage(async (msg: { type?: string; id?: string; tool?: string; enabled?: boolean }) => {
+			view.webview.onDidReceiveMessage(async (msg: {
+				type?: string; id?: string; tool?: string; enabled?: boolean;
+				form?: ServerForm; edit?: { scope: string; name: string } | null; scope?: string; name?: string;
+				items?: { source: string; name: string; scope: string }[]; trust?: string;
+			}) => {
+				if (await this._handleServerMessage(msg)) {
+					return;
+				}
 				if (msg?.type === 'details' && msg.id) {
 					await this._postDetails(msg.id);
 					return;
@@ -339,7 +355,8 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 				embeddingInProgress: this.embeddingInProgress,
 				backendConnected: this.backendConnected,
 				categories: this._categoriesPayload(),
-				discover: this.platforms.filter(p => section(p) === 'discover')
+				discover: this.platforms.filter(p => section(p) === 'discover'),
+				myServers: this.myServers || null
 			}
 		});
 	}
@@ -349,16 +366,18 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	 * their effects and switches. The webview already holds the row itself.
 	 */
 	private async _postDetails(platformId: string): Promise<void> {
-		const row = this._row(platformId);
-		if (!row || !this._view) {
+		if (!this._view) {
 			return;
 		}
-		const server = row.mcpServerId;
+		const server = this._serverIdFor(platformId);
+		if (!this._row(platformId) && !server) {
+			return;
+		}
 		const found = server ? await getBackendClient().getServerTools(server) : undefined;
 		void this._view.webview.postMessage({
 			type: 'platformDetail',
 			detail: {
-				id: row.id,
+				id: platformId,
 				server: server || null,
 				connected: !!found?.connected,
 				tools: found?.tools || [],
@@ -368,7 +387,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async _setToolEnabled(platformId: string, tool: string, enabled: boolean): Promise<void> {
-		const server = this._row(platformId)?.mcpServerId;
+		const server = this._serverIdFor(platformId);
 		if (!server) {
 			return;
 		}
@@ -386,7 +405,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	 * through the same approval as chat, and show the result as JSON.
 	 */
 	private async _tryTool(platformId: string, tool: string): Promise<void> {
-		const server = this._row(platformId)?.mcpServerId;
+		const server = this._serverIdFor(platformId);
 		if (!server) {
 			return;
 		}
@@ -409,6 +428,117 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		const result = await executePlatformTool(server, tool, args, info.effect === 'read');
 		const doc = await vscode.workspace.openTextDocument({ language: 'json', content: JSON.stringify(result, null, 2) });
 		await vscode.window.showTextDocument(doc, { preview: true });
+	}
+
+	/** The MCP server behind a platform row, or the id itself for one of your own servers. */
+	private _serverIdFor(platformId: string): string | undefined {
+		return this._row(platformId)?.mcpServerId || this._myServer(platformId)?.id;
+	}
+
+	private _myServer(id: string | undefined): MyServer | undefined {
+		return id ? this.myServers?.servers.find(s => s.id === id) : undefined;
+	}
+
+	private async _refreshMyServers(): Promise<void> {
+		this.myServers = await getBackendClient().getMyServers();
+		this._pushState();
+	}
+
+	private _post(message: Record<string, unknown>): void {
+		void this._view?.webview.postMessage(message);
+	}
+
+	/**
+	 * Your own MCP servers: add, edit, remove, turn on/off, approve, connect and import.
+	 * The form is checked here (services/mcpServers.ts), so the webview holds no rules.
+	 * Returns true when the message was one of these.
+	 */
+	private async _handleServerMessage(msg: {
+		type?: string; id?: string; form?: ServerForm; edit?: { scope: string; name: string } | null;
+		scope?: string; name?: string; enabled?: boolean; items?: { source: string; name: string; scope: string }[];
+	}): Promise<boolean> {
+		const client = getBackendClient();
+		const notify = getNotificationService();
+		try {
+			switch (msg?.type) {
+				case 'saveServer': {
+					const checked = msg.form ? validateForm(msg.form) : { errors: ['The form is empty.'] };
+					if (!checked.body) {
+						this._post({ type: 'serverFormResult', errors: checked.errors });
+						return true;
+					}
+					const saved = msg.edit
+						? await client.editServer(msg.edit.scope, msg.edit.name, checked.body)
+						: await client.addServer(checked.body);
+					this._post({ type: 'serverFormResult', errors: [], saved: saved.id });
+					void notify.showSuccess(`${saved.name} saved`);
+					await this._refreshMyServers();
+					return true;
+				}
+				case 'removeServer': {
+					if (!msg.scope || !msg.name) {
+						return true;
+					}
+					const ok = await vscode.window.showWarningMessage(
+						`Remove the MCP server ${msg.name}? Its saved keys are deleted too.`, { modal: true }, 'Remove');
+					if (ok === 'Remove') {
+						await client.removeServer(msg.scope, msg.name);
+						this._post({ type: 'serverRemoved', name: msg.name });
+						await this._refreshMyServers();
+					}
+					return true;
+				}
+				case 'enableServer':
+					if (msg.scope && msg.name) {
+						await client.enableServer(msg.scope, msg.name, msg.enabled !== false);
+						await this._refreshMyServers();
+					}
+					return true;
+				case 'approveServer': {
+					const server = this.myServers?.servers.find(s => s.scope === 'project' && s.name === msg.name);
+					if (!server) {
+						return true;
+					}
+					const what = server.url || [server.command || ''].concat(server.args).join(' ');
+					const ok = await vscode.window.showWarningMessage(
+						`This project's .nexora/mcp.json wants to run an MCP server. Only allow it if you trust this project.`,
+						{ modal: true, detail: `${server.name}: ${what}` }, 'Allow');
+					if (ok === 'Allow') {
+						await client.approveServer(server.name);
+						await this._refreshMyServers();
+					}
+					return true;
+				}
+				case 'connectServer':
+					if (msg.id) {
+						await connectMcpServer(msg.id);
+						await this._refreshMyServers();
+					}
+					return true;
+				case 'importPreview': {
+					const sources = await client.getImportSources();
+					this._post({ type: 'importSources', sources: sources || [], workspace: this.myServers?.workspace || null });
+					return true;
+				}
+				case 'importApply': {
+					const added = await client.applyImport(msg.items || []);
+					this._post({ type: 'importDone', count: added.length });
+					void notify.showSuccess(`Imported ${added.length} MCP server${added.length === 1 ? '' : 's'}`);
+					await this._refreshMyServers();
+					return true;
+				}
+				default:
+					return false;
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (msg?.type === 'saveServer') {
+				this._post({ type: 'serverFormResult', errors: [message] });
+			} else {
+				void notify.showError(message);
+			}
+			return true;
+		}
 	}
 
 	private async _syncUsage(): Promise<void> {

@@ -27,7 +27,7 @@ import {
 } from './services/backend/capabilities';
 
 const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'gemini', 'openrouter', 'groq', 'mistral'];
-const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0', 'elevenlabs', 'tavily'] as const;
+const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0', 'elevenlabs', 'tavily', 'perplexity'] as const;
 const OAUTH_APP_PROVIDERS = [
 	'github_client_id',
 	'github_client_secret',
@@ -373,6 +373,7 @@ export class SettingsPanelProvider {
 		configured['v0'] = !!authStatus.v0_configured;
 		configured['elevenlabs'] = !!authStatus.elevenlabs_configured;
 		configured['tavily'] = !!authStatus.tavily_configured;
+		configured['perplexity'] = !!authStatus.perplexity_configured;
 		configured['github_client_id'] = !!authStatus.github_oauth_configured;
 		configured['github_client_secret'] = !!authStatus.github_oauth_configured;
 		configured['vercel_client_id'] = !!authStatus.vercel_oauth_configured;
@@ -832,6 +833,7 @@ export class SettingsPanelProvider {
 			'v0': 'V0_API_KEY',
 			'elevenlabs': 'ELEVENLABS_API_KEY',
 			'tavily': 'TAVILY_API_KEY',
+			'perplexity': 'PERPLEXITY_API_KEY',
 			'github_client_id': 'GITHUB_CLIENT_ID',
 			'github_client_secret': 'GITHUB_CLIENT_SECRET',
 			'vercel_client_id': 'VERCEL_CLIENT_ID',

@@ -25,7 +25,8 @@
 	function escapeHtml(text) {
 		const div = document.createElement('div');
 		div.textContent = text === null || text === undefined ? '' : String(text);
-		return div.innerHTML;
+		// Safe inside attributes too: names and descriptions come from MCP servers and config files.
+		return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 	}
 
 	function announce(msg) {
@@ -67,6 +68,9 @@
 	}
 
 	function statusLabel(platform) {
+		if (platform.custom) {
+			return SERVER_STATE[platform.custom.state] || platform.custom.state;
+		}
 		if (platform.discover) {
 			return 'Not usable yet';
 		}
@@ -103,6 +107,9 @@
 	}
 
 	function actionButtons(platform) {
+		if (platform.custom) {
+			return customActions(platform.custom);
+		}
 		if (platform.discover) {
 			return '';
 		}
@@ -243,6 +250,10 @@
 		if (!lastData) {
 			return null;
 		}
+		const server = findServer(id);
+		if (server) {
+			return serverAsRow(server);
+		}
 		for (const group of lastData.categories || []) {
 			for (const p of group.platforms || []) {
 				if (p.id === id) {
@@ -279,6 +290,12 @@
 		const root = document.getElementById('platforms-root');
 		const el = document.getElementById('platform-detail');
 		if (!root || !el) {
+			return;
+		}
+		if (detail.id === IMPORT_ID && ui.importing) {
+			root.classList.add('is-detail');
+			el.hidden = false;
+			el.innerHTML = importHtml();
 			return;
 		}
 		const row = detail.id ? findRow(detail.id) : null;
@@ -332,9 +349,260 @@
 	}
 
 	function closeDetail() {
+		ui.importing = null;
 		detail.id = '';
 		detail.data = null;
 		renderDetail();
+	}
+
+
+	// --- Your MCP servers -------------------------------------------------------------------
+
+	const SERVER_STATE = { connected: 'Connected', available: 'Not connected', needs_approval: 'Needs approval', disabled: 'Off', error: 'Error' };
+	const SCOPE_LABEL = { user: 'You', project: 'Project', bundled: 'Built in' };
+	const TRUST_LABEL = { '': 'Use my approval setting', ask: 'Ask before every call', 'trust-read-only': 'Run read-only calls without asking', 'never-ask': 'Never ask' };
+	const IMPORT_ID = '__import__';
+	/** The Add/Edit form and the Import screen; both live only in this webview. */
+	const ui = { form: null, importing: null };
+
+	function myServers() {
+		const mine = lastData && lastData.myServers ? lastData.myServers.servers || [] : [];
+		return mine.filter((s) => s.scope !== 'bundled');
+	}
+
+	function findServer(id) {
+		return myServers().find((s) => s.id === id) || null;
+	}
+
+	function serverSummary(s) {
+		return s.transport === 'http' ? (s.url || '') : [s.command || ''].concat(s.args || []).join(' ');
+	}
+
+	function serverToolsText(s) {
+		if (!s.tools || !s.tools.total) {
+			return '';
+		}
+		return s.tools.enabled === s.tools.total ? s.tools.total + ' tools' : s.tools.enabled + ' of ' + s.tools.total + ' tools on';
+	}
+
+	function serverMatches(s) {
+		if (view.filter === 'connected' && s.state !== 'connected') {
+			return false;
+		}
+		const q = view.query.trim().toLowerCase();
+		return !q || (s.name + ' ' + serverSummary(s)).toLowerCase().indexOf(q) !== -1;
+	}
+
+	function primaryServerAction(s) {
+		const kinds = { needs_approval: ['approve', 'Approve'], disabled: ['enable', 'Turn on'], error: ['edit', 'Edit'], available: ['connect', 'Connect'] };
+		const pick = kinds[s.state];
+		return pick ? '<button type="button" class="nx-btn" data-server-action="' + pick[0] + '">' + pick[1] + '</button>' : '';
+	}
+
+	function serverRow(s) {
+		const classes = ['nx-platform', 'nx-server'];
+		if (s.state === 'connected') {
+			classes.push('is-connected');
+		} else if (s.state === 'error') {
+			classes.push('is-failed');
+		} else {
+			classes.push('is-blocked');
+		}
+		const tools = serverToolsText(s);
+		const action = primaryServerAction(s);
+		return '<article class="' + classes.join(' ') + '" data-server="' + escapeHtml(s.id) + '" title="' + escapeHtml(serverSummary(s)) + '">'
+			+ '<span class="nx-dot" aria-hidden="true"></span>'
+			+ '<div class="nx-platform-main">'
+			+ '<div class="nx-name-row"><span class="nx-name">' + escapeHtml(s.name) + '</span><span class="nx-status">' + escapeHtml(SERVER_STATE[s.state] || s.state) + '</span></div>'
+			+ '<div class="nx-meta' + (s.error ? ' nx-meta-error' : '') + '">' + escapeHtml(s.error || serverSummary(s)) + '</div>'
+			+ '<div class="nx-useins"><span class="nx-chip">' + escapeHtml(SCOPE_LABEL[s.scope] || s.scope) + '</span>'
+			+ (tools ? '<span class="nx-tools">' + escapeHtml(tools) + '</span>' : '') + '</div>'
+			+ '</div>'
+			+ (action ? '<div class="nx-platform-actions">' + action + '</div>' : '')
+			+ '</article>';
+	}
+
+	function defaultForm() {
+		return { name: '', kind: 'url', url: '', command: '', args: '', env: '', headers: '', scope: 'user', trust: '' };
+	}
+
+	function formFromServer(s) {
+		return {
+			name: s.name,
+			kind: s.transport === 'http' ? 'url' : 'command',
+			url: s.url || '',
+			command: s.command || '',
+			args: (s.args || []).join('\n'),
+			// An empty value keeps the saved one (secrets are never sent to the IDE).
+			env: (s.env_keys || []).map((k) => k + '=').join('\n'),
+			headers: (s.header_keys || []).map((k) => k + '=').join('\n'),
+			scope: s.scope === 'project' ? 'project' : 'user',
+			trust: s.trust || ''
+		};
+	}
+
+	function readForm() {
+		if (!ui.form) {
+			return;
+		}
+		const value = (id) => {
+			const el = document.getElementById(id);
+			return el ? el.value : '';
+		};
+		const kind = document.querySelector('input[name="f-kind"]:checked');
+		ui.form.values = {
+			name: value('f-name'),
+			kind: kind ? kind.value : ui.form.values.kind,
+			url: value('f-url'),
+			command: value('f-command'),
+			args: value('f-args'),
+			env: value('f-env'),
+			headers: value('f-headers'),
+			scope: value('f-scope') || 'user',
+			trust: value('f-trust')
+		};
+	}
+
+	function option(value, label, current, disabled) {
+		return '<option value="' + escapeHtml(value) + '"' + (value === current ? ' selected' : '') + (disabled ? ' disabled' : '') + '>' + escapeHtml(label) + '</option>';
+	}
+
+	function formHtml() {
+		const f = ui.form.values;
+		const editing = !!ui.form.edit;
+		const hasFolder = !!(lastData && lastData.myServers && lastData.myServers.workspace);
+		const errors = ui.form.errors && ui.form.errors.length
+			? '<div class="nx-form-errors" role="alert">' + ui.form.errors.map((e) => '<div>' + escapeHtml(e) + '</div>').join('') + '</div>' : '';
+		const field = (id, label, input, hint) => '<label class="nx-field" for="' + id + '"><span>' + label + '</span>' + input + (hint ? '<small>' + hint + '</small>' : '') + '</label>';
+		const isUrl = f.kind === 'url';
+		return '<div class="nx-form">'
+			+ '<div class="nx-form-title">' + (editing ? 'Edit ' + escapeHtml(ui.form.edit.name) : 'Add an MCP server') + '</div>'
+			+ errors
+			+ field('f-name', 'Name', '<input id="f-name" type="text" value="' + escapeHtml(f.name) + '" spellcheck="false" autocomplete="off">')
+			+ '<div class="nx-field"><span>Type</span><div class="nx-radios">'
+			+ '<label><input type="radio" name="f-kind" value="url"' + (isUrl ? ' checked' : '') + '> Web address</label>'
+			+ '<label><input type="radio" name="f-kind" value="command"' + (isUrl ? '' : ' checked') + '> Command on this PC</label>'
+			+ '</div></div>'
+			+ (isUrl
+				? field('f-url', 'Address', '<input id="f-url" type="text" placeholder="https://example.com/mcp" value="' + escapeHtml(f.url) + '" spellcheck="false">')
+					+ field('f-headers', 'Headers', '<textarea id="f-headers" rows="2" placeholder="Authorization=Bearer ..." spellcheck="false">' + escapeHtml(f.headers) + '</textarea>',
+						'KEY=VALUE per line. Values that look like keys are saved encrypted.' + (editing ? ' Leave a value empty to keep it.' : ''))
+				: field('f-command', 'Command', '<input id="f-command" type="text" placeholder="npx" value="' + escapeHtml(f.command) + '" spellcheck="false">')
+					+ field('f-args', 'Arguments', '<textarea id="f-args" rows="2" placeholder="-y&#10;@modelcontextprotocol/server-github" spellcheck="false">' + escapeHtml(f.args) + '</textarea>', 'One per line.')
+					+ field('f-env', 'Environment', '<textarea id="f-env" rows="2" placeholder="GITHUB_PERSONAL_ACCESS_TOKEN=..." spellcheck="false">' + escapeHtml(f.env) + '</textarea>',
+						'KEY=VALUE per line. Values that look like keys are saved encrypted.' + (editing ? ' Leave a value empty to keep it.' : '')))
+			+ (editing ? '' : field('f-scope', 'For', '<select id="f-scope">' + option('user', 'Me, in every project', f.scope) + option('project', hasFolder ? 'This project (.nexora/mcp.json)' : 'This project (open a folder first)', f.scope, !hasFolder) + '</select>'))
+			+ field('f-trust', 'Approval', '<select id="f-trust">' + Object.keys(TRUST_LABEL).map((k) => option(k, TRUST_LABEL[k], f.trust)).join('') + '</select>')
+			+ '<div class="nx-form-actions">'
+			+ '<button type="button" class="nx-btn" data-form="save"' + (ui.form.busy ? ' disabled' : '') + '>' + (ui.form.busy ? 'Saving...' : 'Save') + '</button>'
+			+ '<button type="button" class="nx-btn nx-btn-secondary" data-form="cancel">Cancel</button>'
+			+ '</div></div>';
+	}
+
+	function renderMyServers(data) {
+		if (!data.myServers) {
+			return '';
+		}
+		const servers = myServers().filter(serverMatches);
+		const configErrors = Object.keys(data.myServers.config_errors || {}).map((k) => data.myServers.config_errors[k]);
+		const body = servers.length
+			? '<div class="nx-list">' + servers.map(serverRow).join('') + '</div>'
+			: (ui.form ? '' : '<div class="nx-empty nx-mine-empty">Add a server by address or command, or import the ones you use in Cursor, Claude Code, VS Code or Claude Desktop.</div>');
+		return '<section class="nx-group nx-mine" aria-label="Your MCP servers">'
+			+ '<div class="nx-mine-head"><span class="nx-group-name">Your MCP servers</span>'
+			+ '<span class="nx-count">' + myServers().length + '</span>'
+			+ '<button type="button" class="nx-icon-text" data-mine="add" title="Add an MCP server">+ Add</button>'
+			+ '<button type="button" class="nx-icon-text" data-mine="import" title="Import from Cursor, Claude Code, VS Code or Claude Desktop">Import</button></div>'
+			+ configErrors.map((e) => '<div class="nx-banner">' + escapeHtml(e) + '</div>').join('')
+			+ (ui.form ? formHtml() : '')
+			+ body
+			+ '</section>';
+	}
+
+	function serverAsRow(s) {
+		return {
+			id: s.id,
+			name: s.name,
+			custom: s,
+			description: s.error || serverSummary(s),
+			capabilityStatus: s.state === 'connected' ? 'ready' : (s.state === 'error' ? 'failed' : 'not_configured'),
+			live: true,
+			usage: { usable_in: ['chat', 'agent', 'plans'], state: s.state, reason: '', tools: null, undo: false, listed: true },
+			mcpServerId: s.id
+		};
+	}
+
+	function customActions(s) {
+		const buttons = [primaryServerAction(s)];
+		buttons.push('<button type="button" class="nx-btn nx-btn-secondary" data-server-action="edit">Edit</button>');
+		if (s.state !== 'needs_approval') {
+			buttons.push('<button type="button" class="nx-btn nx-btn-secondary" data-server-action="' + (s.enabled ? 'disable' : 'enable') + '">' + (s.enabled ? 'Turn off' : 'Turn on') + '</button>');
+		}
+		buttons.push('<button type="button" class="nx-btn nx-btn-secondary" data-server-action="remove">Remove</button>');
+		return '<div class="nx-platform-actions">' + buttons.join('') + '</div>'
+			+ '<label class="nx-field nx-trust"><span>Approval for this server</span><select data-trust="1">'
+			+ Object.keys(TRUST_LABEL).map((k) => option(k, TRUST_LABEL[k], s.trust || '')).join('') + '</select></label>'
+			+ '<div class="nx-meta nx-meta-full">' + escapeHtml(SCOPE_LABEL[s.scope] || s.scope) + ' - ' + escapeHtml(serverSummary(s)) + '</div>';
+	}
+
+	function saveWithTrust(s, trust) {
+		const values = formFromServer(s);
+		values.trust = trust;
+		vscode.postMessage({ type: 'saveServer', form: values, edit: { scope: s.scope, name: s.name } });
+	}
+
+	function serverAction(action, s) {
+		if (!s) {
+			return;
+		}
+		if (action === 'approve') {
+			vscode.postMessage({ type: 'approveServer', name: s.name });
+		} else if (action === 'enable' || action === 'disable') {
+			vscode.postMessage({ type: 'enableServer', scope: s.scope, name: s.name, enabled: action === 'enable' });
+		} else if (action === 'connect') {
+			vscode.postMessage({ type: 'connectServer', id: s.id });
+		} else if (action === 'remove') {
+			vscode.postMessage({ type: 'removeServer', scope: s.scope, name: s.name });
+		} else if (action === 'edit') {
+			ui.form = { edit: { scope: s.scope, name: s.name }, values: formFromServer(s), errors: [], busy: false };
+			if (detail.id) {
+				closeDetail();
+			}
+			rerender();
+		}
+	}
+
+	function importHtml() {
+		const state = ui.importing;
+		const back = '<button type="button" class="nx-back" data-back="1"><svg class="nx-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4 6 8l4 4"/></svg>Platforms</button>';
+		const head = '<div class="nx-detail-name">Import MCP servers</div><p class="nx-hint">Copies the servers you choose into Nexora. Keys are moved to Nexora\'s encrypted store; the other tools\' files are not changed.</p>';
+		if (!state.sources) {
+			return back + head + '<div class="nx-empty">Looking for configs...</div>';
+		}
+		const groups = state.sources.filter((src) => (src.servers || []).length || src.error);
+		if (!groups.length) {
+			return back + head + '<div class="nx-empty">No MCP servers found in Cursor, Claude Code, VS Code or Claude Desktop on this PC.</div>';
+		}
+		const hasFolder = !!state.workspace;
+		const list = groups.map((src) => '<div class="nx-import-source"><div class="nx-detail-sub">' + escapeHtml(src.label) + ' <span class="nx-count" title="' + escapeHtml(src.path) + '">' + escapeHtml(src.path) + '</span></div>'
+			+ (src.error ? '<div class="nx-banner">' + escapeHtml(src.error) + '</div>' : '')
+			+ '<div class="nx-list">' + (src.servers || []).map((sv) => '<label class="nx-import-row' + (sv.exists ? ' is-added' : '') + '">'
+				+ '<input type="checkbox" data-import-source="' + escapeHtml(src.id) + '" data-import-name="' + escapeHtml(sv.name) + '"' + (sv.exists ? ' disabled' : '') + '>'
+				+ '<span class="nx-import-main"><span class="nx-name-row"><span class="nx-name">' + escapeHtml(sv.name) + '</span><span class="nx-status">' + (sv.exists ? 'Added' : escapeHtml(sv.transport === 'http' ? 'Web address' : 'Command')) + '</span></span>'
+				+ '<span class="nx-meta">' + escapeHtml(sv.summary) + '</span>'
+				+ (sv.secret_keys && sv.secret_keys.length ? '<span class="nx-meta">Keys saved encrypted: ' + escapeHtml(sv.secret_keys.join(', ')) + '</span>' : '')
+				+ '</span></label>').join('') + '</div></div>').join('');
+		return back + head + list
+			+ '<label class="nx-field"><span>Add them for</span><select id="import-scope">' + option('user', 'Me, in every project', 'user') + option('project', hasFolder ? 'This project (.nexora/mcp.json)' : 'This project (open a folder first)', '', !hasFolder) + '</select></label>'
+			+ '<div class="nx-form-actions"><button type="button" class="nx-btn" data-import-apply="1"' + (state.busy ? ' disabled' : '') + '>' + (state.busy ? 'Importing...' : 'Import selected') + '</button></div>';
+	}
+
+	function openImport() {
+		ui.importing = { sources: null, workspace: null, busy: false };
+		detail.id = IMPORT_ID;
+		detail.data = null;
+		renderDetail();
+		vscode.postMessage({ type: 'importPreview' });
 	}
 
 	function render(data) {
@@ -429,13 +697,14 @@
 				</button>
 				<div class="nx-list">${discover.map(renderPlatform).join('')}</div>
 			</section>` : '';
-		list.innerHTML = shown
+		const mine = renderMyServers(data);
+		list.innerHTML = mine + (shown
 			? groups + discoverGroup
-			: (discoverGroup || `<div class="nx-empty">${view.filter === 'connected' ? 'Nothing connected yet. Connect a platform from the All tab.' : 'No platforms match.'}</div>`);
+			: (discoverGroup || `<div class="nx-empty">${view.filter === 'connected' ? 'Nothing connected yet. Connect a platform from the All tab.' : 'No platforms match.'}</div>`));
 
 		const count = categories.reduce((sum, group) => sum + ((group.platforms || []).length), 0);
 		announce(data.error ? data.error : (shown === count ? count + ' platforms' : shown + ' of ' + count + ' platforms'));
-		if (detail.id) {
+		if (detail.id && detail.id !== IMPORT_ID) {
 			// A sign-in or a key may have changed the row: show it, and ask for its tools again.
 			renderDetail();
 			vscode.postMessage({ type: 'details', id: detail.id });
@@ -484,6 +753,48 @@
 			rerender();
 			return;
 		}
+		const mineBtn = target.closest('button[data-mine]');
+		if (mineBtn) {
+			if (mineBtn.getAttribute('data-mine') === 'add') {
+				ui.form = { edit: null, values: defaultForm(), errors: [], busy: false };
+				rerender();
+				const name = document.getElementById('f-name');
+				if (name) {
+					name.focus();
+				}
+			} else {
+				openImport();
+			}
+			return;
+		}
+		const formBtn = target.closest('button[data-form]');
+		if (formBtn && ui.form) {
+			if (formBtn.getAttribute('data-form') === 'save') {
+				readForm();
+				ui.form.busy = true;
+				ui.form.errors = [];
+				rerender();
+				vscode.postMessage({ type: 'saveServer', form: ui.form.values, edit: ui.form.edit });
+			} else {
+				ui.form = null;
+				rerender();
+			}
+			return;
+		}
+		if (target.closest('.nx-form')) {
+			return;
+		}
+		const serverBtn = target.closest('button[data-server-action]');
+		if (serverBtn) {
+			const owner = serverBtn.closest('[data-server]');
+			serverAction(serverBtn.getAttribute('data-server-action'), findServer(owner ? owner.getAttribute('data-server') : ''));
+			return;
+		}
+		const serverRowEl = target.closest('.nx-platform[data-server]');
+		if (serverRowEl) {
+			openDetail(serverRowEl.getAttribute('data-server'));
+			return;
+		}
 		const head = target.closest('button[data-group]');
 		if (head) {
 			const name = head.getAttribute('data-group') || '';
@@ -521,6 +832,23 @@
 			closeDetail();
 			return;
 		}
+		if (target.closest('button[data-import-apply]') && ui.importing) {
+			const scope = (document.getElementById('import-scope') || {}).value || 'user';
+			const items = Array.prototype.slice.call(document.querySelectorAll('input[data-import-source]:checked')).map((box) => ({
+				source: box.getAttribute('data-import-source'), name: box.getAttribute('data-import-name'), scope
+			}));
+			if (items.length) {
+				ui.importing.busy = true;
+				renderDetail();
+				vscode.postMessage({ type: 'importApply', items });
+			}
+			return;
+		}
+		const serverBtn = target.closest('button[data-server-action]');
+		if (serverBtn) {
+			serverAction(serverBtn.getAttribute('data-server-action'), findServer(detail.id));
+			return;
+		}
 		const tryBtn = target.closest('button[data-try]');
 		if (tryBtn && !tryBtn.disabled) {
 			vscode.postMessage({ type: 'tryTool', id: detail.id, tool: tryBtn.getAttribute('data-try') });
@@ -534,6 +862,13 @@
 
 	document.getElementById('platform-detail')?.addEventListener('change', (event) => {
 		const input = event.target;
+		if (input && input.getAttribute && input.getAttribute('data-trust')) {
+			const s = findServer(detail.id);
+			if (s) {
+				saveWithTrust(s, input.value);
+			}
+			return;
+		}
 		if (input && input.getAttribute && input.getAttribute('data-switch')) {
 			vscode.postMessage({ type: 'setToolEnabled', id: detail.id, tool: input.getAttribute('data-switch'), enabled: !!input.checked });
 		}
@@ -545,8 +880,40 @@
 		}
 	});
 
+	document.getElementById('platform-list')?.addEventListener('change', (event) => {
+		const input = event.target;
+		if (input && input.name === 'f-kind' && ui.form) {
+			readForm();
+			rerender();
+		}
+	});
+
 	window.addEventListener('message', (event) => {
 		const msg = event.data || {};
+		if (msg.type === 'serverFormResult' && ui.form) {
+			if (msg.errors && msg.errors.length) {
+				ui.form.errors = msg.errors;
+				ui.form.busy = false;
+			} else {
+				ui.form = null;
+			}
+			rerender();
+			return;
+		}
+		if (msg.type === 'importSources' && ui.importing) {
+			ui.importing.sources = msg.sources || [];
+			ui.importing.workspace = msg.workspace || null;
+			renderDetail();
+			return;
+		}
+		if (msg.type === 'importDone') {
+			closeDetail();
+			return;
+		}
+		if (msg.type === 'serverRemoved' && detail.id && !findServer(detail.id)) {
+			closeDetail();
+			return;
+		}
 		if (msg.type === 'updateData') {
 			render(msg.data || {});
 		} else if (msg.type === 'platformDetail' && msg.detail && msg.detail.id === detail.id) {

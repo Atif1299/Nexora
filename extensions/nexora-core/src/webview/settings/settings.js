@@ -21,7 +21,8 @@
 		{ id: 'stripe', label: 'Stripe Secret Key', placeholder: 'sk_test_... or sk_live_...' },
 		{ id: 'v0', label: 'v0.dev API Key', placeholder: 'Optional - LLM fallback available' },
 		{ id: 'elevenlabs', label: 'ElevenLabs API Key', placeholder: 'sk_...' },
-		{ id: 'tavily', label: 'Tavily API Key', placeholder: 'tvly-...' }
+		{ id: 'tavily', label: 'Tavily API Key', placeholder: 'tvly-...' },
+		{ id: 'perplexity', label: 'Perplexity API Key', placeholder: 'pplx-... (web research in plans)' }
 	];
 
 	const NAV_SECTIONS = ['account', 'plan', 'keys', 'models', 'memory', 'saas', 'connections', 'analytics', 'approvals', 'browser', 'preferences', 'about'];

@@ -5,6 +5,7 @@
 
 import type { Transport } from './transport';
 import type { PlatformUsage, ServerTools } from '../platformUsage';
+import type { ImportSource, MyServer, MyServers, ServerBody } from '../mcpServers';
 
 export function createPlatformsApi(transport: Transport) {
 	return {
@@ -66,6 +67,54 @@ export function createPlatformsApi(transport: Transport) {
 				{ enabled }
 			);
 			return response && Array.isArray(response.tools) ? response as ServerTools : undefined;
+		},
+
+		/** Your own MCP servers and the bundled local ones; undefined from an engine without the route. */
+		getMyServers: async (): Promise<MyServers | undefined> => {
+			try {
+				const response = await transport.get('/api/mcp/my-servers');
+				return response && Array.isArray(response.servers) ? response as MyServers : undefined;
+			} catch {
+				return undefined;
+			}
+		},
+
+		/** Tell the engine which folder's .nexora/mcp.json applies; an older engine ignores it. */
+		setMcpWorkspace: async (path: string | undefined): Promise<void> => {
+			try {
+				await transport.put('/api/mcp/workspace', { path: path || null });
+			} catch {
+				// An engine without the route has no project servers to read.
+			}
+		},
+
+		addServer: async (body: ServerBody): Promise<MyServer> => transport.post('/api/mcp/my-servers', body),
+
+		editServer: async (scope: string, name: string, body: ServerBody): Promise<MyServer> =>
+			transport.put(`/api/mcp/my-servers/${encodeURIComponent(scope)}/${encodeURIComponent(name)}`, body),
+
+		removeServer: async (scope: string, name: string): Promise<void> => {
+			await transport.delete(`/api/mcp/my-servers/${encodeURIComponent(scope)}/${encodeURIComponent(name)}`);
+		},
+
+		enableServer: async (scope: string, name: string, enabled: boolean): Promise<MyServer> =>
+			transport.post(`/api/mcp/my-servers/${encodeURIComponent(scope)}/${encodeURIComponent(name)}/enable`, { enabled }),
+
+		approveServer: async (name: string): Promise<MyServer> =>
+			transport.post(`/api/mcp/my-servers/project/${encodeURIComponent(name)}/approve`, {}),
+
+		getImportSources: async (): Promise<ImportSource[] | undefined> => {
+			try {
+				const response = await transport.get('/api/mcp/import');
+				return Array.isArray(response?.sources) ? response.sources as ImportSource[] : undefined;
+			} catch {
+				return undefined;
+			}
+		},
+
+		applyImport: async (items: { source: string; name: string; scope: string }[]): Promise<MyServer[]> => {
+			const response = await transport.post('/api/mcp/import', { items });
+			return Array.isArray(response?.servers) ? response.servers as MyServer[] : [];
 		},
 
 		searchPlatforms: async (query: string): Promise<any[]> => {

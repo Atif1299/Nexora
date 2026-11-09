@@ -307,7 +307,7 @@ export function createTransport(
 			}, config.timeout);
 
 			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
+				throw await errorFromHttpResponse(response);
 			}
 
 			return await response.json();
@@ -322,7 +322,7 @@ export function createTransport(
 			}, config.timeout);
 
 			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
+				throw await errorFromHttpResponse(response);
 			}
 
 			return await response.json();
@@ -336,7 +336,7 @@ export function createTransport(
 			}, config.timeout);
 
 			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
+				throw await errorFromHttpResponse(response);
 			}
 
 			return await response.json();

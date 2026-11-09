@@ -11,6 +11,7 @@ export interface BackendConfig {
 
 import { createTransport, type HeaderProvider, type SSEEvent } from './backend/transport';
 import type { PlatformUsage, ServerTools } from './platformUsage';
+import type { ImportSource, MyServer, MyServers, ServerBody } from './mcpServers';
 import { createPlatformsApi } from './backend/platforms';
 import { createMemoryApi, type MemorySuggestion, type ProjectFact, type ProjectFactsResponse, type ProjectRulesResponse, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
 import { createWorkflowsApi, type WorkflowTemplate, type TemplateListResponse, type SuggestFromPlanResponse, type SaveFromPlanRequest, type ImportPreview } from './backend/workflows';
@@ -140,6 +141,42 @@ export class BackendClient {
 
 	async setToolEnabled(server: string, tool: string, enabled: boolean): Promise<ServerTools | undefined> {
 		return createPlatformsApi(this.transport).setToolEnabled(server, tool, enabled);
+	}
+
+	getMyServers(): Promise<MyServers | undefined> {
+		return createPlatformsApi(this.transport).getMyServers();
+	}
+
+	setMcpWorkspace(path: string | undefined): Promise<void> {
+		return createPlatformsApi(this.transport).setMcpWorkspace(path);
+	}
+
+	addServer(body: ServerBody): Promise<MyServer> {
+		return createPlatformsApi(this.transport).addServer(body);
+	}
+
+	editServer(scope: string, name: string, body: ServerBody): Promise<MyServer> {
+		return createPlatformsApi(this.transport).editServer(scope, name, body);
+	}
+
+	removeServer(scope: string, name: string): Promise<void> {
+		return createPlatformsApi(this.transport).removeServer(scope, name);
+	}
+
+	enableServer(scope: string, name: string, enabled: boolean): Promise<MyServer> {
+		return createPlatformsApi(this.transport).enableServer(scope, name, enabled);
+	}
+
+	approveServer(name: string): Promise<MyServer> {
+		return createPlatformsApi(this.transport).approveServer(name);
+	}
+
+	getImportSources(): Promise<ImportSource[] | undefined> {
+		return createPlatformsApi(this.transport).getImportSources();
+	}
+
+	applyImport(items: { source: string; name: string; scope: string }[]): Promise<MyServer[]> {
+		return createPlatformsApi(this.transport).applyImport(items);
 	}
 
 	async searchPlatforms(query: string): Promise<any[]> {
