@@ -13,7 +13,7 @@ import type { ChatActivityItem, ChatInitialState, ContextTag, RunMode, WebviewIn
 import { getOrchestrationWebSocket, type WebSocketMessage } from './services/websocketClient';
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
 import type { ToolResult } from './services/tools/executor';
-import { customCommandFor, customCommandsHelp, BUILTIN_SLASH, type CustomCommand } from './services/slashCommands';
+import { customCommandFor, customCommandsHelp, parseSlash, BUILTIN_SLASH, type CustomCommand } from './services/slashCommands';
 import { subagentCardTitle, subagentResult, SUBAGENT_MAX_TURNS, type DelegateCall, type SubagentState } from './services/subagents';
 import { openUrlFromChat } from './services/browser';
 import { resetAgentCwd, type TerminalCommandProgress } from './services/tools/terminalCommand';
@@ -1051,7 +1051,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			throw new ModelUnavailableSignal(unavailableFinal);
 		}
 
-		if (startedTokens && this._hasChatSurface()) {
+		// A subagent's answer belongs to its card and to the main agent, not to the main reply:
+		// closing that bubble here would end the reply (and hide Stop) while the run goes on.
+		if (subagent) {
+			// nothing to post
+		} else if (startedTokens && this._hasChatSurface()) {
 			this._postToWebviews({ type: 'finishMessage' });
 		} else if (this._hasChatSurface()) {
 			this._postToWebviews({
@@ -1514,7 +1518,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	 * "/name text". undefined when the command could not be expanded (the error is shown).
 	 */
 	private async _expandCustomCommand(text: string, mode: 'chat' | 'ask' | 'agent' | 'plan'): Promise<string | undefined> {
-		const call = customCommandFor(text, this._customCommands);
+		let call = customCommandFor(text, this._customCommands);
+		const parsed = parseSlash(text);
+		if (!call && parsed && BUILTIN_SLASH.indexOf(parsed.name) < 0) {
+			// Maybe added since the list was read (Customize New, Examples, Copy): read it again.
+			await this._refreshCustomCommands();
+			call = customCommandFor(text, this._customCommands);
+		}
 		if (!call) {
 			return text;
 		}
@@ -3696,6 +3706,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
+		// Stop cancels this run and every subagent it started (until 9 Nov 2026 Agent mode had no reply to cancel).
+		const reply = this._beginReply();
+		if (!reply) {
+			return;
+		}
 		// Tool rounds of this run, saved with the answer (or alone if it stops first).
 		const rounds: TranscriptRound[] = [];
 		const saveCtx: { sessionId?: string; workspaceId?: string } = {};
@@ -3785,7 +3800,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				llmModel,
 				'agent',
 				sessionId,
-				undefined,
+				reply,
 				{ roundsOut: rounds, costOut: runCost, modelOut: runModel }
 			);
 
@@ -3802,6 +3817,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			// ended this way, persisting the turn without re-sending it.
 			this._clearChatActivity();
 		} catch (error) {
+			if (isRequestCancelled(error) || reply.isCancelled()) {
+				await this._finishStopped(reply, 'agent');
+				return;
+			}
 			const errText = `Agent error: ${error instanceof Error ? error.message : 'Unknown error'}`;
 			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|Failed to fetch/i.test(errText)) {
 				this._noteBackendDown();
@@ -3822,6 +3841,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._saveUnfinishedRounds(saveCtx, rounds, 'agent');
 			// A stopped or failed run may still have edited files.
 			this._postCheckpoints();
+			this._endReply(reply);
 		}
 	}
 

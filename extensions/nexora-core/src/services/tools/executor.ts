@@ -113,6 +113,17 @@ async function executeOne(
 	{
 		const args = tc.arguments;
 
+		// Already answered by the engine: run there (memory, codebase search, web, skills)
+		// or refused there (a tool the turn did not offer). Checked first, so a refused
+		// call can never go on as a platform call.
+		if (args._executed && args._result) {
+			return {
+				id: tc.id,
+				name: tc.name,
+				result: args._result as ToolResult
+			};
+		}
+
 		// A connected platform's tool. The engine deliberately did not run it:
 		// the call leaves the machine, so the user approves it here first and
 		// the engine then makes the call with the credential it holds.
@@ -126,16 +137,6 @@ async function executeOne(
 					args as Record<string, unknown>,
 					args._read_only_hint === true
 				)
-			};
-		}
-
-		// Already run by the engine, because that is where the data lives:
-		// the memory, codebase-search and web tools.
-		if (args._executed && args._result) {
-			return {
-				id: tc.id,
-				name: tc.name,
-				result: args._result as ToolResult
 			};
 		}
 
