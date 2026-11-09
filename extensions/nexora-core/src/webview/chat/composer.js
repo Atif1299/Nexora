@@ -37,9 +37,12 @@
 		{ cmd: 'execute', desc: 'Switch to Execute', mode: 'execute' },
 		{ cmd: 'model', desc: 'Choose a model' },
 		{ cmd: 'reindex', desc: 'Re-index this workspace' },
-		{ cmd: 'rules', desc: 'Open the project rules' },
+		{ cmd: 'rules', desc: 'Open the rules' },
+		{ cmd: 'customize', desc: 'Skills, subagents, commands and rules' },
 		{ cmd: 'help', desc: 'Show commands and keys' }
 	];
+	// The user's command files (.nexora, .claude, .cursor), pushed by the host.
+	let customCommands = [];
 	const HINT = '. Type @ to add a file, / for commands';
 	const MENU_SEARCH_MIN = 8;
 
@@ -379,14 +382,26 @@
 	// "+ > Commands": the list without touching the box; a mode command sends the current draft.
 	function openCommandsForDraft() {
 		const draft = host.input.value.trim();
-		openMenu('slash', host.input, SLASH.map(function (s) {
+		const items = SLASH.map(function (s) {
 			return { label: '/' + s.cmd, desc: s.desc, hint: '', pick: function () { runSlash(s, draft, true); } };
-		}));
+		});
+		customCommands.forEach(function (c) {
+			items.push({ label: '/' + c.name, desc: c.description || 'Your command', hint: c.argument_hint || '', pick: function () { host.input.value = '/' + c.name + ' ' + draft; host.input.focus(); closeMenu(); } });
+		});
+		openMenu('slash', host.input, items);
 	}
 
 	function slashQuery() {
 		const v = host.input.value;
-		return /^\/[a-z]*$/i.test(v) ? v.slice(1).toLowerCase() : null;
+		return /^\/[a-z0-9_:-]*$/i.test(v) ? v.slice(1).toLowerCase() : null;
+	}
+
+	// A command file's command: put "/name " in the box for the text that goes after it.
+	function insertCustomCommand(c) {
+		closeMenu();
+		host.input.value = '/' + c.name + ' ';
+		host.input.focus();
+		host.input.setSelectionRange(host.input.value.length, host.input.value.length);
 	}
 
 	function updateSlashList() {
@@ -397,9 +412,15 @@
 			}
 			return;
 		}
+		if (q === '' && menu.kind !== 'slash') {
+			host.post({ type: 'requestCustomCommands' });
+		}
 		const matches = SLASH.filter(function (s) { return s.cmd.indexOf(q) === 0; });
 		const items = matches.map(function (s) {
 			return { label: '/' + s.cmd, desc: s.desc, hint: '', pick: function () { runSlash(s, ''); } };
+		});
+		customCommands.filter(function (c) { return c.name.indexOf(q) === 0; }).forEach(function (c) {
+			items.push({ label: '/' + c.name, desc: c.description || 'Your command', hint: c.argument_hint || '', pick: function () { insertCustomCommand(c); } });
 		});
 		if (!items.length) {
 			items.push({ note: 'No matching command' });
@@ -569,6 +590,12 @@
 		},
 		render: render,
 		closeMenu: closeMenu,
+		setCustomCommands: function (list) {
+			customCommands = Array.isArray(list) ? list.filter(function (c) { return c && typeof c.name === 'string'; }) : [];
+			if (menu.kind === 'slash' && slashQuery() !== null) {
+				updateSlashList();
+			}
+		},
 		openModelMenu: function () { modelQuery = ''; openModelMenu(); },
 		setCatalog: function (c, ids) {
 			catalog = c || null;

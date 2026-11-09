@@ -13,6 +13,7 @@ import { createTransport, type HeaderProvider, type SSEEvent } from './backend/t
 import type { PlatformUsage, ServerTools } from './platformUsage';
 import type { ImportSource, MyServer, MyServers, ServerBody } from './mcpServers';
 import { createPlatformsApi } from './backend/platforms';
+import { createCustomizeApi } from './backend/customize';
 import { createMemoryApi, type MemorySuggestion, type ProjectFact, type ProjectFactsResponse, type ProjectRulesResponse, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
 import { createWorkflowsApi, type WorkflowTemplate, type TemplateListResponse, type SuggestFromPlanResponse, type SaveFromPlanRequest, type ImportPreview } from './backend/workflows';
 import { createCognitiveApi } from './backend/cognitive';
@@ -862,6 +863,11 @@ export class BackendClient {
 	/** Standing project facts (memory Layer C) injected into every request. */
 	async getProjectFacts(workspaceId: string): Promise<ProjectFactsResponse> {
 		return createMemoryApi(this.transport).getFacts(workspaceId);
+	}
+
+	/** Skills, slash commands and subagents (Phase 3 Customize). */
+	customize() {
+		return createCustomizeApi(this.transport);
 	}
 
 	/** Rule files the agent receives: personal AGENTS.md, then AGENTS.md, CLAUDE.md, .nexora/rules/*.md. */

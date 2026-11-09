@@ -69,6 +69,7 @@ export type WebviewInboundMessage =
 	| { type: 'setRunMode'; runMode: RunMode }
 	| { type: 'setEffort'; effort: Effort }
 	| { type: 'runSlash'; command: string; rest: string }
+	| { type: 'requestCustomCommands' }
 	| { type: 'requestSelection' }
 	| { type: 'requestOpenEditors' }
 	| { type: 'requestFolder' };

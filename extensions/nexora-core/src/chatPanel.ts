@@ -13,6 +13,7 @@ import type { ChatActivityItem, ChatInitialState, ContextTag, RunMode, WebviewIn
 import { getOrchestrationWebSocket, type WebSocketMessage } from './services/websocketClient';
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
 import type { ToolResult } from './services/tools/executor';
+import { customCommandFor, customCommandsHelp, BUILTIN_SLASH, type CustomCommand } from './services/slashCommands';
 import { subagentCardTitle, subagentResult, SUBAGENT_MAX_TURNS, type DelegateCall, type SubagentState } from './services/subagents';
 import { openUrlFromChat } from './services/browser';
 import { resetAgentCwd, type TerminalCommandProgress } from './services/tools/terminalCommand';
@@ -635,7 +636,26 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			void this._pushSuggestions();
 			void this._pushFirstRunCard();
 			this._pushComposerState();
+			void this._refreshCustomCommands();
 			return;
+		}
+		if (data.type === 'requestCustomCommands') {
+			await this._refreshCustomCommands();
+			return;
+		}
+		// "/name text" for one of the user's command files: send the command's prompt instead.
+		if (data.type === 'sendMessage' || data.type === 'askWorkspace') {
+			const expanded = await this._expandCustomCommand(data.message, data.type === 'sendMessage' ? 'chat' : 'ask');
+			if (expanded === undefined) {
+				return;
+			}
+			data.message = expanded;
+		} else if (data.type === 'generatePlan' || data.type === 'executeRequest' || data.type === 'runAgent') {
+			const expanded = await this._expandCustomCommand(data.request, data.type === 'runAgent' ? 'agent' : 'plan');
+			if (expanded === undefined) {
+				return;
+			}
+			data.request = expanded;
 		}
 		if (data.type === 'sendMessage' || data.type === 'askWorkspace' || data.type === 'generatePlan'
 			|| data.type === 'executeRequest' || data.type === 'runAgent') {
@@ -1462,6 +1482,45 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		this._postToWebviews({ type: 'contextTags', tags: [{ kind: 'folder', label: rel, path: rel }] });
 	}
 
+	/** The user's command files (built-in names and hidden ones left out), for the / menu. */
+	private _customCommands: CustomCommand[] = [];
+
+	private async _refreshCustomCommands(): Promise<void> {
+		const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		const list = await getBackendClient().customize().list(folder);
+		this._customCommands = (list?.commands || [])
+			.filter((c) => !c.shadowed_by && BUILTIN_SLASH.indexOf(c.name) < 0)
+			.map((c) => ({ name: c.name, description: c.description, argument_hint: c.argument_hint }));
+		this._postToWebviews({ type: 'customCommands', commands: this._customCommands });
+	}
+
+	/**
+	 * The prompt to send for a message: the text as typed, or a command file's prompt for
+	 * "/name text". undefined when the command could not be expanded (the error is shown).
+	 */
+	private async _expandCustomCommand(text: string, mode: 'chat' | 'ask' | 'agent' | 'plan'): Promise<string | undefined> {
+		const call = customCommandFor(text, this._customCommands);
+		if (!call) {
+			return text;
+		}
+		try {
+			return await getBackendClient().customize().expandCommand(call.name, call.args, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			const message = `Could not run /${call.name}: ${reason}`;
+			if (mode === 'plan') {
+				this._postToWebviews({ type: 'addMessage', role: 'assistant', content: message, isLoading: false });
+			} else {
+				// Chat, Ask and Agent already show a loading reply: finish it with the error.
+				this._clearChatActivity();
+				this._postToWebviews({ type: 'appendToken', content: message });
+				this._postToWebviews({ type: 'finishMessage' });
+				this._postToWebviews({ type: 'generationRunning', running: false });
+			}
+			return undefined;
+		}
+	}
+
 	private async _runSlash(command: string): Promise<void> {
 		switch (command) {
 			case 'new':
@@ -1471,7 +1530,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				await vscode.commands.executeCommand('nexora.reindexWorkspace');
 				return;
 			case 'rules':
-				await this._openProjectRules();
+				await vscode.commands.executeCommand('nexora.openCustomize', 'rules');
+				return;
+			case 'customize':
+				await vscode.commands.executeCommand('nexora.openCustomize');
 				return;
 			case 'help':
 				this._postToWebviews({
@@ -1479,7 +1541,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					role: 'assistant',
 					isLoading: false,
 					content: [
-						'**Commands:** `/new` new chat, `/chat` `/ask` `/agent` `/plan` `/execute` switch mode (text after the command is sent in that mode), `/model` choose a model, `/reindex` re-index the workspace, `/rules` open the project rules, `/help` this list.',
+						'**Commands:** `/new` new chat, `/chat` `/ask` `/agent` `/plan` `/execute` switch mode (text after the command is sent in that mode), `/model` choose a model, `/reindex` re-index the workspace, `/rules` open the rules, `/customize` open skills, subagents, commands and rules, `/help` this list.',
+						customCommandsHelp(this._customCommands) || 'Add your own commands in Customize (`/customize`), or keep the ones you have in `.claude/commands` or `.cursor/commands`.',
 						'**Keys:** Enter send, Shift+Enter new line, Shift+Tab next mode, Esc close a menu or stop a reply, @ add a file, / commands.'
 					].join('\n\n')
 				});

@@ -3148,6 +3148,10 @@
 				}
 				break;
 
+			case 'customCommands':
+				window.NexoraComposer.setCustomCommands(data.commands);
+				break;
+
 			case 'composerState':
 				window.NexoraComposer.setComposerState({ runMode: data.runMode, effort: data.effort, hasSelection: data.hasSelection });
 				break;
