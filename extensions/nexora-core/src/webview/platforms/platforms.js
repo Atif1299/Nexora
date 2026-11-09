@@ -414,7 +414,7 @@
 			+ '<span class="nx-dot" aria-hidden="true"></span>'
 			+ '<div class="nx-platform-main">'
 			+ '<div class="nx-name-row"><span class="nx-name">' + escapeHtml(s.name) + '</span><span class="nx-status">' + escapeHtml(SERVER_STATE[s.state] || s.state) + '</span></div>'
-			+ '<div class="nx-meta' + (s.error ? ' nx-meta-error' : '') + '">' + escapeHtml(s.error || serverSummary(s)) + '</div>'
+			+ '<div class="nx-meta' + (s.error ? ' nx-meta-error' : '') + '">' + escapeHtml(s.error || s.notice || serverSummary(s)) + '</div>'
 			+ '<div class="nx-useins"><span class="nx-chip">' + escapeHtml(SCOPE_LABEL[s.scope] || s.scope) + '</span>'
 			+ (tools ? '<span class="nx-tools">' + escapeHtml(tools) + '</span>' : '') + '</div>'
 			+ '</div>'
@@ -524,7 +524,7 @@
 			id: s.id,
 			name: s.name,
 			custom: s,
-			description: s.error || serverSummary(s),
+			description: s.error || s.notice || serverSummary(s),
 			capabilityStatus: s.state === 'connected' ? 'ready' : (s.state === 'error' ? 'failed' : 'not_configured'),
 			live: true,
 			usage: { usable_in: ['chat', 'agent', 'plans'], state: s.state, reason: '', tools: null, undo: false, listed: true },

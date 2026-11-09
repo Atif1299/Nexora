@@ -28,6 +28,12 @@ export interface MyServer {
 	trust: Trust;
 	state: ServerState;
 	error: string;
+	/** Not an error, e.g. renamed because another server has the name. */
+	notice?: string;
+	/** The ${...} references in its config (what it reads from the engine or the secret store). */
+	references?: string[];
+	/** What an approval covers; sent back so a file changed since is refused. */
+	fingerprint?: string;
 	tools: { total: number; enabled: number } | null;
 }
 
@@ -81,6 +87,37 @@ const STATE_LABELS: Record<ServerState, string> = {
 
 const TRUST_VALUES: Trust[] = ['', 'ask', 'trust-read-only', 'never-ask'];
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
+
+const TRUST_LABELS: Record<Trust, string> = {
+	'': 'your global setting',
+	'ask': 'ask every time',
+	'trust-read-only': 'run read-only tools without asking',
+	'never-ask': 'never ask'
+};
+
+/** Everything a project server approval covers, one line each, for the confirmation dialog. */
+export function approvalDetail(server: MyServer): string {
+	const lines: string[] = [];
+	if (server.url) {
+		lines.push(`Connects to: ${server.url}`);
+	} else {
+		lines.push(`Runs: ${[server.command || ''].concat(server.args || []).join(' ')}`);
+	}
+	if (server.env_keys && server.env_keys.length) {
+		lines.push(`Environment: ${server.env_keys.join(', ')}`);
+	}
+	if (server.header_keys && server.header_keys.length) {
+		lines.push(`Headers: ${server.header_keys.join(', ')}`);
+	}
+	if (server.references && server.references.length) {
+		lines.push(`Reads: ${server.references.join(', ')}`);
+	}
+	lines.push(`Tool calls: ${TRUST_LABELS[server.trust] || TRUST_LABELS['']}`);
+	if (server.error) {
+		lines.push(`Problem: ${server.error}`);
+	}
+	return lines.join('\n');
+}
 
 export function stateLabel(state: ServerState): string {
 	return STATE_LABELS[state] || state;

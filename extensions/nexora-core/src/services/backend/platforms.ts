@@ -100,8 +100,8 @@ export function createPlatformsApi(transport: Transport) {
 		enableServer: async (scope: string, name: string, enabled: boolean): Promise<MyServer> =>
 			transport.post(`/api/mcp/my-servers/${encodeURIComponent(scope)}/${encodeURIComponent(name)}/enable`, { enabled }),
 
-		approveServer: async (name: string): Promise<MyServer> =>
-			transport.post(`/api/mcp/my-servers/project/${encodeURIComponent(name)}/approve`, {}),
+		approveServer: async (name: string, fingerprint?: string): Promise<MyServer> =>
+			transport.post(`/api/mcp/my-servers/project/${encodeURIComponent(name)}/approve`, fingerprint ? { fingerprint } : {}),
 
 		getImportSources: async (): Promise<ImportSource[] | undefined> => {
 			try {

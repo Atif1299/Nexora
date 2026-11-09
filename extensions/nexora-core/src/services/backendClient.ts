@@ -167,8 +167,8 @@ export class BackendClient {
 		return createPlatformsApi(this.transport).enableServer(scope, name, enabled);
 	}
 
-	approveServer(name: string): Promise<MyServer> {
-		return createPlatformsApi(this.transport).approveServer(name);
+	approveServer(name: string, fingerprint?: string): Promise<MyServer> {
+		return createPlatformsApi(this.transport).approveServer(name, fingerprint);
 	}
 
 	getImportSources(): Promise<ImportSource[] | undefined> {

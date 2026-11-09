@@ -42,7 +42,7 @@ import {
 } from './services/agents/localAgents';
 import type { SaasConnector } from './services/backend/auth';
 import { section, usageFor, type PlatformUsage, type ServerTool } from './services/platformUsage';
-import { validateForm, type MyServer, type MyServers, type ServerForm } from './services/mcpServers';
+import { approvalDetail, validateForm, type MyServer, type MyServers, type ServerForm } from './services/mcpServers';
 import { executePlatformTool } from './services/tools/platformTool';
 
 /**
@@ -499,12 +499,11 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 					if (!server) {
 						return true;
 					}
-					const what = server.url || [server.command || ''].concat(server.args).join(' ');
 					const ok = await vscode.window.showWarningMessage(
-						`This project's .nexora/mcp.json wants to run an MCP server. Only allow it if you trust this project.`,
-						{ modal: true, detail: `${server.name}: ${what}` }, 'Allow');
+						`This project's .nexora/mcp.json wants to run the MCP server ${server.name}. Only allow it if you trust this project.`,
+						{ modal: true, detail: approvalDetail(server) }, 'Allow');
 					if (ok === 'Allow') {
-						await client.approveServer(server.name);
+						await client.approveServer(server.name, server.fingerprint);
 						await this._refreshMyServers();
 					}
 					return true;
