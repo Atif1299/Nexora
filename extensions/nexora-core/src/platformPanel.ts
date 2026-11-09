@@ -63,6 +63,16 @@ const SETTINGS_BACKED_PLATFORMS = new Set([
 	'github', 'vercel', 'supabase', 'stripe', 'v0-dev', 'elevenlabs', 'tavily'
 ]);
 
+/**
+ * Rows a plan reaches through an engine handler that needs a key (DALL-E runs on the OpenAI
+ * key, Perplexity on its own): there is nothing to sign in to, so Connect and Configure open
+ * the Settings card that holds the key.
+ */
+const ENGINE_KEY_CARDS: Record<string, string> = {
+	'dall-e': 'openai',
+	perplexity: 'perplexity'
+};
+
 /** platforms.json has no OpenRouter row, but its key is a first-class LLM key in Settings. */
 const OPENROUTER_ROW: PlatformApiRow = {
 	id: 'openrouter',
@@ -137,6 +147,8 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	private llmKeys: Partial<Record<ApiKeyProvider, boolean>> = {};
 	private oauthApps: Partial<Record<OAuthProvider, boolean>> = {};
 	private mcpConnections: Record<string, boolean> = {};
+	/** 'stdio' for servers that run on this PC (Connect starts them), 'http' for hosted ones. */
+	private mcpTransports: Record<string, string> = {};
 	private mcpClientIds: Record<string, boolean> = {};
 	/** Local coding agents found on PATH, keyed by platform id. */
 	private localAgents: Record<string, LocalAgentProbe> = {};
@@ -639,7 +651,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			keyProvider: undefined,
 			setupHint: undefined,
 			mcpServerId: undefined,
-			configurable: SETTINGS_BACKED_PLATFORMS.has(id),
+			configurable: SETTINGS_BACKED_PLATFORMS.has(id) || !!ENGINE_KEY_CARDS[id],
 			disconnectable: live && status === 'ready' && SETTINGS_BACKED_PLATFORMS.has(id)
 		};
 	}
@@ -726,7 +738,9 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			capabilityStatus: connected ? 'ready' : 'not_configured',
 			capabilityReason: connected
 				? undefined
-				: (setupHint || 'Not connected - Connect opens sign-in in your browser'),
+				: (setupHint || (this.mcpTransports[mcpServerId] === 'stdio'
+					? 'Not started - Connect starts it on this PC (the first start downloads it and can take a minute)'
+					: 'Not connected - Connect opens sign-in in your browser')),
 			is_enabled: isEnabled !== false,
 			keyProvider: undefined,
 			setupHint,
@@ -757,6 +771,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			const rows = await getBackendClient().getMcpConnectStatus();
 			this.mcpConnections = Object.fromEntries(rows.map(r => [r.id, r.connected]));
 			this.mcpClientIds = Object.fromEntries(rows.map(r => [r.id, r.has_client_id]));
+			this.mcpTransports = Object.fromEntries(rows.map(r => [r.id, r.transport || 'http']));
 		} catch {
 			// Unknown: do not claim a setup is missing when the engine is unreachable.
 			this.mcpConnections = {};
@@ -815,6 +830,10 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			await this._openSettings(keyProvider);
 			return;
 		}
+		if (ENGINE_KEY_CARDS[platformId]) {
+			await this._openSettings(ENGINE_KEY_CARDS[platformId]);
+			return;
+		}
 		if (this._row(platformId)?.integration === 'catalogue') {
 			return;
 		}
@@ -864,7 +883,13 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	private async _connectMcp(mcpServerId: string): Promise<void> {
 		const notifications = getNotificationService();
 		const label = mcpServerLabel(mcpServerId);
-		const result = await connectMcpServer(mcpServerId);
+		// A local server is started, not signed in to; its first start can take a minute.
+		const result = this.mcpTransports[mcpServerId] === 'stdio'
+			? await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: `Starting ${label} on this PC (the first start downloads it)...` },
+				() => connectMcpServer(mcpServerId)
+			)
+			: await connectMcpServer(mcpServerId);
 
 		switch (result.status) {
 			case 'connected':
@@ -910,6 +935,10 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		}
 		if (platformId === 'crewai' || platformId === 'gpt-researcher') {
 			await this._handleConfigure(platformId);
+			return;
+		}
+		if (ENGINE_KEY_CARDS[platformId]) {
+			await this._openSettings(ENGINE_KEY_CARDS[platformId]);
 			return;
 		}
 		const mcpServerId = this._row(platformId)?.mcpServerId;
