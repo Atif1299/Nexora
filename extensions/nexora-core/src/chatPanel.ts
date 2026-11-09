@@ -924,7 +924,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		model: string | undefined,
 		mode: AgentMode,
 		sessionId: string | undefined,
-		reply?: InFlightReply
+		reply?: InFlightReply,
+		subagent?: string
 	): Promise<AgentTurnResponse> {
 		const client = getBackendClient();
 		let assembled = '';
@@ -946,7 +947,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				mode,
 				sessionId,
 				reply?.signal,
-				getSettingsService(this._context).getPreferences().agentEffort
+				getSettingsService(this._context).getPreferences().agentEffort,
+				subagent
 			)) {
 				this._assertReply(reply);
 				if (ev.type === 'tool_delta') {
@@ -957,7 +959,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					}
 					startedTokens = true;
 					assembled += ev.content;
-					if (this._hasChatSurface()) {
+					// A subagent's text goes to its card with its answer, not into the main reply.
+					if (!subagent && this._hasChatSurface()) {
 						this._postToWebviews({ type: 'appendToken', content: ev.content });
 					}
 				} else if (ev.type === 'tool_calls' && Array.isArray(ev.tool_calls) && ev.tool_calls.length > 0) {
@@ -1037,7 +1040,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		model: string | undefined,
 		mode: AgentMode,
 		sessionId: string | undefined,
-		reply?: InFlightReply
+		reply?: InFlightReply,
+		subagent?: string
 	): Promise<AgentTurnResponse> {
 		return this._consumeStreamedAgentTurn(
 			messages,
@@ -1046,7 +1050,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			model,
 			mode,
 			sessionId,
-			reply
+			reply,
+			subagent
 		);
 	}
 
@@ -2214,14 +2219,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			saveCtx.workspaceId = workspaceId;
 			const atContextMessage = await this._injectAtMentionContext(message);
 			this._assertReply(reply);
-			const finalAnswer = await this._runAgentLoop(
+			const finalAnswer = await this._runAgentLoopWithMode(
 				atContextMessage,
 				workspaceId,
 				workspacePath,
 				llmModel,
+				'ask',
 				sessionId,
 				reply,
-				rounds
+				{ roundsOut: rounds }
 			);
 
 			const sessionAfter = this._getActiveSession();
@@ -2258,141 +2264,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._saveUnfinishedRounds(saveCtx, rounds, 'ask');
 			this._endReply(reply);
 		}
-	}
-
-	/**
-	 * Run the agent loop with tool calling.
-	 * Calls backend for LLM + Memvid tools, executes file tools locally.
-	 */
-	private async _runAgentLoop(
-		userMessage: string,
-		workspaceId: string,
-		workspacePath: string,
-		model?: string,
-		sessionId?: string,
-		reply?: InFlightReply,
-		roundsOut?: TranscriptRound[]
-	): Promise<string> {
-		const maxTurns = getAgentMaxTurns();
-		let turn = 0;
-		resetAgentCwd(workspacePath);
-
-		// Build initial messages
-		const messages: AgentMessage[] = [
-			{ role: 'user', content: userMessage }
-		];
-
-		// Track activity items for UI
-		const activityItems: ChatActivityItem[] = [
-			{ id: 'agent', label: 'Working...', done: false }
-		];
-
-		while (turn < maxTurns) {
-			turn++;
-			// Update turn counter in activity item fields
-			const agentItem = activityItems.find(a => a.id === 'agent');
-			if (agentItem) {
-				agentItem.turn = turn;
-				agentItem.totalTurns = maxTurns;
-			}
-			this._emitChatActivity(activityItems);
-			this._assertReply(reply);
-
-			const response = await this._nextAgentLoopTurn(
-				messages,
-				workspaceId,
-				workspacePath,
-				model,
-				'ask',
-				sessionId,
-				reply
-			);
-			this._assertReply(reply);
-
-			if (response.type === 'final') {
-				// Agent is done, return the answer
-				activityItems.find(a => a.id === 'agent')!.done = true;
-				this._emitChatActivity(activityItems);
-				return response.content || 'No response generated.';
-			}
-
-			// Handle tool calls
-			if (response.type === 'tool_calls' && response.tool_calls) {
-				for (const tc of response.tool_calls) {
-					this._pushToolActivity(activityItems, tc);
-				}
-				const agentBusy = activityItems.find(a => a.id === 'agent');
-				if (agentBusy) {
-					agentBusy.done = true;
-				}
-				this._emitChatActivity(activityItems);
-
-				const executed = await executeToolCalls(response.tool_calls, workspacePath, {
-					cancellationToken: this._cancellationTokenFromReply(reply),
-					onTodos: (todos) => this._postToWebviews({ type: 'todoUpdate', todos }),
-					onToolProgress: (toolCallId, name, progress) => {
-						if (name !== 'run_terminal_command') {
-							return;
-						}
-						this._applyTerminalProgress(activityItems, toolCallId, progress);
-						this._emitChatActivity(activityItems);
-					}
-				});
-				this._assertReply(reply);
-
-				for (const ex of executed) {
-					const item = activityItems.find(a => a.id === `tool-${ex.id}`);
-					if (item) {
-						item.done = true;
-						if (item.kind === 'terminal' && !item.status) {
-							item.status = ex.result.success ? 'succeeded' : 'failed';
-						}
-					}
-				}
-				if (agentBusy) {
-					agentBusy.done = false;
-				}
-				this._emitChatActivity(activityItems);
-
-				// Add assistant message with tool_calls, keeping the text it wrote before them
-				const callMessages = response.tool_calls.map(tc => ({
-					id: tc.id,
-					type: 'function' as const,
-					function: {
-						name: tc.name,
-						arguments: JSON.stringify(tc.arguments)
-					}
-				}));
-				messages.push({
-					role: 'assistant',
-					content: response.content || '',
-					tool_calls: callMessages
-				});
-
-				// Add tool result messages
-				const toolMessages = formatToolResultsAsMessages(executed);
-				for (const tm of toolMessages) {
-					messages.push(tm);
-				}
-				// Saved with the answer, so the next message knows what already ran (G-46).
-				roundsOut?.push({
-					content: response.content || '',
-					tool_calls: callMessages,
-					results: toolMessages.map(tm => ({ tool_call_id: tm.tool_call_id, name: tm.name, content: tm.content }))
-				});
-			}
-		}
-
-		const maxMsg = `Agent reached maximum turns (${turn}/${maxTurns}) without completing. Try breaking the request into smaller steps or continue in a new message.`;
-		if (this._hasChatSurface()) {
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: maxMsg,
-				isLoading: false
-			});
-		}
-		return maxMsg;
 	}
 
 	private _formatToolLabel(toolName: string, args: Record<string, any>): string {
@@ -4200,13 +4071,26 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		mode: AgentMode,
 		sessionId?: string,
 		reply?: InFlightReply,
-		options?: { maxTurns?: number; modifiedFilesOut?: Set<string>; costOut?: { usd: number }; modelOut?: { id: string }; roundsOut?: TranscriptRound[] }
+		options?: {
+			maxTurns?: number;
+			modifiedFilesOut?: Set<string>;
+			costOut?: { usd: number };
+			modelOut?: { id: string };
+			roundsOut?: TranscriptRound[];
+			/** Run as a subagent: activity goes to its card, nothing is posted to the main reply. */
+			subagent?: { name: string; onActivity: (items: ChatActivityItem[]) => void };
+		}
 	): Promise<string> {
 		const maxTurns = options?.maxTurns ?? getAgentMaxTurns();
 		let turn = 0;
 		let activeModel = model;
 		const roundsOut = options?.roundsOut;
-		resetAgentCwd(workspacePath);
+		const subagent = options?.subagent;
+		const emit = (items: ChatActivityItem[]) => subagent ? subagent.onActivity(items) : this._emitChatActivity(items);
+		// A subagent shares the main agent's command folder, so it does not reset it.
+		if (!subagent) {
+			resetAgentCwd(workspacePath);
+		}
 
 		// Build initial messages
 		const messages: AgentMessage[] = [
@@ -4229,7 +4113,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				agentItem.turn = turn;
 				agentItem.totalTurns = maxTurns;
 			}
-			this._emitChatActivity(activityItems);
+			emit(activityItems);
 			this._assertReply(reply);
 
 			let response: AgentTurnResponse;
@@ -4242,7 +4126,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 						activeModel,
 						mode,
 						sessionId,
-						reply
+						reply,
+						subagent?.name
 					);
 					break;
 				} catch (error) {
@@ -4290,7 +4175,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			if (response.type === 'final') {
 				// Agent is done, return the answer
 				activityItems.find(a => a.id === 'agent')!.done = true;
-				this._emitChatActivity(activityItems);
+				emit(activityItems);
 				return response.content || 'No response generated.';
 			}
 
@@ -4303,7 +4188,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				if (agentBusy) {
 					agentBusy.done = true;
 				}
-				this._emitChatActivity(activityItems);
+				emit(activityItems);
 
 				const executed = await executeToolCalls(response.tool_calls, workspacePath, {
 					cancellationToken: this._cancellationTokenFromReply(reply),
@@ -4313,7 +4198,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 							return;
 						}
 						this._applyTerminalProgress(activityItems, toolCallId, progress);
-						this._emitChatActivity(activityItems);
+						emit(activityItems);
 					}
 				});
 				this._assertReply(reply);
@@ -4330,7 +4215,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				if (agentBusy) {
 					agentBusy.done = false;
 				}
-				this._emitChatActivity(activityItems);
+				emit(activityItems);
 
 				// Add assistant message with tool_calls, keeping the text it wrote before them
 				const callMessages = response.tool_calls.map(tc => ({
@@ -4381,7 +4266,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 
 		const maxMsg = `Agent reached maximum turns (${turn}/${maxTurns}) without completing. Try breaking the request into smaller steps or continue in a new message.`;
-		if (this._hasChatSurface()) {
+		if (!subagent && this._hasChatSurface()) {
 			this._postToWebviews({
 				type: 'addMessage',
 				role: 'assistant',

@@ -345,7 +345,8 @@ export class BackendClient {
 		mode: AgentMode = 'ask',
 		sessionId?: string,
 		signal?: AbortSignal,
-		effort?: Effort
+		effort?: Effort,
+		subagent?: string
 	): AsyncIterable<SSEEvent> {
 		return createAgentApi(this.transport).agentTurnStream(
 			messages,
@@ -355,7 +356,8 @@ export class BackendClient {
 			mode,
 			sessionId,
 			signal,
-			effort
+			effort,
+			subagent
 		);
 	}
 

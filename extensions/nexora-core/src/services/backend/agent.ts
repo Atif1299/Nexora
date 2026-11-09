@@ -200,7 +200,8 @@ export function createAgentApi(transport: Transport) {
 			mode: AgentMode = 'ask',
 			sessionId?: string,
 			signal?: AbortSignal,
-			effort?: Effort
+			effort?: Effort,
+			subagent?: string
 		): AsyncIterable<SSEEvent> => {
 			return (async function* () {
 				const environment = await agentEnvironment(workspacePath);
@@ -215,7 +216,9 @@ export function createAgentApi(transport: Transport) {
 					session_id: sessionId,
 					shell: currentShell(),
 					environment,
-					project_rules: projectRulesEnabled()
+					project_rules: projectRulesEnabled(),
+					// A subagent run (delegate): the engine uses that agent's prompt and tools.
+					subagent
 				}, signal, AGENT_TURN_TIMEOUT_MS);
 			})();
 		},
