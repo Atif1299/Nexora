@@ -19,6 +19,7 @@ import {
 } from './terminalCommand';
 import { executePlatformTool } from './platformTool';
 import { delegateCall, runLimited, SUBAGENT_MAX_PARALLEL, type DelegateCall } from '../subagents';
+import { hookBlockedResult, withHookFeedback } from '../hooks';
 import { getDiagnosticsTool, withErrorsAfterEdit } from './diagnostics';
 import {
 	browserClickTool,
@@ -34,6 +35,8 @@ export interface ToolResult {
 	data?: any;
 	error?: string;
 	truncated?: boolean;
+	/** A PostToolUse hook's message for the model (Phase 4). */
+	hook_feedback?: string;
 }
 
 export interface ExecuteToolCallsOptions {
@@ -43,6 +46,14 @@ export interface ExecuteToolCallsOptions {
 	onTodos?: (todos: TodoItem[]) => void;
 	/** delegate: runs a subagent and returns its answer; absent inside a subagent (depth 1). */
 	runSubagent?: (call: DelegateCall) => Promise<ToolResult>;
+	/**
+	 * The user's PreToolUse / PostToolUse hooks (Phase 4); absent when there are none, so
+	 * no hooks costs nothing. before returns a reason to block; after, feedback for the model.
+	 */
+	hooks?: {
+		before: (tc: ToolCall) => Promise<string | undefined>;
+		after: (tc: ToolCall, result: ToolResult) => Promise<string | undefined>;
+	};
 }
 
 export interface ExecutedToolCall {
@@ -105,7 +116,26 @@ function isParallelSafe(tc: ToolCall): boolean {
 	return PARALLEL_SAFE.has(tc.name) || (args._executed === true && !!args._result);
 }
 
+/** One call with the user's hooks around it; calls the engine already answered skip them. */
 async function executeOne(
+	tc: ToolCall,
+	workspaceRoot: string,
+	options?: ExecuteToolCallsOptions
+): Promise<ExecutedToolCall> {
+	const hooks = options?.hooks;
+	if (!hooks || (tc.arguments || {})._executed) {
+		return executeTool(tc, workspaceRoot, options);
+	}
+	const blocked = await hooks.before(tc);
+	if (blocked) {
+		return { id: tc.id, name: tc.name, result: hookBlockedResult(blocked) };
+	}
+	const done = await executeTool(tc, workspaceRoot, options);
+	const feedback = await hooks.after(tc, done.result);
+	return feedback ? { ...done, result: withHookFeedback(done.result, feedback) } : done;
+}
+
+async function executeTool(
 	tc: ToolCall,
 	workspaceRoot: string,
 	options?: ExecuteToolCallsOptions

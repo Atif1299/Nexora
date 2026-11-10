@@ -12,8 +12,9 @@ import { getChatWebviewHtml } from './webview/chat';
 import type { ChatActivityItem, ChatInitialState, ContextTag, RunMode, WebviewInboundMessage } from './webview/chat/types';
 import { getOrchestrationWebSocket, type WebSocketMessage } from './services/websocketClient';
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
-import type { ToolResult } from './services/tools/executor';
+import type { ExecuteToolCallsOptions, ToolResult } from './services/tools/executor';
 import { customCommandFor, customCommandsHelp, parseSlash, BUILTIN_SLASH, type CustomCommand } from './services/slashCommands';
+import { hookRefusal, MAX_STOP_CONTINUATIONS, promptWithHookContext, stopContinuation, toolHookPayload, type HookOutcome } from './services/hooks';
 import { subagentCardTitle, subagentResult, SUBAGENT_MAX_TURNS, type DelegateCall, type SubagentState } from './services/subagents';
 import { openUrlFromChat } from './services/browser';
 import { resetAgentCwd, type TerminalCommandProgress } from './services/tools/terminalCommand';
@@ -659,18 +660,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 		// "/name text" for one of the user's command files: send the command's prompt instead.
+		// Then the user's UserPromptSubmit / SessionStart hooks, which may add context or stop it.
 		if (data.type === 'sendMessage' || data.type === 'askWorkspace') {
-			const expanded = await this._expandCustomCommand(data.message, data.type === 'sendMessage' ? 'chat' : 'ask');
-			if (expanded === undefined) {
+			const mode = data.type === 'sendMessage' ? 'chat' : 'ask';
+			const expanded = await this._expandCustomCommand(data.message, mode);
+			const ready = expanded === undefined ? undefined : await this._applyPromptHooks(expanded, mode);
+			if (ready === undefined) {
 				return;
 			}
-			data.message = expanded;
+			data.message = ready;
 		} else if (data.type === 'generatePlan' || data.type === 'executeRequest' || data.type === 'runAgent') {
-			const expanded = await this._expandCustomCommand(data.request, data.type === 'runAgent' ? 'agent' : 'plan');
-			if (expanded === undefined) {
+			const mode = data.type === 'runAgent' ? 'agent' : 'plan';
+			const expanded = await this._expandCustomCommand(data.request, mode);
+			const ready = expanded === undefined ? undefined : await this._applyPromptHooks(expanded, mode);
+			if (ready === undefined) {
 				return;
 			}
-			data.request = expanded;
+			data.request = ready;
 		}
 		if (data.type === 'sendMessage' || data.type === 'askWorkspace' || data.type === 'generatePlan'
 			|| data.type === 'executeRequest' || data.type === 'runAgent') {
@@ -1532,18 +1538,82 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			return await getBackendClient().customize().expandCommand(call.name, call.args, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
 		} catch (error) {
 			const reason = error instanceof Error ? error.message : String(error);
-			const message = `Could not run /${call.name}: ${reason}`;
-			if (mode === 'plan') {
-				this._postToWebviews({ type: 'addMessage', role: 'assistant', content: message, isLoading: false });
-			} else {
-				// Chat, Ask and Agent already show a loading reply: finish it with the error.
-				this._clearChatActivity();
-				this._postToWebviews({ type: 'appendToken', content: message });
-				this._postToWebviews({ type: 'finishMessage' });
-				this._postToWebviews({ type: 'generationRunning', running: false });
-			}
+			this._refuseSend(`Could not run /${call.name}: ${reason}`, mode);
 			return undefined;
 		}
+	}
+
+	/** Shows why a message was not sent, closing the loading reply Chat, Ask and Agent already show. */
+	private _refuseSend(message: string, mode: 'chat' | 'ask' | 'agent' | 'plan'): void {
+		if (mode === 'plan') {
+			this._postToWebviews({ type: 'addMessage', role: 'assistant', content: message, isLoading: false });
+			return;
+		}
+		this._clearChatActivity();
+		this._postToWebviews({ type: 'appendToken', content: message });
+		this._postToWebviews({ type: 'finishMessage' });
+		this._postToWebviews({ type: 'generationRunning', running: false });
+	}
+
+	// --- hooks (Phase 4): the engine runs them; the IDE asks only for events that have one ---
+
+	private _hookEvents: { at: number; folder: string; events: string[] } | undefined;
+
+	private async _activeHookEvents(): Promise<string[]> {
+		const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+		const cached = this._hookEvents;
+		if (cached && cached.folder === folder && Date.now() - cached.at < 5000) {
+			return cached.events;
+		}
+		const events = await getBackendClient().customize().hookEvents(folder || undefined);
+		this._hookEvents = { at: Date.now(), folder, events };
+		return events;
+	}
+
+	/** An event's hooks, or undefined when it has none (no call is made then). */
+	private async _runHooks(event: string, payload: Record<string, unknown>, sessionId?: string): Promise<HookOutcome | undefined> {
+		if ((await this._activeHookEvents()).indexOf(event) < 0) {
+			return undefined;
+		}
+		const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		return getBackendClient().customize().runHooks(event, payload, folder, sessionId);
+	}
+
+	/** PreToolUse / PostToolUse for the executor, or undefined when neither event has a hook. */
+	private async _toolHooks(sessionId?: string): Promise<ExecuteToolCallsOptions['hooks']> {
+		const events = await this._activeHookEvents();
+		if (events.indexOf('PreToolUse') < 0 && events.indexOf('PostToolUse') < 0) {
+			return undefined;
+		}
+		const gate = (outcome: HookOutcome | undefined) => outcome && (outcome.blocked || outcome.stop) ? (outcome.reason || 'no reason given') : undefined;
+		return {
+			before: async (tc) => gate(await this._runHooks('PreToolUse', toolHookPayload(tc), sessionId)),
+			after: async (tc, result) => gate(await this._runHooks('PostToolUse', { ...toolHookPayload(tc), tool_response: result }, sessionId))
+		};
+	}
+
+	/**
+	 * SessionStart (first message of a chat) and UserPromptSubmit hooks for a message:
+	 * the text to send, with any context they add, or undefined when one stopped it.
+	 */
+	private async _applyPromptHooks(text: string, mode: 'chat' | 'ask' | 'agent' | 'plan'): Promise<string | undefined> {
+		const session = this._getActiveSession();
+		const outcomes: Array<[string, HookOutcome | undefined]> = [];
+		if (session && session.messages.length === 0) {
+			outcomes.push(['SessionStart', await this._runHooks('SessionStart', { source: 'startup' }, session.id)]);
+		}
+		outcomes.push(['UserPromptSubmit', await this._runHooks('UserPromptSubmit', { prompt: text }, session?.id)]);
+		const context: string[] = [];
+		for (const [event, outcome] of outcomes) {
+			if (outcome && (outcome.blocked || outcome.stop)) {
+				this._refuseSend(hookRefusal(event, outcome.reason || 'no reason given'), mode);
+				return undefined;
+			}
+			if (outcome?.context) {
+				context.push(outcome.context);
+			}
+		}
+		return promptWithHookContext(text, context.join('\n'));
 	}
 
 	private async _runSlash(command: string): Promise<void> {
@@ -4234,6 +4304,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		let activeModel = model;
 		const roundsOut = options?.roundsOut;
 		const subagent = options?.subagent;
+		let stopContinuations = 0;
 		const emit = (items: ChatActivityItem[]) => subagent ? subagent.onActivity(items) : this._emitChatActivity(items);
 		// A subagent shares the main agent's command folder, so it does not reset it.
 		if (!subagent) {
@@ -4321,6 +4392,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 
 			if (response.type === 'final') {
+				// The user's Stop hooks may send the main agent back to work (not a subagent).
+				if (!subagent && stopContinuations < MAX_STOP_CONTINUATIONS) {
+					const stop = await this._runHooks('Stop', { stop_hook_active: stopContinuations > 0, last_message: response.content || '' }, sessionId);
+					if (stop?.blocked && !stop.stop) {
+						stopContinuations++;
+						messages.push({ role: 'assistant', content: response.content || '' });
+						messages.push({ role: 'user', content: stopContinuation(stop.reason || 'no reason given') });
+						continue;
+					}
+				}
 				// Agent is done, return the answer
 				activityItems.find(a => a.id === 'agent')!.done = true;
 				emit(activityItems);
@@ -4345,6 +4426,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					runSubagent: subagent ? undefined : (call) => this._runSubagent(call, {
 						workspaceId, workspacePath, mode, reply, model: activeModel, modifiedFiles, costOut: options?.costOut
 					}),
+					hooks: await this._toolHooks(sessionId),
 					onToolProgress: (toolCallId, name, progress) => {
 						if (name !== 'run_terminal_command') {
 							return;
