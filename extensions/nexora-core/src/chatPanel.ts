@@ -4153,8 +4153,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			if (message.agent) {
 				// A subagent step (agent.sub.*): the subagent's own loop, shown as its card in the chat.
 				const result = await this._runSubagent(
-					{ id: 'plan-' + taskId, agent: message.agent, task: userMessage, model: message.agent_model || '' },
-					{ workspaceId, workspacePath, mode: 'agent', model: llmModel, modifiedFiles, costOut: stepCost }
+					{ id: 'plan-' + taskId, agent: message.agent, task: instruction, model: message.agent_model || '' },
+					{ workspaceId, workspacePath, mode: 'agent', model: llmModel, modifiedFiles, costOut: stepCost, context }
 				);
 				const answer = String((result.data as { answer?: string } | undefined)?.answer || result.error || '');
 				await client.submitTaskResult({
@@ -4236,6 +4236,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			model: string | undefined;
 			modifiedFiles: Set<string>;
 			costOut?: { usd: number };
+			/** Read before the task (a plan step's skills and context); the card shows only the task. */
+			context?: string;
 		}
 	): Promise<ToolResult> {
 		const cost = { usd: 0 };
@@ -4259,7 +4261,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		post('running');
 		try {
 			const answer = await this._runAgentLoopWithMode(
-				call.task,
+				ctx.context ? ctx.context + '\n\n' + call.task : call.task,
 				ctx.workspaceId,
 				ctx.workspacePath,
 				call.model || ctx.model,

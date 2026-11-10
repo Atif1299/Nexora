@@ -111,7 +111,7 @@
 					'<label class="cz-field"><span>Token' + (card.needs_token ? '' : ' <span class="nx-hint">(optional)</span>') + '</span>' +
 					'<input class="nx-input" id="cz-agToken" type="password" autocomplete="off" placeholder="' + (card.needs_token ? 'This agent asks for a bearer token' : 'Only if the agent needs one') + '">' +
 					'<span class="nx-hint">Kept in Nexora\'s encrypted store, never in a file.</span></label>' +
-					'<p class="cz-warn">A plan step sends this agent the step\'s task and the plan\'s context. Add only agents you trust with that.</p>' +
+					'<p class="cz-warn">A plan step sends this agent its task and the step\'s skills, never your chat or project memory. Add only agents you trust with that work.</p>' +
 					'<div class="nx-row"><button type="button" class="nx-btn" data-ag="confirm"' + busy('add', 'Adding...', 'Add agent') + '</button>' +
 					'<button type="button" class="nx-btn nx-btn-ghost" data-act="closeDialog">Cancel</button></div></div>';
 			}
@@ -166,7 +166,8 @@
 
 		function paramField(p) {
 			const id = 'cz-rcParam-' + p.name;
-			const value = p['default'] === undefined || p['default'] === null ? '' : String(p['default']);
+			const typed = page.params && page.params[p.name];
+			const value = typed !== undefined ? String(typed) : (p['default'] === undefined || p['default'] === null ? '' : String(p['default']));
 			const input = Array.isArray(p.choices) && p.choices.length
 				? '<select class="nx-select" id="' + esc(id) + '" data-rc-param="' + esc(p.name) + '">' + p.choices.map(function (c) {
 					return '<option' + (String(c) === value ? ' selected' : '') + '>' + esc(c) + '</option>';
@@ -212,6 +213,7 @@
 					document.getElementById('cz-rcError').textContent = 'Fill in ' + missing + '.';
 					return;
 				}
+				page.params = params;
 				page.busy = 'use';
 				ctx.showDialog('recipeUse', useDialog());
 				bindUse();
@@ -265,6 +267,7 @@
 					page.recipe = (data('recipes') || []).find(function (r) { return r.id === d.rcUse; }) || null;
 					if (page.recipe) {
 						page.busy = '';
+						page.params = null;
 						ctx.showDialog('recipeUse', useDialog());
 						bindUse();
 					}
@@ -299,6 +302,7 @@
 				if (m.type === 'remoteAgentAnswer') {
 					page.busy = '';
 					page.answer = m.answer || {};
+					ctx.render();
 					ctx.showDialog('agentAnswer', answerDialog());
 					return true;
 				}
@@ -311,6 +315,9 @@
 				if (m.type === 'error' || m.type === 'done') {
 					const was = page.busy;
 					page.busy = '';
+					if (was) {
+						ctx.render();
+					}
 					if (m.type === 'error' && ctx.dialog() === 'agentAdd' && (was === 'read' || was === 'add')) {
 						page.cardError = m.message || '';
 						ctx.showDialog('agentAdd', addDialog());
