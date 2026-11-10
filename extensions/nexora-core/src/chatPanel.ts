@@ -766,10 +766,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				&& data.inputs && typeof data.inputs === 'object') {
 				await this._handleModifyPlan(data.planId, { update_inputs: { [data.taskId]: data.inputs } });
 			}
-		} else if (data.type === 'getRollbackable') {
-			await this._handleGetRollbackable();
-		} else if (data.type === 'rollback') {
-			await this._handleRollback(data.historyId);
 		} else if (data.type === 'indexWorkspace') {
 			await this._handleIndexWorkspace();
 		} else if (data.type === 'showEngineOutput') {
@@ -1635,6 +1631,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			case 'reindex':
 				await vscode.commands.executeCommand('nexora.reindexWorkspace');
 				return;
+			case 'undo':
+				await this.undoPlatformAction();
+				return;
 			case 'rules':
 				await vscode.commands.executeCommand('nexora.openCustomize', 'rules');
 				return;
@@ -1650,7 +1649,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 					role: 'assistant',
 					isLoading: false,
 					content: [
-						'**Commands:** `/new` new chat, `/chat` `/ask` `/agent` `/plan` `/execute` switch mode (text after the command is sent in that mode), `/model` choose a model, `/reindex` re-index the workspace, `/rules` open the rules, `/customize` open skills, subagents, commands and rules, `/help` this list.',
+						'**Commands:** `/new` new chat, `/chat` `/ask` `/agent` `/plan` `/execute` switch mode (text after the command is sent in that mode), `/model` choose a model, `/reindex` re-index the workspace, `/undo` undo a platform action a plan ran, `/rules` open the rules, `/customize` open skills, subagents, commands and rules, `/help` this list.',
 						customCommandsHelp(this._customCommands) || 'Add your own commands in Customize (`/customize`), or keep the ones you have in `.claude/commands` or `.cursor/commands`.',
 						'**Keys:** Enter send, Shift+Enter new line, Shift+Tab next mode, Esc close a menu or stop a reply, @ add a file, / commands.'
 					].join('\n\n')
@@ -1943,10 +1942,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 		this._saveTemplateOfferedFor = planId;
 		const action = await getNotificationService().showInfo(
-			'Save this workflow as a reusable template?',
-			'Save as Template'
+			'Save this plan as a recipe you can run again from Customize > Recipes?',
+			'Save as recipe'
 		);
-		if (action !== 'Save as Template') {
+		if (action !== 'Save as recipe') {
 			return;
 		}
 		try {
@@ -1979,11 +1978,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				category: data.category,
 				parameters: data.parameters
 			});
-			void notifications.showSuccess(`Saved template "${saved.name}"`);
+			void notifications.showSuccess(`Saved recipe "${saved.name}". Run it from Customize > Recipes.`);
 			void vscode.commands.executeCommand('nexora.refreshTemplates');
 		} catch (error) {
 			void notifications.showError(
-				`Failed to save template: ${error instanceof Error ? error.message : String(error)}`
+				`Couldn't save the recipe: ${error instanceof Error ? error.message : String(error)}`
 			);
 		}
 	}
@@ -3344,100 +3343,63 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	private async _handleGetRollbackable(): Promise<void> {
-		if (!this._hasChatSurface()) {
-			return;
-		}
-
+	/**
+	 * Undo a platform action a plan ran in this folder (the engine's undo list): pick one,
+	 * confirm what the undo will do, run it. File edits are undone with Restore files instead.
+	 */
+	public async undoPlatformAction(): Promise<void> {
+		const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+		const client = getBackendClient();
+		let items;
 		try {
-			const client = getBackendClient();
 			// Only this folder's actions: an undo from folder B must not offer folder A's deploy.
 			const { workspaceId } = await this._workspaceContext();
-			const items = await client.getRollbackable('default', workspaceId);
-
-			let response = `**Rollbackable Actions**\n\n`;
-
-			if (items.length === 0) {
-				response += `No rollbackable actions available.`;
-			} else {
-				response += `The following actions can be undone:\n\n`;
-				for (const item of items) {
-					response += `- **ID ${item.id}**: ${item.platform}/${item.operation} → can ${item.rollback_operation}\n`;
-				}
-				response += `\nTo rollback, use the rollback command with the ID.`;
-			}
-
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: response,
-				isLoading: false
-			});
-
+			items = await client.getRollbackable('default', workspaceId);
 		} catch (error) {
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: `Error getting rollbackable items: ${error instanceof Error ? error.message : 'Unknown error'}`,
-				isLoading: false
-			});
-		}
-	}
-
-	private async _handleRollback(historyId: number): Promise<void> {
-		if (!this._hasChatSurface()) {
+			void vscode.window.showErrorMessage(`Couldn't load the undo list: ${errorText(error)}`);
 			return;
 		}
-
-		this._postToWebviews({
-			type: 'addMessage',
-			role: 'assistant',
-			content: `Rolling back action ${historyId}...`,
-			isLoading: true
-		});
-
+		if (!items.length) {
+			void vscode.window.showInformationMessage(
+				'Nothing to undo in this folder. Undo covers platform actions a plan ran, such as creating a repository or a deployment; use Restore files under an agent message for file edits.'
+			);
+			return;
+		}
+		const picked = await vscode.window.showQuickPick(items.map(item => ({
+			label: `$(discard) ${item.platform}: ${item.operation}`,
+			description: item.rollback_operation ? `undo runs ${item.rollback_operation}` : undefined,
+			// The engine stores UTC without a zone suffix; read it as UTC, show local time.
+			detail: item.completed_at
+				? `Ran ${new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(item.completed_at) ? item.completed_at : item.completed_at + 'Z').toLocaleString()}`
+				: undefined,
+			item
+		})), { placeHolder: 'Undo a platform action a plan ran in this folder' });
+		if (!picked) {
+			return;
+		}
+		const { item } = picked;
 		try {
-			const client = getBackendClient();
-
-			// Get rollback info first
-			const info = await client.getRollbackInfo(historyId);
-
-			if (info.warning) {
-				// Show warning but proceed
-				this._postToWebviews({
-					type: 'addMessage',
-					role: 'assistant',
-					content: `**Warning:** ${info.warning}`,
-					isLoading: false
-				});
+			const info = await client.getRollbackInfo(item.id);
+			const what = info.rollback_operation || item.rollback_operation || 'its undo operation';
+			const answer = await vscode.window.showWarningMessage(
+				`Undo ${item.platform}: ${item.operation}?`,
+				{ modal: true, detail: `Nexora will run ${what} on ${item.platform}.${info.warning ? '\n\n' + info.warning : ''}` },
+				'Undo'
+			);
+			if (answer !== 'Undo') {
+				return;
 			}
-
-			// Execute rollback
-			const result = await client.rollback(historyId, 'default');
-
+			const result = await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: `Undoing ${item.platform}: ${item.operation}` },
+				() => client.rollback(item.id, 'default')
+			);
 			if (result.success) {
-				this._postToWebviews({
-					type: 'addMessage',
-					role: 'assistant',
-					content: `**Rollback Successful**\n\n${result.message}`,
-					isLoading: false
-				});
+				void vscode.window.showInformationMessage(result.message || `Undid ${item.platform}: ${item.operation}.`);
 			} else {
-				this._postToWebviews({
-					type: 'addMessage',
-					role: 'assistant',
-					content: `**Rollback Failed**\n\n${result.message}`,
-					isLoading: false
-				});
+				void vscode.window.showErrorMessage(`Couldn't undo ${item.platform}: ${item.operation}. ${result.message || ''}`.trim());
 			}
-
 		} catch (error) {
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: `Error during rollback: ${error instanceof Error ? error.message : 'Unknown error'}`,
-				isLoading: false
-			});
+			void vscode.window.showErrorMessage(`Couldn't undo ${item.platform}: ${item.operation}. ${errorText(error)}`);
 		}
 	}
 

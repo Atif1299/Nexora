@@ -37,6 +37,7 @@
 		{ cmd: 'execute', desc: 'Switch to Execute', mode: 'execute' },
 		{ cmd: 'model', desc: 'Choose a model' },
 		{ cmd: 'reindex', desc: 'Re-index this workspace' },
+		{ cmd: 'undo', desc: 'Undo a platform action a plan ran' },
 		{ cmd: 'rules', desc: 'Open the rules' },
 		{ cmd: 'customize', desc: 'Skills, subagents, commands and rules' },
 		{ cmd: 'help', desc: 'Show commands and keys' }

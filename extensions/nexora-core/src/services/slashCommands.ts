@@ -8,7 +8,7 @@
 // Pure helpers, no vscode import.
 
 /** Built-in commands; a command file with one of these names is hidden by it. */
-export const BUILTIN_SLASH: string[] = ['new', 'chat', 'ask', 'agent', 'plan', 'execute', 'model', 'reindex', 'rules', 'customize', 'help'];
+export const BUILTIN_SLASH: string[] = ['new', 'chat', 'ask', 'agent', 'plan', 'execute', 'model', 'reindex', 'undo', 'rules', 'customize', 'help'];
 
 const SLASH_RE = /^\/([a-z0-9][a-z0-9_:-]*)(?:\s+([\s\S]*))?$/i;
 

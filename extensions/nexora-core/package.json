@@ -283,6 +283,12 @@
         "title": "Nexora Menu",
         "category": "Nexora",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "nexora.undoPlatformAction",
+        "title": "Undo a Platform Action",
+        "category": "Nexora",
+        "icon": "$(discard)"
       }
     ],
     "menus": {
@@ -356,6 +362,11 @@
           "command": "nexora.refreshTimeline",
           "when": "view == nexora.timeline",
           "group": "navigation"
+        },
+        {
+          "command": "nexora.undoPlatformAction",
+          "when": "view == nexora.chatPanel",
+          "group": "3_undo@1"
         }
       ],
       "editor/title": [
@@ -398,6 +409,11 @@
           "command": "nexora.showEngineOutput",
           "when": "activeWebviewPanelId == nexora.chatEditor",
           "group": "2_view@3"
+        },
+        {
+          "command": "nexora.undoPlatformAction",
+          "when": "activeWebviewPanelId == nexora.chatEditor",
+          "group": "3_undo@1"
         }
       ],
       "commandCenter": [

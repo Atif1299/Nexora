@@ -2694,10 +2694,10 @@
 		}).join('');
 
 		card.innerHTML = `
-			<div class="nx-saveTitle">Save as template</div>
+			<div class="nx-saveTitle">Save as recipe</div>
 			<div class="nx-saveField">
 				<label for="saveTplName">Name</label>
-				<input id="saveTplName" type="text" value="Saved workflow" />
+				<input id="saveTplName" type="text" value="Saved recipe" />
 			</div>
 			<div class="nx-saveField">
 				<label for="saveTplDesc">Description</label>
@@ -2709,7 +2709,7 @@
 			</div>
 			${rows}
 			<div class="nx-saveActions">
-				<button type="button" class="nx-saveConfirm" id="saveTplConfirm" data-plan-id="${escapeHtml(planId)}">Save template</button>
+				<button type="button" class="nx-saveConfirm" id="saveTplConfirm" data-plan-id="${escapeHtml(planId)}">Save recipe</button>
 				<button type="button" class="nx-saveCancel" id="saveTplCancel">Cancel</button>
 			</div>
 		`;
@@ -3097,7 +3097,7 @@
 			if (!card || !planId) {
 				return;
 			}
-			const name = (card.querySelector('#saveTplName') || {}).value || 'Saved workflow';
+			const name = (card.querySelector('#saveTplName') || {}).value || 'Saved recipe';
 			const description = (card.querySelector('#saveTplDesc') || {}).value || '';
 			const category = (card.querySelector('#saveTplCat') || {}).value || 'custom';
 			const parameters = [];

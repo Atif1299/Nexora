@@ -52,8 +52,6 @@ export type WebviewInboundMessage =
 	| { type: 'runFix'; fix: string }
 	/** New inputs for a step that needs input; the engine validates them again. */
 	| { type: 'updateStepInputs'; planId: string; taskId: string; inputs: Record<string, unknown> }
-	| { type: 'getRollbackable' }
-	| { type: 'rollback'; historyId: number }
 	| { type: 'indexWorkspace' }
 	| { type: 'showEngineOutput' }
 	| ({ type: 'executeRequest'; request: string } & ComposerExtras)

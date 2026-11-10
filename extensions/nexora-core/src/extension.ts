@@ -388,6 +388,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.showEngineOutput', () => showEngineOutput()),
 		vscode.commands.registerCommand('nexora.newSession', () => chatProvider.createNewSession()),
 		vscode.commands.registerCommand('nexora.toggleSessions', () => chatProvider.toggleSessionRail()),
+		vscode.commands.registerCommand('nexora.undoPlatformAction', () => chatProvider.undoPlatformAction()),
 		// section: plugins | platforms | skills | agents | recipes | commands | hooks | rules; none = All.
 		vscode.commands.registerCommand('nexora.openCustomize', async (section?: unknown, startNew?: unknown) => {
 			await customizeProvider.open(typeof section === 'string' ? section : undefined, startNew === true);
@@ -410,6 +411,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				{ label: '$(play-circle) Recipes', description: 'Run a saved plan', run: () => vscode.commands.executeCommand('nexora.openCustomize', 'recipes') },
 				{ label: '$(plug) Platforms', description: 'Connect services', run: () => vscode.commands.executeCommand('nexora.openPlatformBrowser') },
 				{ label: '$(extensions) Customize', description: 'Plugins, skills, agents, hooks, rules', run: () => vscode.commands.executeCommand('nexora.openCustomize') },
+				{ label: '$(discard) Undo a platform action', description: 'Reverse what a plan did on a platform', run: () => vscode.commands.executeCommand('nexora.undoPlatformAction') },
 				{ label: '$(history) Memory timeline', run: () => vscode.commands.executeCommand('nexora.openTimeline') },
 				{ label: '$(settings-gear) Settings', run: () => vscode.commands.executeCommand('nexora.openSettings') },
 				{ label: '$(output) Engine output', run: () => vscode.commands.executeCommand('nexora.showEngineOutput') }
