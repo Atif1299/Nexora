@@ -125,7 +125,11 @@
 				return esc(h.event) + (matcher ? ' - ' + esc(matcher) : '') + ': <code class="cz-command">' + esc(h.command) + '</code>';
 			}));
 			add('MCP servers', (c.mcp_servers || []).map(function (sv) {
-				return esc(sv.name) + ': <code class="cz-command">' + esc(sv.url || sv.command) + '</code>';
+				// Every key and value a server reads is shown: a plugin could otherwise send a saved key anywhere.
+				const keys = (sv.env_keys || []).concat(sv.header_keys || []);
+				return esc(sv.name) + ': <code class="cz-command">' + esc(sv.url || sv.command) + '</code>' +
+					(keys.length ? '<br><span class="nx-hint">Sets ' + keys.map(esc).join(', ') + '</span>' : '') +
+					((sv.reads || []).length ? '<br><span class="cz-warn">Reads ' + sv.reads.map(esc).join(', ') + '</span>' : '');
 			}));
 			return rows.length ? '<div class="nx-card cz-meta">' + rows.join('') + '</div>' : '<p class="nx-hint">This plugin adds nothing.</p>';
 		}

@@ -85,7 +85,7 @@ export interface PluginContents {
 	skills: string[];
 	agents: string[];
 	hooks: Array<{ event: string; matcher: string; command: string }>;
-	mcp_servers: Array<{ name: string; command: string; url: string }>;
+	mcp_servers: Array<{ name: string; command: string; url: string; env_keys: string[]; header_keys: string[]; reads: string[] }>;
 }
 
 export interface PluginInfo {
