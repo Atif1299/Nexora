@@ -40,6 +40,44 @@ export interface CustomizeList {
 	agents: CustomizeItem[];
 }
 
+/** What past plan steps taught the router about one capability (routing that learns). */
+export interface LearnedSummary {
+	runs: number;
+	ok: number;
+	rate: number;
+	avg_ms: number;
+	avg_cost: number | null;
+}
+
+/** Agents a plan step can use, as GET /api/customize/agents lists them (Phase 5). */
+export interface AgentsInfo {
+	local: { id: string; name: string; binary: string; install_hint: string; docs_url: string; installed: boolean; capability: string; learned: LearnedSummary | null }[];
+	subagents: { name: string; description: string; scope: string; origin: string; plugin: string; path: string; effects: string; capability: string; learned: LearnedSummary | null }[];
+	remote: RemoteAgent[];
+}
+
+export interface RemoteAgent {
+	name: string;
+	title: string;
+	description: string;
+	url: string;
+	card_url: string;
+	version: string;
+	protocol: 'jsonrpc' | 'nexora';
+	skills: { id: string; name: string; description: string }[];
+	needs_token: boolean;
+	has_token?: boolean;
+	capability?: string;
+	learned?: LearnedSummary | null;
+}
+
+export interface RemoteAgentAnswer {
+	ok: boolean;
+	text: string;
+	error: string;
+	state?: string;
+}
+
 export interface CustomizeExample {
 	id: string;
 	kind: CustomizeKind;
@@ -116,6 +154,8 @@ export interface MarketplaceInfo {
 
 /** Fetching a plugin or marketplace can mean a git clone: the engine allows 120 s. */
 const PLUGIN_FETCH_TIMEOUT_MS = 150_000;
+// A remote agent's test answer (the engine gives up after 60 s).
+const REMOTE_TEST_TIMEOUT_MS = 75_000;
 
 function query(workspacePath?: string): string {
 	return workspacePath ? '?workspace_path=' + encodeURIComponent(workspacePath) : '';
@@ -235,6 +275,40 @@ export function createCustomizeApi(transport: Transport) {
 			await transport.delete('/api/plugins/marketplaces/' + encodeURIComponent(name));
 		},
 		refreshMarketplace: async (name: string): Promise<MarketplaceInfo> =>
-			transport.post('/api/plugins/marketplaces/' + encodeURIComponent(name) + '/refresh', {}, PLUGIN_FETCH_TIMEOUT_MS)
+			transport.post('/api/plugins/marketplaces/' + encodeURIComponent(name) + '/refresh', {}, PLUGIN_FETCH_TIMEOUT_MS),
+
+		// --- agents as plan executors (Phase 5) ---
+
+		listAgents: async (workspacePath?: string): Promise<AgentsInfo | undefined> => {
+			try {
+				const r = await transport.get('/api/customize/agents' + (workspacePath ? '?workspace_path=' + encodeURIComponent(workspacePath) : ''));
+				return Array.isArray(r?.local) ? r as AgentsInfo : undefined;
+			} catch {
+				return undefined;
+			}
+		},
+		previewRemoteAgent: async (url: string): Promise<RemoteAgent> =>
+			transport.post('/api/customize/agents/a2a/preview', { url }, PLUGIN_FETCH_TIMEOUT_MS),
+		addRemoteAgent: async (url: string, token?: string): Promise<RemoteAgent> =>
+			transport.post('/api/customize/agents/a2a', { url, token: token || undefined }, PLUGIN_FETCH_TIMEOUT_MS),
+		removeRemoteAgent: async (name: string): Promise<void> => {
+			await transport.delete('/api/customize/agents/a2a/' + encodeURIComponent(name));
+		},
+		testRemoteAgent: async (name: string): Promise<RemoteAgentAnswer> =>
+			transport.post('/api/customize/agents/a2a/' + encodeURIComponent(name) + '/test', {}, REMOTE_TEST_TIMEOUT_MS),
+		/** How much routing has learned: plan steps recorded and capabilities they cover. */
+		learnedFacts: async (): Promise<{ steps: number; capabilities: number } | undefined> => {
+			try {
+				const r = await transport.get('/api/capabilities/learned');
+				const caps = Object.values((r?.capabilities || {}) as Record<string, LearnedSummary | null>);
+				return { steps: caps.reduce((n, c) => n + (c?.runs || 0), 0), capabilities: caps.length };
+			} catch {
+				return undefined;
+			}
+		},
+		forgetLearned: async (): Promise<number> => {
+			const r = await transport.delete('/api/capabilities/learned');
+			return Number(r?.forgotten || 0);
+		}
 	};
 }

@@ -852,6 +852,10 @@ export class BackendClient {
 		return createWorkflowsApi(this.transport).exportTemplate(templateId);
 	}
 
+	async deleteTemplate(templateId: string): Promise<{ deleted: string }> {
+		return createWorkflowsApi(this.transport).deleteTemplate(templateId);
+	}
+
 	async previewImportTemplate(bundle: Record<string, unknown>): Promise<ImportPreview> {
 		return createWorkflowsApi(this.transport).previewImport(bundle);
 	}

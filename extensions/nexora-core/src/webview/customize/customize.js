@@ -34,6 +34,10 @@
 		M: M, esc: esc, ui: ui, post: post, header: header, tooOld: tooOld, render: render, setSection: setSection,
 		showDialog: showDialog, closeDialog: closeDialog, dialog: function () { return ui.dialog; }
 	});
+	const Orch = window.NexoraCustomizeOrchestration({
+		M: M, esc: esc, ui: ui, post: post, header: header, tooOld: tooOld, render: render, setSection: setSection,
+		showDialog: showDialog, closeDialog: closeDialog, dialog: function () { return ui.dialog; }, reveal: reveal
+	});
 	const PAGE_SECTIONS = ['hooks', 'plugins'];
 
 	function $(id) {
@@ -65,6 +69,9 @@
 		}
 		if (id === 'platforms') {
 			return -1;
+		}
+		if (id === 'recipes') {
+			return Orch.count();
 		}
 		if (PAGE_SECTIONS.indexOf(id) >= 0) {
 			return Pages.count(id);
@@ -342,6 +349,10 @@
 			return;
 		}
 		const s = section();
+		if (s.id === 'recipes') {
+			main.innerHTML = Orch.render(s);
+			return;
+		}
 		if (PAGE_SECTIONS.indexOf(s.id) >= 0) {
 			main.innerHTML = Pages.render(s);
 			Pages.afterRender();
@@ -360,7 +371,7 @@
 				main.innerHTML = renderItems(s);
 			}
 		} else {
-			main.innerHTML = renderItems(s);
+			main.innerHTML = renderItems(s) + (s.id === 'agents' && ui.data.engine ? Orch.agentsExtra() : '');
 		}
 		const form = $('cz-newForm');
 		if (form) {
@@ -378,6 +389,13 @@
 				again.setSelectionRange(pos, pos);
 			});
 		}
+	}
+
+	/** 'plugins:marketplace' or 'hooks:new' opens a page with its tab or form. */
+	function reveal(where) {
+		const parts = String(where).split(':');
+		Pages.reveal(parts[1] || '');
+		setSection(parts[0]);
 	}
 
 	function setSection(id) {
@@ -401,7 +419,7 @@
 			return;
 		}
 		const d = t.dataset;
-		if (Pages.click(t)) {
+		if (Pages.click(t) || Orch.click(t)) {
 			return;
 		}
 		if (d.section) {
@@ -473,7 +491,8 @@
 
 	window.addEventListener('message', function (event) {
 		const m = event.data || {};
-		if (Pages.message(m)) {
+		// Orch first: it also needs to see 'done' and 'error', which Pages may claim.
+		if (Orch.message(m) || Pages.message(m)) {
 			return;
 		}
 		switch (m.type) {
@@ -486,10 +505,7 @@
 				break;
 			case 'reveal':
 				if (m.section) {
-					// 'plugins:marketplace' or 'hooks:new' opens a page's tab or form.
-					const parts = String(m.section).split(':');
-					Pages.reveal(parts[1] || '');
-					setSection(parts[0]);
+					reveal(m.section);
 				}
 				if (m.startNew) {
 					ui.newForm = true;

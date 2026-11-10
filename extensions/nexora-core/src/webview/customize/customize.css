@@ -785,3 +785,38 @@
 {
 	width: 90px;
 }
+
+/* Phase 5: agents and recipes */
+
+.cz-okChip
+{
+	border-color: var(--vscode-testing-iconPassed, #3fb950);
+	color: var(--vscode-testing-iconPassed, #3fb950);
+}
+
+.cz-grow
+{
+	flex: 1;
+	min-width: 0;
+}
+
+.cz-previewList
+{
+	margin: 4px 0 10px;
+	padding-left: 20px;
+	line-height: 1.6;
+}
+
+.cz-learned
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-top: 16px;
+}
+
+.cz-learned p
+{
+	margin: 4px 0 0;
+}

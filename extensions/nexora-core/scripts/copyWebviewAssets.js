@@ -62,7 +62,7 @@ function main() {
 	copyWebviewFolder(root, 'platforms', ['platforms.css', 'platforms.js']);
 
 	// Customize editor page assets (Phase 3)
-	copyWebviewFolder(root, 'customize', ['customize.css', 'model.js', 'pages.js', 'customize.js']);
+	copyWebviewFolder(root, 'customize', ['customize.css', 'model.js', 'pages.js', 'orchestration.js', 'customize.js']);
 }
 
 main();

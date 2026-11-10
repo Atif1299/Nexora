@@ -16,8 +16,10 @@
 			blurb: 'Bundles of commands, skills, subagents, hooks and MCP servers, installed in one step from a marketplace, a git repository or a folder. Claude Code plugins work as they are.' },
 		{ id: 'skills', kind: 'skill', title: 'Skills', singular: 'skill',
 			blurb: 'Instructions for a kind of task. The agent sees each skill\'s name and description and loads the full text only when a request matches, so you can keep many.' },
-		{ id: 'agents', kind: 'agent', title: 'Subagents', singular: 'subagent',
-			blurb: 'Specialists the agent hands a task to, each with its own instructions, tools and model. Up to 3 run at once; each shows as a card in the chat.' },
+		{ id: 'agents', kind: 'agent', title: 'Agents', singular: 'subagent',
+			blurb: 'Who can take on work: your subagents (the chat agent hands them tasks, up to 3 at once), coding agents on this PC and remote A2A agents. Plans can give a step to any of them.' },
+		{ id: 'recipes', kind: 'recipe', title: 'Recipes', singular: 'recipe',
+			blurb: 'Plans you can run again with new values: steps across platforms and agents, with their skills. Save a finished plan from its card, import one, or get them with plugins.' },
 		{ id: 'commands', kind: 'command', title: 'Commands', singular: 'command',
 			blurb: 'Prompts you run by typing /name in the chat. Text after the name fills $ARGUMENTS.' },
 		{ id: 'hooks', kind: 'hook', title: 'Hooks', singular: 'hook',
@@ -93,7 +95,7 @@
 		const c = contents || {};
 		const parts = [
 			[c.commands, 'command', 'commands'], [c.skills, 'skill', 'skills'], [c.agents, 'subagent', 'subagents'],
-			[c.hooks, 'hook', 'hooks'], [c.mcp_servers, 'MCP server', 'MCP servers']
+			[c.hooks, 'hook', 'hooks'], [c.mcp_servers, 'MCP server', 'MCP servers'], [c.recipes, 'recipe', 'recipes']
 		].filter(function (p) { return Array.isArray(p[0]) && p[0].length; })
 			.map(function (p) { return plural(p[0].length, p[1], p[2]); });
 		return parts.length ? parts.join(' - ') : 'Nothing to add';
@@ -204,8 +206,88 @@
 		return 'Use the ' + name + ' ' + (kind === 'agent' ? 'subagent' : 'skill') + ' to ';
 	}
 
+	/** "4 of 5 plan runs worked, about 40 s" from what past runs taught the router; '' before any. */
+	function learnedLabel(summary) {
+		if (!summary || !summary.runs) {
+			return '';
+		}
+		const seconds = Math.round(Number(summary.avg_ms || 0) / 1000);
+		const took = seconds >= 120 ? 'about ' + Math.round(seconds / 60) + ' min' : 'about ' + seconds + ' s';
+		return summary.ok + ' of ' + summary.runs + ' plan runs worked, ' + took;
+	}
+
+	/** The Routing that learns card: what the stats cover. */
+	function learnedFacts(facts) {
+		return 'Nexora has learned from ' + facts.steps + (facts.steps === 1 ? ' plan step' : ' plan steps') + ' across ' +
+			facts.capabilities + (facts.capabilities === 1 ? ' capability' : ' capabilities') +
+			'. After 3 runs, a route or agent that keeps failing moves down and one that works faster and cheaper moves up.';
+	}
+
+	const RECIPE_GROUPS = [
+		{ title: 'Yours', match: function (r) { return r.source === 'user' || r.source === 'imported'; } },
+		{ title: 'From plugins', match: function (r) { return r.source === 'plugin'; } },
+		{ title: 'Built in', match: function (r) { return r.source === 'builtin'; } }
+	];
+
+	function groupRecipes(list) {
+		return RECIPE_GROUPS.map(function (g) {
+			return { title: g.title, items: list.filter(g.match).sort(function (a, b) { return a.name.localeCompare(b.name); }) };
+		}).filter(function (g) { return g.items.length; });
+	}
+
+	function recipeSourceLabel(recipe) {
+		if (recipe.source === 'plugin') {
+			return 'Plugin ' + ((recipe.metadata && recipe.metadata.plugin) || '');
+		}
+		return { builtin: 'Built in', imported: 'Imported', user: 'Yours' }[recipe.source] || recipe.source;
+	}
+
+	const LOCAL_AGENT_NAMES = { 'claude-code': 'Claude Code', cursor: 'Cursor', cline: 'Cline' };
+
+	/** Who runs a recipe step: "IDE agent", "subagent ui-tester", "Claude Code", "remote agent x" or the capability. */
+	function stepRunner(capability) {
+		const id = String(capability || '');
+		const name = id.split('.').slice(2).join('.');
+		if (id === 'workspace.implement') {
+			return 'IDE agent';
+		}
+		if (id.indexOf('agent.sub.') === 0) {
+			return 'subagent ' + name;
+		}
+		if (id.indexOf('agent.local.') === 0) {
+			return LOCAL_AGENT_NAMES[name] || name;
+		}
+		if (id.indexOf('agent.a2a.') === 0) {
+			return 'remote agent ' + name;
+		}
+		return id;
+	}
+
+	/** "3 steps - 2 inputs - uses agents" */
+	function recipeSummary(recipe) {
+		const tasks = recipe.tasks || [];
+		const params = recipe.parameters || [];
+		const parts = [tasks.length + (tasks.length === 1 ? ' step' : ' steps')];
+		if (params.length) {
+			parts.push(params.length + (params.length === 1 ? ' input' : ' inputs'));
+		}
+		if (tasks.some(function (t) { return String(t.capability || '').indexOf('agent.') === 0; })) {
+			parts.push('uses agents');
+		}
+		if (tasks.some(function (t) { return (t.skills || []).length; })) {
+			parts.push('uses skills');
+		}
+		return parts.join(' - ');
+	}
+
 	const api = {
 		SECTIONS: SECTIONS,
+		learnedLabel: learnedLabel,
+		learnedFacts: learnedFacts,
+		groupRecipes: groupRecipes,
+		recipeSourceLabel: recipeSourceLabel,
+		stepRunner: stepRunner,
+		recipeSummary: recipeSummary,
 		EVENT_INFO: EVENT_INFO,
 		hookRunLabel: hookRunLabel,
 		hookMatcherLabel: hookMatcherLabel,

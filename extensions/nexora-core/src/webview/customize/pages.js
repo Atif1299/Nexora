@@ -120,6 +120,7 @@
 			add('Commands', (c.commands || []).map(function (x) { return '<code>/' + esc(x) + '</code>'; }));
 			add('Skills', (c.skills || []).map(esc));
 			add('Subagents', (c.agents || []).map(esc));
+			add('Recipes', (c.recipes || []).map(esc));
 			add('Hooks', (c.hooks || []).map(function (h) {
 				const matcher = M.hookMatcherLabel(h.event, h.matcher);
 				return esc(h.event) + (matcher ? ' - ' + esc(matcher) : '') + ': <code class="cz-command">' + esc(h.command) + '</code>';

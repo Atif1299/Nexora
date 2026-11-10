@@ -8,6 +8,7 @@
 // editor; Nexora's own items can be deleted (to the trash); others can be copied into
 // Nexora to edit. Examples install in one click, and Try puts the item in the chat.
 
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { acquireEditorPanel, gateEditorPanel } from './services/editorPage';
@@ -139,13 +140,16 @@ export class CustomizePanelProvider {
 		const folder = this._folder();
 		const client = getBackendClient();
 		const api = client.customize();
-		const [list, examples, rules, hookList, installedPlugins, marketplaces] = await Promise.all([
+		const [list, examples, rules, hookList, installedPlugins, marketplaces, agentsInfo, learned, recipes] = await Promise.all([
 			api.list(folder),
 			api.examples(folder),
 			client.getProjectRules(folder).catch(() => undefined),
 			api.listHooks(folder),
 			api.listPlugins(),
-			api.listMarketplaces()
+			api.listMarketplaces(),
+			api.listAgents(folder),
+			api.learnedFacts(),
+			client.listTemplates().then((r) => r.templates, () => null)
 		]);
 		this._post({
 			type: 'state',
@@ -162,6 +166,10 @@ export class CustomizePanelProvider {
 			hookShell: hookList ? hookList.shell : '',
 			plugins: installedPlugins || null,
 			marketplaces: marketplaces || [],
+			// Phase 5: agents plans can use, what routing learned, and recipes (null: engine too old)
+			agentsInfo: agentsInfo || null,
+			learned: learned || null,
+			recipes: recipes || null,
 			rulesEnabled: vscode.workspace.getConfiguration('nexora.agent').get<boolean>('projectRules', true)
 		});
 	}
@@ -273,6 +281,50 @@ export class CustomizePanelProvider {
 				case 'removeMarketplace':
 					await this._removeMarketplace(String(msg.name || ''));
 					return;
+				// --- agents and recipes (Phase 5) ---
+				case 'previewRemoteAgent':
+					this._post({ type: 'remoteAgentCard', card: await this._api().previewRemoteAgent(String(msg.url || '')) });
+					return;
+				case 'addRemoteAgent': {
+					const agent = await this._api().addRemoteAgent(String(msg.url || ''), String(msg.token || ''));
+					await this._pushState();
+					this._post({ type: 'remoteAgentAdded', name: agent.name });
+					void vscode.window.showInformationMessage(`Added ${agent.title || agent.name}. Plans can now give it a step (agent.a2a.${agent.name}).`);
+					return;
+				}
+				case 'removeRemoteAgent':
+					await this._removeRemoteAgent(String(msg.name || ''));
+					return;
+				case 'testRemoteAgent': {
+					const name = String(msg.name || '');
+					const answer = await this._api().testRemoteAgent(name);
+					this._post({ type: 'remoteAgentAnswer', answer: { ...answer, title: name } });
+					return;
+				}
+				case 'forgetLearned':
+					await this._forgetLearned();
+					return;
+				case 'copyText':
+					await vscode.env.clipboard.writeText(String(msg.text || ''));
+					void vscode.window.showInformationMessage('Copied. Run it in a terminal, then reopen Customize.');
+					return;
+				case 'openExternal':
+					if (/^https?:\/\//.test(String(msg.url || ''))) {
+						await vscode.env.openExternal(vscode.Uri.parse(String(msg.url)));
+					}
+					return;
+				case 'useRecipe':
+					await this._useRecipe(String(msg.id || ''), (msg.params && typeof msg.params === 'object') ? msg.params : {});
+					return;
+				case 'exportRecipe':
+					await this._exportRecipe(String(msg.id || ''));
+					return;
+				case 'deleteRecipe':
+					await this._deleteRecipe(String(msg.id || ''));
+					return;
+				case 'importRecipe':
+					await this._importRecipe();
+					return;
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -357,6 +409,86 @@ export class CustomizePanelProvider {
 	}
 
 	/** A project rule file, given relative to the folder as /api/memory/rules lists it. */
+	private async _removeRemoteAgent(name: string): Promise<void> {
+		const ok = await vscode.window.showWarningMessage(
+			`Remove the remote agent ${name}? Plans that use it will skip its steps, and its saved token is deleted.`,
+			{ modal: true }, 'Remove');
+		if (ok !== 'Remove') {
+			return;
+		}
+		await this._api().removeRemoteAgent(name);
+		await this._pushState();
+	}
+
+	private async _forgetLearned(): Promise<void> {
+		const ok = await vscode.window.showWarningMessage(
+			'Forget what Nexora learned from past plan steps? Routes and agents go back to their default order.',
+			{ modal: true }, 'Forget');
+		if (ok !== 'Forget') {
+			this._post({ type: 'done' });
+			return;
+		}
+		await this._api().forgetLearned();
+		await this._pushState();
+		this._post({ type: 'done' });
+	}
+
+	/** Build a recipe's plan with these values and show it in the chat for approval. */
+	private async _useRecipe(id: string, params: Record<string, unknown>): Promise<void> {
+		const plan = await getBackendClient().instantiateTemplate(id, params, 'default', this._folder());
+		this._post({ type: 'recipePlanned' });
+		await vscode.commands.executeCommand('nexora.showPlanApproval', plan);
+	}
+
+	private async _exportRecipe(id: string): Promise<void> {
+		const bundle = await getBackendClient().exportTemplate(id);
+		const folder = this._folder();
+		const target = await vscode.window.showSaveDialog({
+			defaultUri: vscode.Uri.file(path.join(folder || os.homedir(), id + '.nexora-recipe.json')),
+			filters: { 'Nexora recipe': ['json'] }
+		});
+		if (!target) {
+			return;
+		}
+		await vscode.workspace.fs.writeFile(target, Buffer.from(JSON.stringify(bundle, null, 2), 'utf8'));
+		void vscode.window.showInformationMessage(`Saved ${path.basename(target.fsPath)}. Anyone can import it in Customize > Recipes.`);
+	}
+
+	private async _deleteRecipe(id: string): Promise<void> {
+		const ok = await vscode.window.showWarningMessage(`Delete the recipe ${id}? This cannot be undone.`, { modal: true }, 'Delete');
+		if (ok !== 'Delete') {
+			return;
+		}
+		await getBackendClient().deleteTemplate(id);
+		await this._pushState();
+	}
+
+	private async _importRecipe(): Promise<void> {
+		const picked = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { 'Nexora recipe': ['json'] } });
+		if (!picked || !picked.length) {
+			return;
+		}
+		let bundle: Record<string, unknown>;
+		try {
+			bundle = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(picked[0])).toString('utf8'));
+		} catch {
+			throw new Error('That file is not a recipe (it is not valid JSON).');
+		}
+		const client = getBackendClient();
+		const preview = await client.previewImportTemplate(bundle);
+		if (!preview.valid) {
+			throw new Error('That recipe cannot be imported: ' + (preview.errors || []).join('; '));
+		}
+		const missing = preview.platforms_missing.length ? ` It uses ${preview.platforms_missing.join(', ')}, which this Nexora does not have.` : '';
+		const ok = await vscode.window.showInformationMessage(
+			`Import "${preview.name}" (${preview.task_count} steps)?${missing}`, { modal: true }, 'Import');
+		if (ok !== 'Import') {
+			return;
+		}
+		await client.importTemplate(bundle);
+		await this._pushState();
+	}
+
 	private async _openRule(rel: string): Promise<void> {
 		const folder = this._folder();
 		if (!folder || !rel) {
