@@ -3,42 +3,40 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// Customize tab: plugins, skills, subagents, commands, hooks, rules and a link to Platforms.
-// The Hooks and Plugins pages live in pages.js.
+// Customize tab: one search across every kind, a scope menu and a chip per kind (plugins,
+// platforms, skills, agents, recipes, commands, hooks, rules); no chip is the All overview.
+// The Hooks and Plugins pages live in pages.js, Agents extras and Recipes in orchestration.js.
 (function () {
 	'use strict';
 
 	const vscode = acquireVsCodeApi();
 	const M = window.NexoraCustomizeModel;
-	const CHIPS = [
-		{ id: 'all', label: 'All' },
-		{ id: 'user', label: 'You' },
-		{ id: 'project', label: 'This project' },
-		{ id: 'claude', label: 'From Claude Code' },
-		{ id: 'cursor', label: 'From Cursor' }
-	];
 	const KIND_OF = { skills: 'skill', agents: 'agent', commands: 'command' };
+	const ITEM_SECTIONS = ['skills', 'agents', 'commands'];
+	const PAGE_SECTIONS = ['hooks', 'plugins'];
+	const OVERVIEW_ROWS = 4;
+	const SEARCH_ROWS = 8;
 
 	const ui = {
-		section: 'plugins',
+		section: '',
 		query: '',
-		chip: 'all',
+		scope: 'all',
+		scopeMenu: false,
 		detail: null,
 		detailText: null,
 		newForm: false,
+		focusForm: false,
 		error: '',
 		dialog: '',
 		data: null
 	};
-	const Pages = window.NexoraCustomizePages({
-		M: M, esc: esc, ui: ui, post: post, header: header, tooOld: tooOld, render: render, setSection: setSection,
-		showDialog: showDialog, closeDialog: closeDialog, dialog: function () { return ui.dialog; }
-	});
-	const Orch = window.NexoraCustomizeOrchestration({
-		M: M, esc: esc, ui: ui, post: post, header: header, tooOld: tooOld, render: render, setSection: setSection,
-		showDialog: showDialog, closeDialog: closeDialog, dialog: function () { return ui.dialog; }, reveal: reveal
-	});
-	const PAGE_SECTIONS = ['hooks', 'plugins'];
+	const ctx = {
+		M: M, esc: esc, ui: ui, post: post, intro: intro, tooOld: tooOld, render: render, reveal: reveal,
+		showDialog: showDialog, closeDialog: closeDialog, dialog: function () { return ui.dialog; },
+		keep: keep, rowHtml: rowHtml, listHead: listHead, listOf: listOf, invite: invite, none: none, addButton: addButton
+	};
+	const Pages = window.NexoraCustomizePages(ctx);
+	const Orch = window.NexoraCustomizeOrchestration(ctx);
 
 	function $(id) {
 		return document.getElementById(id);
@@ -54,56 +52,93 @@
 		vscode.postMessage(message);
 	}
 
+	function sectionOf(id) {
+		return M.SECTIONS.find(function (s) { return s.id === id; }) || null;
+	}
+
+	/** The selected chip, or null for the All overview. */
 	function section() {
-		return M.SECTIONS.find(function (s) { return s.id === ui.section; }) || M.SECTIONS[0];
+		return sectionOf(ui.section);
 	}
 
 	function items(id) {
 		return (ui.data && Array.isArray(ui.data[id])) ? ui.data[id] : [];
 	}
 
-	function activeCount(id) {
-		if (id === 'rules') {
-			const rules = ui.data && ui.data.rules;
-			return rules && Array.isArray(rules.files) ? rules.files.length : 0;
-		}
-		if (id === 'platforms') {
-			return -1;
-		}
-		if (id === 'recipes') {
-			return Orch.count();
-		}
-		if (PAGE_SECTIONS.indexOf(id) >= 0) {
-			return Pages.count(id);
-		}
-		return items(id).filter(function (i) { return !i.shadowed_by; }).length;
+	// --- rows shared by every kind ----------------------------------------------------------
+
+	/** Whether a row passes the search and the scope menu. entry: { text, scope, origin }. */
+	function keep(entry) {
+		return M.matches(entry, ui.query, ui.scope);
 	}
 
-	// --- navigation ---------------------------------------------------------
-
-	function renderNav() {
-		$('cz-nav').innerHTML = '<div class="cz-navTitle">Customize</div>' + M.SECTIONS.map(function (s) {
-			const n = activeCount(s.id);
-			return '<button type="button" class="cz-navItem' + (s.id === ui.section ? ' cz-navActive' : '') + '" data-section="' + s.id + '"' +
-				(s.id === ui.section ? ' aria-current="page"' : '') + '>' +
-				'<span>' + esc(s.title) + '</span>' + (n >= 0 ? '<span class="cz-navCount">' + n + '</span>' : '') + '</button>';
-		}).join('');
+	/**
+	 * One list row: an icon tile, the name, a muted source line and the actions on the right.
+	 * o: { icon, name, source, desc, open (attributes that make the row a button), badges, more, cls, nameCls, actions }
+	 */
+	function rowHtml(o) {
+		const tag = o.open ? 'button' : 'div';
+		const line = [o.source, o.desc].filter(Boolean).join(' - ');
+		return '<div class="cz-row' + (o.cls ? ' ' + o.cls : '') + '" role="listitem">' +
+			'<' + tag + (o.open ? ' type="button" ' + o.open : '') + ' class="cz-rowMain">' +
+			'<span class="cz-icon" aria-hidden="true"><i class="codicon codicon-' + o.icon + '"></i></span>' +
+			'<span class="cz-rowText"><span class="cz-rowTop"><span class="cz-name' + (o.nameCls ? ' ' + o.nameCls : '') + '">' + esc(o.name) + '</span>' + (o.badges || '') + '</span>' +
+			(line ? '<span class="cz-source" title="' + esc(line) + '">' + esc(line) + '</span>' : '') + (o.more || '') + '</span></' + tag + '>' +
+			(o.actions ? '<span class="cz-rowActions">' + o.actions + '</span>' : '') + '</div>';
 	}
 
-	// --- shared pieces -------------------------------------------------------
+	function listOf(rows) {
+		return '<div class="cz-list" role="list">' + rows.join('') + '</div>';
+	}
 
-	function header(s, withTools) {
-		const engine = ui.data && ui.data.engine;
-		let html = '<header class="cz-head"><div><h1>' + esc(s.title) + '</h1><p class="nx-hint">' + esc(s.blurb) + '</p></div>';
-		if (withTools && engine) {
-			html += '<div class="cz-headActions"><button type="button" class="nx-btn nx-btn-secondary" data-act="examples">Examples</button>' +
-				'<button type="button" class="nx-btn" data-act="new">+ New ' + esc(s.singular) + '</button></div>';
+	/** "Installed 3" with the kind's actions on the right. */
+	function listHead(title, count, actions) {
+		return '<div class="cz-listHead"><h2 class="cz-listTitle">' + esc(title) + (count === undefined ? '' : ' <span class="cz-count">' + count + '</span>') + '</h2>' +
+			(actions ? '<div class="cz-headActions">' + actions + '</div>' : '') + '</div>';
+	}
+
+	/** Each kind's one way to add something: [attributes, label, codicon]. */
+	function addSpec(id) {
+		const hasWs = !!(ui.data && ui.data.hasWorkspace);
+		switch (id) {
+			case 'plugins': return ['data-reveal="plugins:marketplace"', 'Add plugin', 'add'];
+			case 'platforms': return ['data-act="platforms"', 'Open Platforms', 'link-external'];
+			case 'recipes': return ['data-rc="import"', 'Import recipe', 'add'];
+			case 'rules': return hasWs ? ['data-reveal="rules:new"', 'New rule', 'add'] : ['data-act="personalRules"', 'Personal rules', 'edit'];
+			default: return ['data-reveal="' + id + ':new"', 'New ' + sectionOf(id).singular, 'add'];
 		}
-		html += '</header>';
-		if (ui.error) {
-			html += '<div class="nx-banner cz-error" role="alert">' + esc(ui.error) + '</div>';
+	}
+
+	function addButton(id) {
+		const spec = addSpec(id);
+		return '<button type="button" class="nx-btn nx-btn-secondary" ' + spec[0] + '><i class="codicon codicon-' + spec[2] + '" aria-hidden="true"></i> ' + esc(spec[1]) + '</button>';
+	}
+
+	/** What a kind with no items shows: one line on what it is for, and its add action (extra: one more button). */
+	function invite(id, extra) {
+		const s = sectionOf(id);
+		return '<div class="cz-invite"><span class="cz-icon" aria-hidden="true"><i class="codicon codicon-' + s.icon + '"></i></span>' +
+			'<span class="cz-inviteText">' + esc(s.invite) + '</span>' + (typeof extra === 'string' ? extra : '') + addButton(id) + '</div>';
+	}
+
+	/** The line shown when the search or the scope menu hides every row. */
+	/** Why a list is empty: the search, the scope menu, or (neither) emptyText. */
+	function none(emptyText) {
+		const q = ui.query.trim();
+		if (q) {
+			return '<p class="nx-hint cz-none">No matches for "' + esc(q) + '"</p>';
 		}
-		return html;
+		const scope = M.SCOPES.find(function (s) { return s.id === ui.scope; });
+		if (emptyText && (!scope || scope === M.SCOPES[0])) {
+			return '<p class="nx-hint cz-none">' + esc(emptyText) + '</p>';
+		}
+		return '<p class="nx-hint cz-none">Nothing here from ' + esc(scope ? scope.label : ui.scope) + '.</p>';
+	}
+
+	/** A kind page's opening line, and the last error. */
+	function intro(s) {
+		return '<p class="nx-hint cz-blurb">' + esc(s.blurb) + '</p>' +
+			(ui.error ? '<div class="nx-banner cz-error" role="alert">' + esc(ui.error) + '</div>' : '');
 	}
 
 	function tooOld() {
@@ -115,7 +150,106 @@
 		return '<span class="cz-chip cz-origin-' + esc(item.origin) + '">' + esc(M.originLabel(item.origin)) + '</span>';
 	}
 
-	// --- New form --------------------------------------------------------------
+	// --- what each kind lists --------------------------------------------------------------
+
+	function itemRow(item) {
+		const hidden = !!item.shadowed_by;
+		const kind = item.kind + 's';
+		const source = [item.scope === 'project' ? 'This project' : 'You', item.origin === 'nexora' ? '' : M.originLabel(item.origin),
+			item.usage && item.usage.count ? M.usageLabel(item.usage) : ''].filter(Boolean).join(' - ');
+		return rowHtml({
+			icon: sectionOf(kind).icon,
+			name: item.kind === 'command' ? '/' + item.name : item.name,
+			source: source,
+			desc: item.description || 'No description',
+			open: 'data-open-detail="' + esc(item.name) + '" data-path="' + esc(item.path) + '" data-kind="' + kind + '"',
+			cls: hidden ? 'cz-hidden' : '',
+			badges: hidden ? '<span class="cz-chip">Hidden</span>' : '',
+			more: (hidden ? '<span class="cz-hiddenBy">Hidden by ' + esc(item.shadowed_by) + '</span>' : '') +
+				(item.problems || []).map(function (p) { return '<span class="cz-problem">' + esc(p) + '</span>'; }).join(''),
+			actions: (hidden ? '' : '<button type="button" class="nx-btn nx-btn-ghost" data-try="' + esc(item.name) + '" data-kind="' + kind + '" title="Put it in the chat">Try</button>') +
+				'<button type="button" class="nx-btn nx-btn-ghost" data-open-file="' + esc(item.path) + '">Open</button>'
+		});
+	}
+
+	function itemEntry(item) {
+		return { item: item, text: item.name + ' ' + (item.description || ''), scope: item.scope, origin: item.origin, html: itemRow(item) };
+	}
+
+	function ruleEntries() {
+		const rules = ui.data && ui.data.rules;
+		const files = rules && Array.isArray(rules.files) ? rules.files : [];
+		const size = function (f) { return Number(f.chars).toLocaleString() + ' chars' + (f.truncated ? ', cut to fit' : ''); };
+		return files.map(function (f) {
+			return f.personal
+				? { text: 'personal rules ' + rules.personal_path, scope: 'user', html: rowHtml({ icon: 'law', name: 'Personal rules', source: 'You, all projects - ' + size(f), open: 'data-act="personalRules"' }) }
+				: { text: f.path, scope: 'project', html: rowHtml({ icon: 'law', name: f.path, nameCls: 'cz-mono', source: 'This project - ' + size(f), open: 'data-rule="' + esc(f.path) + '"' }) };
+		});
+	}
+
+	function platformEntries() {
+		const open = 'data-act="platforms" title="Open Platforms"';
+		const servers = (ui.data && ui.data.mcpServers || []).map(function (sv) {
+			return { group: 'servers', text: sv.name + ' ' + (sv.url || sv.command || ''), scope: sv.scope === 'project' ? 'project' : 'user',
+				html: rowHtml({ icon: 'plug', name: sv.name, source: M.serverSource(sv), desc: sv.url || sv.command || '', open: open, cls: sv.state === 'connected' ? '' : 'cz-off' }) };
+		});
+		const platforms = (ui.data && ui.data.connectedPlatforms || []).map(function (p) {
+			return { group: 'platforms', text: p.name + ' ' + p.id, scope: 'user',
+				html: rowHtml({ icon: 'plug', name: p.name, source: ['Connected'].concat((p.usableIn || []).length ? ['works in ' + p.usableIn.join(', ')] : []).join(' - '), open: open }) };
+		});
+		return servers.concat(platforms);
+	}
+
+	/** Every row of a kind, as the overview, the search and the chip count see them. */
+	function entries(id) {
+		if (ITEM_SECTIONS.indexOf(id) >= 0) {
+			const own = items(id).filter(function (i) { return !i.shadowed_by; }).map(itemEntry);
+			return id === 'agents' ? own.concat(Orch.agentEntries()) : own;
+		}
+		if (id === 'recipes') {
+			return Orch.recipeEntries();
+		}
+		if (PAGE_SECTIONS.indexOf(id) >= 0) {
+			return Pages.entries(id);
+		}
+		return id === 'rules' ? ruleEntries() : platformEntries();
+	}
+
+	function count(id) {
+		return entries(id).filter(function (e) { return M.matches(e, '', ui.scope); }).length;
+	}
+
+	// --- top bar: scope menu and chips -------------------------------------------------------
+
+	function renderChips() {
+		const scope = M.SCOPES.find(function (s) { return s.id === ui.scope; }) || M.SCOPES[0];
+		let html = '<div class="cz-scopeWrap"><button type="button" class="cz-chipBtn' + (ui.scope === 'all' ? '' : ' cz-chipOn') + '" data-act="scopeMenu" aria-haspopup="menu" aria-expanded="' + ui.scopeMenu + '" title="Whose items to show">' +
+			esc(scope.label) + ' <i class="codicon codicon-chevron-down" aria-hidden="true"></i></button>';
+		if (ui.scopeMenu) {
+			html += '<div class="cz-menu" role="menu">' + M.SCOPES.map(function (s) {
+				return '<button type="button" class="cz-menuItem" role="menuitemradio" aria-checked="' + (s.id === ui.scope) + '" data-scope="' + s.id + '">' +
+					'<i class="codicon codicon-check" aria-hidden="true"></i>' + esc(s.label) + '</button>';
+			}).join('') + '</div>';
+		}
+		html += '</div>' + M.SECTIONS.map(function (s) {
+			const on = s.id === ui.section;
+			return '<button type="button" class="cz-chipBtn' + (on ? ' cz-chipOn' : '') + '" data-section="' + s.id + '" aria-pressed="' + on + '">' +
+				esc(s.title) + (ui.data ? ' <span class="cz-count">' + count(s.id) + '</span>' : '') + '</button>';
+		}).join('');
+		// Redrawing the chips must not drop the keyboard user's place.
+		const active = document.activeElement;
+		const box = $('cz-chips');
+		const again = active && box.contains(active) ? ['section', 'scope', 'act'].map(function (k) {
+			return active.dataset[k] ? '[data-' + k + '="' + active.dataset[k] + '"]' : '';
+		}).filter(Boolean)[0] : '';
+		box.innerHTML = html;
+		const target = again ? box.querySelector(again) : null;
+		if (target) {
+			target.focus();
+		}
+	}
+
+	// --- New form --------------------------------------------------------------------------
 
 	function newForm(s) {
 		const hasWs = !!(ui.data && ui.data.hasWorkspace);
@@ -154,59 +288,61 @@
 		ui.error = '';
 	}
 
-	// --- item lists --------------------------------------------------------------
+	// --- pages -----------------------------------------------------------------------------
 
-	function row(item) {
-		const hidden = !!item.shadowed_by;
-		const problems = (item.problems || []).map(function (p) { return '<div class="cz-problem">' + esc(p) + '</div>'; }).join('');
-		return '<div class="cz-row' + (hidden ? ' cz-hidden' : '') + '" role="listitem">' +
-			'<button type="button" class="cz-rowMain" data-open-detail="' + esc(item.name) + '" data-path="' + esc(item.path) + '">' +
-			'<span class="cz-rowTop"><span class="cz-name">' + esc(item.kind === 'command' ? '/' + item.name : item.name) + '</span>' + originChip(item) +
-			(item.usage ? '<span class="cz-usage">' + esc(M.usageLabel(item.usage)) + '</span>' : '') + '</span>' +
-			'<span class="cz-desc">' + (item.description ? esc(item.description) : '<em>No description</em>') + '</span>' +
-			(hidden ? '<span class="cz-hiddenBy">Hidden by ' + esc(item.shadowed_by) + '</span>' : '') +
-			problems + '</button>' +
-			'<span class="cz-rowActions">' +
-			(hidden ? '' : '<button type="button" class="nx-btn nx-btn-ghost" data-try="' + esc(item.name) + '" title="Put it in the chat">Try</button>') +
-			'<button type="button" class="nx-btn nx-btn-ghost" data-open-file="' + esc(item.path) + '">Open</button></span></div>';
-	}
-
-	function group(title, list) {
-		if (!list.length) {
-			return '';
+	function renderOverview() {
+		const searching = !!ui.query.trim();
+		let html = ui.error ? '<div class="nx-banner cz-error" role="alert">' + esc(ui.error) + '</div>' : '';
+		if (!ui.data.engine) {
+			html += tooOld();
 		}
-		return '<div class="cz-group"><div class="cz-groupTitle">' + esc(title) + ' <span class="nx-hint">' + list.length + '</span></div>' +
-			'<div class="cz-list" role="list">' + list.map(row).join('') + '</div></div>';
+		let shownKinds = 0;
+		const empty = [];
+		M.SECTIONS.forEach(function (s) {
+			const all = entries(s.id);
+			const shown = all.filter(keep);
+			if (!shown.length) {
+				if (!all.length) {
+					empty.push(s.id);
+				}
+				return;
+			}
+			shownKinds++;
+			html += '<section class="cz-sec" aria-label="' + esc(s.title) + '">' +
+				listHead(s.title, shown.length, '<button type="button" class="nx-btn nx-btn-ghost" data-section="' + s.id + '">See all</button>' + addButton(s.id)) +
+				listOf(shown.slice(0, searching ? SEARCH_ROWS : OVERVIEW_ROWS).map(function (e) { return e.html; })) + '</section>';
+		});
+		if (!shownKinds && (searching || ui.scope !== 'all')) {
+			return html + none();
+		}
+		if (!searching && ui.scope === 'all' && empty.length) {
+			html += '<section class="cz-sec" aria-label="Get started">' + listHead('Get started') +
+				'<div class="cz-list">' + empty.map(invite).join('') + '</div></section>';
+		}
+		return html;
 	}
 
 	function renderItems(s) {
-		let html = header(s, true);
+		let html = intro(s);
 		if (!ui.data.engine) {
 			return html + tooOld();
+		}
+		const all = items(s.id);
+		const shown = all.map(itemEntry).filter(keep);
+		// This project's items first: they win over yours with the same name.
+		shown.sort(function (a, b) { return (a.scope === 'project' ? 0 : 1) - (b.scope === 'project' ? 0 : 1); });
+		const examples = '<button type="button" class="nx-btn nx-btn-ghost" data-act="examples">Examples</button>';
+		if (all.length) {
+			html += listHead(s.id === 'agents' ? 'Your subagents' : 'Your ' + s.title.toLowerCase(), shown.length, examples + addButton(s.id));
 		}
 		if (ui.newForm) {
 			html += newForm(s);
 		}
-		const all = items(s.id);
 		if (!all.length) {
-			return html + '<div class="nx-empty cz-emptyState"><div class="nx-empty-title">No ' + esc(s.title.toLowerCase()) + ' yet</div>' +
-				'<p class="nx-hint">' + esc(s.blurb) + '</p><p class="nx-hint">Nexora also reads them from .claude and .cursor folders, so the ones you already have appear here by themselves.</p>' +
-				'<div class="nx-row"><button type="button" class="nx-btn" data-act="new">+ New ' + esc(s.singular) + '</button>' +
-				'<button type="button" class="nx-btn nx-btn-secondary" data-act="examples">Install an example</button></div></div>';
+			return html + invite(s.id, examples);
 		}
-		html += '<div class="cz-toolbar"><input class="nx-input cz-search" id="cz-search" type="search" placeholder="Search ' + esc(s.title.toLowerCase()) + '" value="' + esc(ui.query) + '" aria-label="Search">' +
-			'<div class="cz-chips" role="group" aria-label="Filter">' + CHIPS.map(function (c) {
-				return '<button type="button" class="cz-filter' + (ui.chip === c.id ? ' cz-filterOn' : '') + '" data-chip="' + c.id + '" aria-pressed="' + (ui.chip === c.id) + '">' + esc(c.label) + '</button>';
-			}).join('') + '</div></div>';
-		const shown = M.filterItems(all, ui.query, ui.chip);
-		if (!shown.length) {
-			return html + '<p class="nx-hint cz-none">Nothing matches.</p>';
-		}
-		const g = M.groupByScope(shown);
-		return html + group(ui.data.workspaceName ? 'This project (' + ui.data.workspaceName + ')' : 'This project', g.project) + group('You', g.user);
+		return html + (shown.length ? listOf(shown.map(function (e) { return e.html; })) : none());
 	}
-
-	// --- detail view ---------------------------------------------------------------
 
 	function metaRow(label, value) {
 		return value ? '<div class="cz-metaRow"><span class="cz-metaLabel">' + esc(label) + '</span><span>' + value + '</span></div>' : '';
@@ -225,11 +361,11 @@
 		}
 		const preview = ui.detailText === null ? '<div class="nx-hint">Loading...</div>' : '<pre class="cz-preview">' + esc(ui.detailText || '(empty)') + '</pre>';
 		return '<div class="cz-detail">' +
-			'<button type="button" class="nx-btn nx-btn-ghost cz-back" data-act="back">&lt; ' + esc(s.title) + '</button>' +
+			'<button type="button" class="nx-btn nx-btn-ghost cz-back" data-act="back"><i class="codicon codicon-chevron-left" aria-hidden="true"></i> ' + esc(s.title) + '</button>' +
 			'<header class="cz-head"><div><h1>' + esc(kind === 'command' ? '/' + item.name : item.name) + ' ' + originChip(item) + '</h1>' +
 			'<p>' + (item.description ? esc(item.description) : '<em>No description</em>') + '</p></div>' +
 			'<div class="cz-headActions">' +
-			(item.shadowed_by ? '' : '<button type="button" class="nx-btn" data-try="' + esc(item.name) + '">Try in chat</button>') +
+			(item.shadowed_by ? '' : '<button type="button" class="nx-btn" data-try="' + esc(item.name) + '" data-kind="' + s.id + '">Try in chat</button>') +
 			'<button type="button" class="nx-btn nx-btn-secondary" data-open-file="' + esc(item.path) + '">Open file</button>' +
 			(item.editable ? '<button type="button" class="nx-btn nx-btn-danger" data-delete="' + esc(item.name) + '" data-path="' + esc(item.path) + '">Delete</button>'
 				: '<button type="button" class="nx-btn nx-btn-secondary" data-copy="' + esc(item.name) + '" title="Make an editable Nexora copy; the original is not changed">Copy to Nexora</button>') +
@@ -247,37 +383,29 @@
 			'<div class="cz-previewTitle">File</div>' + preview + '</div>';
 	}
 
-	// --- rules and platforms -------------------------------------------------------------
-
 	function renderRules(s) {
-		let html = header(s, false);
+		let html = intro(s);
 		const rules = ui.data.rules;
 		if (!rules) {
 			return html + '<p class="nx-hint">The engine is not reachable, so the rules could not be read.</p>';
 		}
+		const hasWs = !!ui.data.hasWorkspace;
 		const files = Array.isArray(rules.files) ? rules.files : [];
 		const personal = files.find(function (f) { return f.personal; });
-		const project = files.filter(function (f) { return !f.personal; });
-		const size = function (f) { return Number(f.chars).toLocaleString() + ' chars' + (f.truncated ? ', cut to fit' : ''); };
-		html += '<div class="nx-card"><div class="cz-groupTitle">Personal rules (all projects)</div>' +
-			(personal ? '<div class="cz-ruleRow"><code>' + esc(rules.personal_path) + '</code><span class="nx-hint">' + size(personal) + '</span></div>'
-				: '<p class="nx-hint">Your own rules for every project. None yet.</p>') +
-			'<div class="nx-row"><button type="button" class="nx-btn nx-btn-secondary" data-act="personalRules">' + (personal ? 'Edit personal rules' : 'Create personal rules') + '</button></div></div>';
-		html += '<div class="nx-card"><div class="cz-groupTitle cz-groupHead"><span>Project rules</span>' +
-			(ui.data.hasWorkspace ? '<button type="button" class="nx-btn nx-btn-secondary" data-act="new">+ New rule</button>' : '') + '</div>';
-		if (ui.newForm && ui.data.hasWorkspace) {
+		const all = ruleEntries();
+		const shown = all.filter(keep);
+		const personalBtn = hasWs ? '<button type="button" class="nx-btn nx-btn-ghost" data-act="personalRules">' +
+			(personal ? 'Edit personal rules' : 'Create personal rules') + '</button>' : '';
+		if (all.length) {
+			html += listHead('Rules', shown.length, personalBtn + addButton('rules'));
+		}
+		if (ui.newForm && hasWs) {
 			html += newForm(s);
 		}
-		if (!ui.data.hasWorkspace) {
-			html += '<p class="nx-hint">Open a folder to add project rules.</p>';
-		} else if (!project.length) {
-			html += '<p class="nx-hint">Add AGENTS.md, CLAUDE.md or files in .nexora/rules/ and the agent follows them on every message.</p>';
-		} else {
-			html += '<div class="cz-list">' + project.map(function (f) {
-				return '<button type="button" class="cz-ruleRow cz-ruleLink" data-rule="' + esc(f.path) + '"><code>' + esc(f.path) + '</code><span class="nx-hint">' + size(f) + '</span></button>';
-			}).join('') + '</div>';
+		html += !all.length ? invite('rules', personalBtn) : (shown.length ? listOf(shown.map(function (e) { return e.html; })) : none());
+		if (!hasWs) {
+			html += '<p class="nx-hint">Open a folder to add project rules: AGENTS.md, CLAUDE.md or files in .nexora/rules/.</p>';
 		}
-		html += '</div>';
 		if (files.length) {
 			html += '<p class="nx-hint">Sent with every Chat, Ask and Agent message: ' + Number(rules.total_chars).toLocaleString() + ' of ' + Number(rules.max_chars).toLocaleString() + ' characters. Project rules win where they disagree with personal ones.</p>';
 		}
@@ -291,11 +419,23 @@
 	}
 
 	function renderPlatforms(s) {
-		return header(s, false) + '<div class="nx-card"><p>Connect platforms such as GitHub, Vercel or Supabase, add your own MCP servers, or import the ones you use in Cursor, Claude Code or VS Code.</p>' +
-			'<div class="nx-row"><button type="button" class="nx-btn" data-act="platforms">Open Platforms</button></div></div>';
+		let html = intro(s);
+		const all = platformEntries();
+		if (!all.length) {
+			return html + invite('platforms');
+		}
+		const shown = all.filter(keep);
+		const servers = shown.filter(function (e) { return e.group === 'servers'; });
+		const platforms = shown.filter(function (e) { return e.group === 'platforms'; });
+		html += listHead('Your MCP servers', servers.length, addButton('platforms'));
+		html += servers.length ? listOf(servers.map(function (e) { return e.html; })) : none('None yet. Add one by web address or as a command on this PC.');
+		if (platforms.length) {
+			html += listHead('Connected platforms', platforms.length) + listOf(platforms.map(function (e) { return e.html; }));
+		}
+		return html;
 	}
 
-	// --- examples dialog ------------------------------------------------------------------
+	// --- examples dialog ---------------------------------------------------------------------
 
 	function openExamples() {
 		const examples = (ui.data && ui.data.examples) || [];
@@ -314,7 +454,7 @@
 				}
 				return '<div class="cz-groupTitle">' + k[1] + '</div>' + list.map(function (e) {
 					const done = [e.installed && e.installed.user ? 'you' : '', e.installed && e.installed.project ? 'this project' : ''].filter(Boolean);
-					return '<div class="cz-exRow"><div><div class="cz-name">' + esc(k[0] === 'command' ? '/' + e.name : e.name) + '</div><div class="cz-desc">' + esc(e.description) + '</div>' +
+					return '<div class="cz-exRow"><div><div class="cz-name">' + esc(k[0] === 'command' ? '/' + e.name : e.name) + '</div><div class="nx-hint">' + esc(e.description) + '</div>' +
 						(done.length ? '<div class="nx-hint">Installed for ' + esc(done.join(' and ')) + '</div>' : '') + '</div>' +
 						'<button type="button" class="nx-btn nx-btn-secondary" data-install="' + esc(e.id) + '">Install</button></div>';
 				}).join('');
@@ -339,16 +479,21 @@
 		ui.dialog = '';
 	}
 
-	// --- render ---------------------------------------------------------------------------
+	// --- render ------------------------------------------------------------------------------
 
+	/** Redraws the chips and the page. The search box is never redrawn, so typing keeps its focus. */
 	function render() {
-		renderNav();
+		renderChips();
 		const main = $('cz-main');
 		if (!ui.data) {
 			main.innerHTML = '<div class="nx-hint">Loading...</div>';
 			return;
 		}
 		const s = section();
+		if (!s) {
+			main.innerHTML = renderOverview();
+			return;
+		}
 		if (s.id === 'recipes') {
 			main.innerHTML = Orch.render(s);
 			return;
@@ -376,44 +521,62 @@
 		const form = $('cz-newForm');
 		if (form) {
 			form.addEventListener('submit', submitNew);
-			$('cz-newName').focus();
+			// Only when the form opens: a refresh while typing elsewhere must not steal focus.
+			if (ui.focusForm) {
+				$('cz-newName').focus();
+			}
 		}
-		const search = $('cz-search');
-		if (search) {
-			search.addEventListener('input', function () {
-				ui.query = search.value;
-				const pos = search.selectionStart;
-				render();
-				const again = $('cz-search');
-				again.focus();
-				again.setSelectionRange(pos, pos);
-			});
-		}
+		ui.focusForm = false;
 	}
 
-	/** 'plugins:marketplace' or 'hooks:new' opens a page with its tab or form. */
-	function reveal(where) {
-		const parts = String(where).split(':');
-		Pages.reveal(parts[1] || '');
-		setSection(parts[0]);
+	/** Chooses a chip ('' for the All overview) without drawing; the search text stays. */
+	function select(id) {
+		ui.section = sectionOf(id) ? id : '';
+		ui.detail = null;
+		ui.newForm = false;
+		ui.error = '';
 	}
 
 	function setSection(id) {
-		ui.section = id;
-		ui.detail = null;
-		ui.newForm = false;
-		ui.query = '';
-		ui.chip = 'all';
-		ui.error = '';
+		select(id);
 		render();
 	}
 
-	function itemByName(name) {
-		return items(section().id).find(function (i) { return i.name === name && !i.shadowed_by; })
-			|| items(section().id).find(function (i) { return i.name === name; });
+	/** 'plugins:marketplace', 'hooks:new' or 'skills:new' opens a chip with its tab or form. */
+	function reveal(where) {
+		const parts = String(where).split(':');
+		select(parts[0]);
+		if (PAGE_SECTIONS.indexOf(ui.section) >= 0) {
+			Pages.reveal(parts[1] || '');
+		} else if (parts[1] === 'new' && ui.section) {
+			ui.newForm = true;
+			ui.focusForm = true;
+		}
+		render();
 	}
 
+	function itemByName(kind, name) {
+		return items(kind).find(function (i) { return i.name === name && !i.shadowed_by; })
+			|| items(kind).find(function (i) { return i.name === name; });
+	}
+
+	function closeScopeMenu(focusButton) {
+		ui.scopeMenu = false;
+		renderChips();
+		if (focusButton) {
+			$('cz-chips').querySelector('[data-act="scopeMenu"]').focus();
+		}
+	}
+
+	$('cz-search').addEventListener('input', function (e) {
+		ui.query = e.target.value;
+		render();
+	});
+
 	document.addEventListener('click', function (e) {
+		if (ui.scopeMenu && !e.target.closest('.cz-scopeWrap')) {
+			closeScopeMenu(false);
+		}
 		const t = e.target.closest('button, [data-act]');
 		if (!t) {
 			return;
@@ -422,12 +585,25 @@
 		if (Pages.click(t) || Orch.click(t)) {
 			return;
 		}
-		if (d.section) {
-			setSection(d.section);
-		} else if (d.chip) {
-			ui.chip = d.chip;
+		if (d.reveal) {
+			reveal(d.reveal);
+		} else if (d.act === 'scopeMenu') {
+			ui.scopeMenu = !ui.scopeMenu;
+			renderChips();
+			const current = $('cz-chips').querySelector('.cz-menuItem[aria-checked="true"]');
+			if (current) {
+				current.focus();
+			}
+		} else if (d.scope) {
+			ui.scope = d.scope;
+			ui.scopeMenu = false;
 			render();
+			$('cz-chips').querySelector('[data-act="scopeMenu"]').focus();
+		} else if (d.section !== undefined) {
+			// A selected chip, clicked again, goes back to the All overview.
+			setSection(d.section === ui.section && t.closest('#cz-chips') ? '' : d.section);
 		} else if (d.openDetail !== undefined) {
+			select(d.kind);
 			ui.detail = { name: d.openDetail, path: d.path };
 			ui.detailText = null;
 			post({ type: 'detailRequest', path: d.path });
@@ -437,14 +613,14 @@
 		} else if (d.rule) {
 			post({ type: 'openRule', path: d.rule });
 		} else if (d.try) {
-			const item = itemByName(d.try);
+			const item = itemByName(d.kind, d.try);
 			if (item) {
 				post({ type: 'tryItem', text: M.tryText(item.kind, item.name) });
 			}
 		} else if (d.delete) {
-			post({ type: 'deleteItem', kind: section().id, name: d.delete, path: d.path });
+			post({ type: 'deleteItem', kind: ui.section, name: d.delete, path: d.path });
 		} else if (d.copy) {
-			post({ type: 'copyItem', kind: section().id, name: d.copy });
+			post({ type: 'copyItem', kind: ui.section, name: d.copy });
 		} else if (d.install) {
 			const scope = $('cz-exScope') ? $('cz-exScope').value : 'user';
 			t.disabled = true;
@@ -452,6 +628,7 @@
 			post({ type: 'installExample', id: d.install, scope: scope });
 		} else if (d.act === 'new') {
 			ui.newForm = true;
+			ui.focusForm = true;
 			ui.detail = null;
 			render();
 		} else if (d.act === 'cancelNew') {
@@ -476,16 +653,19 @@
 	});
 
 	document.addEventListener('keydown', function (e) {
-		if (e.key === 'Escape') {
-			if (!$('cz-dialog').hidden) {
-				closeDialog();
-			} else if (ui.newForm) {
-				ui.newForm = false;
-				render();
-			} else if (ui.detail) {
-				ui.detail = null;
-				render();
-			}
+		if (e.key !== 'Escape') {
+			return;
+		}
+		if (!$('cz-dialog').hidden) {
+			closeDialog();
+		} else if (ui.scopeMenu) {
+			closeScopeMenu(true);
+		} else if (ui.newForm) {
+			ui.newForm = false;
+			render();
+		} else if (ui.detail) {
+			ui.detail = null;
+			render();
 		}
 	});
 
@@ -505,11 +685,7 @@
 				break;
 			case 'reveal':
 				if (m.section) {
-					reveal(m.section);
-				}
-				if (m.startNew) {
-					ui.newForm = true;
-					render();
+					reveal(String(m.section).indexOf(':') < 0 && m.startNew ? m.section + ':new' : m.section);
 				}
 				break;
 			case 'detailBody':

@@ -425,47 +425,125 @@ body
 	user-select: none;
 }
 
-.nx-railTop
+.nx-sessionRail.is-hidden
 {
-	flex: 0 0 auto;
-	padding: 8px;
-	border-bottom: 1px solid var(--nx-border);
+	display: none;
 }
 
-.nx-railNew
+/* Nav rows above the chat list: icon and label, no boxes. */
+.nx-railNav
+{
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding: 8px 6px 4px;
+}
+
+.nx-railNavItem
 {
 	display: flex;
 	align-items: center;
-	justify-content: center;
-	gap: 6px;
-	width: 100%;
+	gap: 8px;
 	height: 28px;
 	padding: 0 8px;
-	border-radius: var(--nx-radius-1);
-	border: 1px solid var(--vscode-button-secondaryBorder, var(--nx-border));
-	background: var(--vscode-button-secondaryBackground, var(--nx-surface));
-	color: var(--vscode-button-secondaryForeground, var(--nx-fg));
-	font-size: 12px;
-	font-weight: 600;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--nx-fg);
+	font-family: inherit;
+	font-size: 13px;
+	text-align: left;
 	cursor: pointer;
 }
 
-.nx-railNew:hover
+.nx-railNavItem .codicon,
+.nx-railSearch .codicon
 {
-	background: var(--vscode-button-secondaryHoverBackground, var(--nx-surface));
+	flex: 0 0 auto;
+	font-size: 16px;
+	color: var(--nx-muted);
 }
 
-.nx-railNew:focus-visible
+.nx-railNavItem:hover
+{
+	background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--nx-fg) 8%, transparent));
+}
+
+.nx-railNavItem:focus-visible,
+.nx-railOpen:focus-visible,
+.nx-railAction:focus-visible
 {
 	outline: 1px solid var(--nx-focus);
-	outline-offset: 1px;
+	outline-offset: -1px;
 }
 
-.nx-railNewMark
+.nx-railNavCount
 {
-	font-size: 14px;
-	line-height: 1;
-	font-weight: 600;
+	margin-left: auto;
+	min-width: 16px;
+	padding: 0 5px;
+	border-radius: 8px;
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+	font-size: 11px;
+	line-height: 16px;
+	text-align: center;
+}
+
+.nx-railSearch
+{
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 4px 6px;
+	padding: 0 8px;
+	height: 26px;
+	border: 1px solid var(--nx-input-border);
+	border-radius: 6px;
+	background: var(--nx-input-bg);
+}
+
+.nx-railSearch[hidden]
+{
+	display: none;
+}
+
+.nx-railSearch:focus-within
+{
+	border-color: var(--nx-focus);
+}
+
+.nx-railSearch input
+{
+	flex: 1 1 auto;
+	min-width: 0;
+	border: none;
+	outline: none;
+	background: transparent;
+	color: var(--nx-input-fg);
+	font-family: inherit;
+	font-size: 12px;
+}
+
+.nx-railSearch input::placeholder
+{
+	color: var(--nx-input-placeholder);
+}
+
+.nx-railGroup
+{
+	padding: 12px 8px 4px;
+	color: var(--nx-muted);
+	font-size: 11px;
+}
+
+.nx-railEmpty
+{
+	padding: 8px;
+	color: var(--nx-muted);
+	font-size: 12px;
 }
 
 .nx-railList
@@ -512,30 +590,23 @@ body
 
 .nx-railItem
 {
+	position: relative;
 	display: flex;
-	flex-wrap: nowrap;
 	align-items: center;
-	gap: 2px;
 	height: 28px;
-	min-height: 28px;
-	max-height: 28px;
-	overflow: hidden;
-	margin: 1px 0;
-	padding: 0 2px 0 4px;
-	border-radius: var(--nx-radius-1);
-	color: var(--nx-muted);
+	border-radius: 6px;
+	color: var(--nx-fg);
 }
 
 .nx-railItem:hover
 {
 	background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--nx-fg) 8%, transparent));
-	color: var(--nx-fg);
 }
 
 .nx-railItem.is-active
 {
-	background: var(--vscode-list-inactiveSelectionBackground, color-mix(in srgb, var(--nx-fg) 12%, transparent));
-	color: var(--vscode-list-inactiveSelectionForeground, var(--nx-fg));
+	background: var(--vscode-list-activeSelectionBackground, color-mix(in srgb, var(--nx-fg) 12%, transparent));
+	color: var(--vscode-list-activeSelectionForeground, var(--nx-fg));
 }
 
 .nx-railOpen
@@ -544,18 +615,16 @@ body
 	min-width: 0;
 	display: flex;
 	align-items: center;
+	gap: 8px;
 	height: 28px;
-	max-height: 28px;
-	padding: 0 6px;
+	padding: 0 8px 0 10px;
 	border: none;
+	border-radius: 6px;
 	background: transparent;
 	color: inherit;
-	font-size: 12px;
-	line-height: 1.3;
+	font-family: inherit;
+	font-size: 13px;
 	text-align: left;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
 	cursor: pointer;
 }
 
@@ -568,46 +637,81 @@ body
 	white-space: nowrap;
 }
 
-.nx-railOpen:focus-visible
+.nx-railAge
 {
-	outline: 1px solid var(--nx-focus);
-	outline-offset: -1px;
+	flex: 0 0 auto;
+	color: var(--nx-muted);
+	font-size: 11px;
 }
 
-.nx-railDelete
+.nx-railItem.is-active .nx-railAge
 {
-	flex: 0 0 22px;
-	flex-shrink: 0;
+	color: inherit;
+	opacity: 0.75;
+}
+
+/* Rename and Delete replace the age on hover or keyboard focus. */
+.nx-railActions
+{
+	display: none;
+	position: absolute;
+	right: 4px;
+	top: 3px;
+	gap: 2px;
+}
+
+.nx-railItem:hover .nx-railActions,
+.nx-railItem:focus-within .nx-railActions
+{
+	display: flex;
+}
+
+.nx-railItem:hover .nx-railAge,
+.nx-railItem:focus-within .nx-railAge
+{
+	visibility: hidden;
+}
+
+.nx-railItem:hover .nx-railOpenText,
+.nx-railItem:focus-within .nx-railOpenText
+{
+	margin-right: 16px;
+}
+
+.nx-railAction
+{
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	width: 22px;
 	height: 22px;
-	margin-right: 2px;
 	padding: 0;
 	border: none;
 	border-radius: 4px;
 	background: transparent;
 	color: inherit;
-	opacity: 0.7;
-	font-size: 14px;
-	line-height: 1;
 	cursor: pointer;
 }
 
-.nx-railItem:hover .nx-railDelete,
-.nx-railItem.is-active .nx-railDelete,
-.nx-railDelete:focus-visible
+.nx-railAction:hover
 {
-	opacity: 1;
+	background: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, var(--nx-fg) 12%, transparent));
 }
 
-.nx-railDelete:hover
+.nx-railRename
 {
-	background: color-mix(in srgb, var(--nx-fg) 12%, transparent);
-}
-
-.nx-railDelete:focus-visible
-{
-	outline: 1px solid var(--nx-focus);
-	outline-offset: 0;
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 24px;
+	margin: 0 2px;
+	padding: 0 8px;
+	border: 1px solid var(--nx-focus);
+	border-radius: 6px;
+	outline: none;
+	background: var(--nx-input-bg);
+	color: var(--nx-input-fg);
+	font-family: inherit;
+	font-size: 13px;
 }
 
 .nx-status
@@ -765,56 +869,63 @@ body
 	max-width: 320px;
 }
 
-.nx-quickActions
+.nx-welcomeCards
 {
-	display: flex;
-	gap: var(--nx-space-2);
-	margin-top: var(--nx-space-5);
-	flex-wrap: wrap;
-	justify-content: center;
-}
-
-.nx-quickBtn
-{
-	display: inline-flex;
-	align-items: center;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 	gap: 8px;
-	padding: 7px 10px;
-	border: 1px solid color-mix(in srgb, var(--nx-border) 75%, transparent);
-	border-radius: 999px;
-	background: color-mix(in srgb, var(--nx-surface) 88%, transparent);
-	color: var(--nx-fg);
-	font-size: 12px;
-	cursor: pointer;
-	transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+	width: 100%;
+	max-width: 440px;
+	margin-top: 24px;
 }
 
-.nx-quickBtn:hover
+.nx-welcomeCard
 {
-	background: color-mix(in srgb, var(--nx-surface-2) 92%, transparent);
-	border-color: color-mix(in srgb, var(--nx-focus) 35%, var(--nx-border));
-	transform: translateY(-0.5px);
-}
-
-.nx-quickBtn:focus
-{
-	outline: 1px solid color-mix(in srgb, var(--nx-focus) 70%, transparent);
-	outline-offset: 2px;
-}
-
-.nx-quickIcon
-{
-	display: inline-flex;
+	display: grid;
+	grid-template-columns: auto 1fr;
+	column-gap: 10px;
+	row-gap: 2px;
 	align-items: center;
-	justify-content: center;
-	width: 20px;
-	height: 20px;
+	padding: 10px 12px;
+	border: 1px solid var(--nx-border);
 	border-radius: 6px;
-	border: 1px solid color-mix(in srgb, var(--nx-border) 80%, transparent);
-	background: color-mix(in srgb, var(--nx-surface-2) 65%, transparent);
+	background: transparent;
+	color: var(--nx-fg);
+	font-family: inherit;
+	text-align: left;
+	cursor: pointer;
+	transition: background var(--nx-transition), border-color var(--nx-transition);
+}
+
+.nx-welcomeCard:hover
+{
+	background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--nx-fg) 8%, transparent));
+}
+
+.nx-welcomeCard:focus-visible
+{
+	outline: 1px solid var(--nx-focus);
+	outline-offset: -1px;
+}
+
+.nx-welcomeCard .codicon
+{
+	grid-row: 1 / span 2;
+	font-size: 18px;
+	color: var(--nx-muted);
+}
+
+.nx-welcomeCardTitle
+{
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.nx-welcomeCardDesc
+{
 	color: var(--nx-muted);
 	font-size: 12px;
-	line-height: 1;
+	line-height: 1.4;
 }
 
 /* Messages */

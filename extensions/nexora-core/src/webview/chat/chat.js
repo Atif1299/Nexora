@@ -44,6 +44,10 @@
 	const suggestNever = document.getElementById('suggestNever');
 	const sessionList = document.getElementById('sessionList');
 	const newSessionBtn = document.getElementById('newSessionBtn');
+	const railSearchBtn = document.getElementById('railSearchBtn');
+	const railSearchRow = document.getElementById('railSearchRow');
+	const railSearch = document.getElementById('railSearch');
+	const railPlatformCount = document.getElementById('railPlatformCount');
 	const firstRunCard = document.getElementById('firstRunCard');
 	const firstRunProvider = document.getElementById('firstRunProvider');
 	const firstRunKey = document.getElementById('firstRunKey');
@@ -198,8 +202,15 @@
 		}
 	}
 
-	function updateAuthStatus() {
-		// Connector status lives in Settings, not the chat header.
+	/** Connected platform flags from the host; the rail's Platforms row shows how many are on. */
+	function updateAuthStatus(...connected) {
+		if (!railPlatformCount) {
+			return;
+		}
+		const count = connected.filter(Boolean).length;
+		railPlatformCount.textContent = String(count);
+		railPlatformCount.hidden = count === 0;
+		railPlatformCount.title = count + (count === 1 ? ' platform connected' : ' platforms connected');
 	}
 
 	function updateModeUI() {
@@ -1786,58 +1797,241 @@
 		setReplyInFlight(false);
 	}
 
-	function renderSessions(sessions, activeId) {
+	// Chat list rail: chats grouped by last activity, filtered by the search box, renamed in place.
+	const RAIL_GROUPS = ['Today', 'Yesterday', 'Last 7 days', 'Last 30 days', 'Older'];
+	const RAIL_NAME_MAX = 80;
+	let railSessions = [];
+	let railQuery = '';
+	let renamingSessionId = '';
+	let renameDraft = '';
+	let railDrawing = false;
+
+	function sessionTime(s) {
+		const t = Number(s.updatedAt || s.createdAt);
+		return isFinite(t) ? t : 0;
+	}
+
+	/** Index into RAIL_GROUPS, by calendar day in local time. */
+	function railGroupIndex(time, now) {
+		const d = new Date(now);
+		const dayStart = function (back) {
+			return new Date(d.getFullYear(), d.getMonth(), d.getDate() - back).getTime();
+		};
+		if (time >= dayStart(0)) {
+			return 0;
+		}
+		if (time >= dayStart(1)) {
+			return 1;
+		}
+		if (time >= dayStart(7)) {
+			return 2;
+		}
+		return time >= dayStart(30) ? 3 : 4;
+	}
+
+	function relativeAge(time, now) {
+		const min = Math.floor(Math.max(0, now - time) / 60000);
+		if (min < 1) {
+			return 'now';
+		}
+		if (min < 60) {
+			return min + 'm';
+		}
+		const hours = Math.floor(min / 60);
+		if (hours < 24) {
+			return hours + 'h';
+		}
+		const days = Math.floor(hours / 24);
+		if (days < 7) {
+			return days + 'd';
+		}
+		if (days < 30) {
+			return Math.floor(days / 7) + 'w';
+		}
+		return days < 365 ? Math.floor(days / 30) + 'mo' : Math.floor(days / 365) + 'y';
+	}
+
+	function railIconButton(icon, label, onClick) {
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.className = 'nx-railAction';
+		btn.title = label;
+		btn.setAttribute('aria-label', label);
+		const i = document.createElement('i');
+		i.className = 'codicon codicon-' + icon;
+		i.setAttribute('aria-hidden', 'true');
+		btn.appendChild(i);
+		btn.addEventListener('click', function (ev) {
+			ev.stopPropagation();
+			onClick();
+		});
+		return btn;
+	}
+
+	function startRename(id, name) {
+		renamingSessionId = id;
+		renameDraft = name;
+		drawRail();
+	}
+
+	function endRename(id, save) {
+		if (renamingSessionId !== id) {
+			return;
+		}
+		const name = renameDraft.replace(/\s+/g, ' ').trim().slice(0, RAIL_NAME_MAX);
+		renamingSessionId = '';
+		const session = railSessions.find(function (s) { return s.id === id; });
+		if (save && name && session && name !== session.name) {
+			session.name = name;
+			vscode.postMessage({ type: 'renameSession', sessionId: id, name: name });
+		}
+		drawRail();
+	}
+
+	function railRow(s, now) {
+		const id = s.id;
+		const name = s.name || 'New chat';
+		const row = document.createElement('div');
+		row.className = 'nx-railItem' + (id === activeSessionId ? ' is-active' : '');
+		row.setAttribute('data-session-id', id);
+
+		if (id === renamingSessionId) {
+			const field = document.createElement('input');
+			field.type = 'text';
+			field.className = 'nx-railRename';
+			field.maxLength = RAIL_NAME_MAX;
+			field.value = renameDraft;
+			field.setAttribute('aria-label', 'Chat name');
+			field.addEventListener('input', function () {
+				renameDraft = field.value;
+			});
+			field.addEventListener('keydown', function (ev) {
+				if (ev.key === 'Enter') {
+					ev.preventDefault();
+					endRename(id, true);
+				} else if (ev.key === 'Escape') {
+					ev.preventDefault();
+					endRename(id, false);
+				}
+			});
+			field.addEventListener('blur', function () {
+				// Clicking elsewhere keeps the name, as in the Explorer. A redraw (which removes the
+				// focused field) or the window losing focus is not the user leaving, so the edit stays open.
+				if (!railDrawing && document.hasFocus()) {
+					endRename(id, true);
+				}
+			});
+			row.appendChild(field);
+			return row;
+		}
+
+		const openBtn = document.createElement('button');
+		openBtn.type = 'button';
+		openBtn.className = 'nx-railOpen';
+		openBtn.title = name;
+		if (id === activeSessionId) {
+			openBtn.setAttribute('aria-current', 'true');
+		}
+		const label = document.createElement('span');
+		label.className = 'nx-railOpenText';
+		label.textContent = name;
+		const age = document.createElement('span');
+		age.className = 'nx-railAge';
+		age.textContent = relativeAge(sessionTime(s), now);
+		openBtn.appendChild(label);
+		openBtn.appendChild(age);
+		openBtn.addEventListener('click', function () {
+			if (id !== activeSessionId) {
+				vscode.postMessage({ type: 'switchSession', sessionId: id });
+			}
+		});
+		openBtn.addEventListener('dblclick', function () {
+			startRename(id, name);
+		});
+
+		const actions = document.createElement('div');
+		actions.className = 'nx-railActions';
+		actions.appendChild(railIconButton('edit', 'Rename ' + name, function () {
+			startRename(id, name);
+		}));
+		actions.appendChild(railIconButton('trash', 'Delete ' + name, function () {
+			vscode.postMessage({ type: 'deleteSession', sessionId: id });
+		}));
+
+		row.appendChild(openBtn);
+		row.appendChild(actions);
+		return row;
+	}
+
+	function drawRail() {
 		if (!sessionList) {
 			return;
 		}
+		const now = Date.now();
+		const query = railQuery.trim().toLowerCase();
+		const shown = railSessions
+			.filter(function (s) { return !query || (s.name || '').toLowerCase().indexOf(query) >= 0; })
+			.sort(function (a, b) { return sessionTime(b) - sessionTime(a); });
+		railDrawing = true;
+		sessionList.innerHTML = '';
+		railDrawing = false;
+		if (!shown.length && query) {
+			const empty = document.createElement('div');
+			empty.className = 'nx-railEmpty';
+			empty.textContent = 'No chats match';
+			sessionList.appendChild(empty);
+			return;
+		}
+		let group = -1;
+		shown.forEach(function (s) {
+			const g = railGroupIndex(sessionTime(s), now);
+			if (g !== group) {
+				group = g;
+				const head = document.createElement('div');
+				head.className = 'nx-railGroup';
+				head.textContent = RAIL_GROUPS[g];
+				sessionList.appendChild(head);
+			}
+			sessionList.appendChild(railRow(s, now));
+		});
+		const field = sessionList.querySelector('.nx-railRename');
+		if (field) {
+			field.focus();
+			field.setSelectionRange(field.value.length, field.value.length);
+		}
+	}
+
+	function renderSessions(sessions, activeId) {
 		if (activeId) {
 			activeSessionId = activeId;
 		}
-		sessionList.innerHTML = '';
-		(sessions || []).forEach(function (s) {
-			const id = s && s.id ? String(s.id) : '';
-			if (!id) {
-				return;
-			}
-			const name = (s && s.name) ? String(s.name) : 'New chat';
-			const row = document.createElement('div');
-			row.className = 'nx-railItem' + (id === activeSessionId ? ' is-active' : '');
-			row.setAttribute('role', 'listitem');
-			row.setAttribute('data-session-id', id);
-			if (id === activeSessionId) {
-				row.setAttribute('aria-current', 'true');
-			}
-
-			const openBtn = document.createElement('button');
-			openBtn.type = 'button';
-			openBtn.className = 'nx-railOpen';
-			openBtn.title = name;
-			const openLabel = document.createElement('span');
-			openLabel.className = 'nx-railOpenText';
-			openLabel.textContent = name;
-			openBtn.appendChild(openLabel);
-			openBtn.addEventListener('click', function () {
-				if (id === activeSessionId) {
-					return;
-				}
-				vscode.postMessage({ type: 'switchSession', sessionId: id });
+		railSessions = (sessions || [])
+			.filter(function (s) { return s && s.id; })
+			.map(function (s) {
+				return { id: String(s.id), name: String(s.name || ''), createdAt: s.createdAt, updatedAt: s.updatedAt };
 			});
+		if (renamingSessionId && !railSessions.some(function (s) { return s.id === renamingSessionId; })) {
+			renamingSessionId = '';
+		}
+		drawRail();
+	}
 
-			const delBtn = document.createElement('button');
-			delBtn.type = 'button';
-			delBtn.className = 'nx-railDelete';
-			delBtn.title = 'Delete chat session';
-			delBtn.setAttribute('aria-label', 'Delete ' + name);
-			delBtn.textContent = '-';
-			delBtn.addEventListener('click', function (ev) {
-				ev.stopPropagation();
-				vscode.postMessage({ type: 'deleteSession', sessionId: id });
-			});
+	function setRailHidden(hidden) {
+		const rail = document.getElementById('sessionRail');
+		if (rail) {
+			rail.classList.toggle('is-hidden', !!hidden);
+		}
+	}
 
-			row.appendChild(openBtn);
-			row.appendChild(delBtn);
-			sessionList.appendChild(row);
-		});
+	function closeRailSearch() {
+		railQuery = '';
+		if (railSearch) {
+			railSearch.value = '';
+		}
+		if (railSearchRow) {
+			railSearchRow.hidden = true;
+		}
+		drawRail();
 	}
 
 	function loadSessionMessages(sessionId, msgs) {
@@ -2795,19 +2989,32 @@
 		}
 	}, true);
 
-	// Quick action buttons
-	document.querySelectorAll('.nx-quickBtn').forEach(btn => {
-		btn.onclick = () => {
-			const action = btn.getAttribute('data-action');
-			if (action === 'platforms') {
-				vscode.postMessage({ type: 'browsePlatforms' });
-			} else if (action === 'history') {
-				vscode.postMessage({ type: 'getHistory' });
-			} else if (action === 'memory') {
-				vscode.postMessage({ type: 'indexWorkspace' });
-			}
-		};
+	// Rail nav rows and welcome cards: pages open through the host's fixed page map.
+	document.querySelectorAll('[data-page]').forEach(btn => {
+		btn.addEventListener('click', () => vscode.postMessage({ type: 'openPage', page: btn.getAttribute('data-page') }));
 	});
+	document.querySelectorAll('[data-action="indexWorkspace"]').forEach(btn => {
+		btn.addEventListener('click', () => vscode.postMessage({ type: 'indexWorkspace' }));
+	});
+
+	if (railSearchBtn && railSearchRow && railSearch) {
+		railSearchBtn.addEventListener('click', () => {
+			railSearchRow.hidden = false;
+			railSearch.focus();
+			railSearch.select();
+		});
+		railSearch.addEventListener('input', () => {
+			railQuery = railSearch.value;
+			drawRail();
+		});
+		railSearch.addEventListener('keydown', (e) => {
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				closeRailSearch();
+				railSearchBtn.focus();
+			}
+		});
+	}
 
 	// Click handlers for plan approval/cancel
 	window.addEventListener('click', (e) => {
@@ -3075,9 +3282,12 @@
 				break;
 
 			case 'authStatus':
-				updateAuthStatus(data.github, data.vercel, data.supabase, data.stripe, data.v0, data.elevenlabs, data.tavily);
 				if (data.backendOffline === true) {
+					// Unknown, not zero: hide the count until the engine answers.
+					updateAuthStatus();
 					updateStatus(false);
+				} else {
+					updateAuthStatus(data.github, data.vercel, data.supabase, data.stripe, data.v0, data.elevenlabs, data.tavily);
 				}
 				break;
 
@@ -3087,6 +3297,10 @@
 
 			case 'updateSessions':
 				renderSessions(data.sessions, data.activeSessionId);
+				break;
+
+			case 'sessionRail':
+				setRailHidden(data.hidden);
 				break;
 
 			case 'loadSession':
@@ -3224,6 +3438,13 @@
 	updateStatus(!!initial.connected);
 	updateAuthStatus(!!initial.auth.github, !!initial.auth.vercel, !!initial.auth.supabase, !!initial.auth.stripe, !!initial.auth.v0, !!initial.auth.elevenlabs, !!initial.auth.tavily);
 
+	setRailHidden(initial.sessionRailHidden);
+	// Ages and date groups move with the clock, not only when the list changes.
+	setInterval(function () {
+		if (!renamingSessionId) {
+			drawRail();
+		}
+	}, 60000);
 	if (initial.sessions && initial.activeSessionId) {
 		renderSessions(initial.sessions, initial.activeSessionId);
 		loadSessionMessages(initial.activeSessionId, initial.messages || []);

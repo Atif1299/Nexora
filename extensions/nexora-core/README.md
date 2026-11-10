@@ -17,11 +17,11 @@ npm run watch
 | Path | Responsibility |
 |---|---|
 | `extension.ts` | Activation: settings, key-header provider, OAuth/MCP handlers, inline completion, webview registration (gated on engine state), engine start, WebSocket routing, ~30 commands |
-| `chatPanel.ts` | The chat surface: sessions, five modes, model picker, `@mentions`, plan card, the agent loop driver (`_runAgentLoopWithMode`), plan code steps (`_handleWorkspaceTask`) |
-| `sessionsView.ts` | Sessions rail |
+| `chatPanel.ts` | The chat surface: the chat list rail (New chat, Search, Recipes, Platforms, Customize, chats by date), five modes, model picker, `@mentions`, plan card, the agent loop driver (`_runAgentLoopWithMode`), plan code steps (`_handleWorkspaceTask`) |
 | `workflowPanel.ts`, `taskTreeProvider.ts`, `outputPanel.ts` | Plan graph, task tree, step output |
 | `platformPanel.ts` | Platform Browser: catalogue, kinds, Connect / Configure / Install |
-| `templatesPanel.ts`, `timelinePanel.ts`, `analyticsPanel.ts`, `settingsPanel.ts` | Templates, Timeline, Cost & Analytics, Settings (10 sections) |
+| `customizePanel.ts` | Customize: plugins, platforms, skills, agents, recipes (templates), commands, hooks, rules |
+| `timelinePanel.ts`, `settingsPanel.ts` | Memory timeline; Settings (sections incl. Cost & Analytics) |
 | `services/engineProcess.ts` | Find, spawn, health-check and supervise the local engine; generate engine secrets |
 | `services/backend/*`, `services/backendClient.ts` | Typed engine clients; `transport.ts` adds the loopback token and key headers, timeouts, abort, SSE |
 | `services/websocketClient.ts` | Orchestration WebSocket with back-off and plan re-sync |

@@ -11,26 +11,46 @@
 
 	const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
+	/** The kind chips, in the order the page shows them. icon: a codicon; invite: the line a kind with no items shows. */
 	const SECTIONS = [
-		{ id: 'plugins', kind: 'plugin', title: 'Plugins', singular: 'plugin',
+		{ id: 'plugins', kind: 'plugin', title: 'Plugins', singular: 'plugin', icon: 'package',
+			invite: 'Plugins add commands, skills, subagents, hooks and MCP servers in one install.',
 			blurb: 'Bundles of commands, skills, subagents, hooks and MCP servers, installed in one step from a marketplace, a git repository or a folder. Claude Code plugins work as they are.' },
-		{ id: 'skills', kind: 'skill', title: 'Skills', singular: 'skill',
+		{ id: 'platforms', kind: 'platform', title: 'Platforms', singular: 'platform', icon: 'plug',
+			invite: 'Connect GitHub, Vercel or Supabase, or add your own MCP servers, so the agent can use them.',
+			blurb: 'Connected platforms and your own MCP servers. They are managed in the Platforms panel.' },
+		{ id: 'skills', kind: 'skill', title: 'Skills', singular: 'skill', icon: 'lightbulb',
+			invite: 'Skills teach the agent a kind of task; it loads one only when a request matches.',
 			blurb: 'Instructions for a kind of task. The agent sees each skill\'s name and description and loads the full text only when a request matches, so you can keep many.' },
-		{ id: 'agents', kind: 'agent', title: 'Agents', singular: 'subagent',
+		{ id: 'agents', kind: 'agent', title: 'Agents', singular: 'subagent', icon: 'hubot',
+			invite: 'Subagents take on focused tasks the chat agent hands them, up to 3 at once.',
 			blurb: 'Who can take on work: your subagents (the chat agent hands them tasks, up to 3 at once), coding agents on this PC and remote A2A agents. Plans can give a step to any of them.' },
-		{ id: 'recipes', kind: 'recipe', title: 'Recipes', singular: 'recipe',
+		{ id: 'recipes', kind: 'recipe', title: 'Recipes', singular: 'recipe', icon: 'play-circle',
+			invite: 'Recipes are plans you run again with new values. Save one from a finished plan\'s card.',
 			blurb: 'Plans you can run again with new values: steps across platforms and agents, with their skills. Save a finished plan from its card, import one, or get them with plugins.' },
-		{ id: 'commands', kind: 'command', title: 'Commands', singular: 'command',
+		{ id: 'commands', kind: 'command', title: 'Commands', singular: 'command', icon: 'terminal-cmd',
+			invite: 'Commands are prompts you run by typing /name in the chat.',
 			blurb: 'Prompts you run by typing /name in the chat. Text after the name fills $ARGUMENTS.' },
-		{ id: 'hooks', kind: 'hook', title: 'Hooks', singular: 'hook',
+		{ id: 'hooks', kind: 'hook', title: 'Hooks', singular: 'hook', icon: 'zap',
+			invite: 'Hooks run your commands at fixed points, such as before a tool or after an edit.',
 			blurb: 'Your commands that run at fixed points: before and after a tool, when you send a message, when the agent finishes, around plan steps. They can block, add context or check the work.' },
-		{ id: 'rules', kind: 'rule', title: 'Rules', singular: 'rule',
-			blurb: 'Standing instructions sent with every message: your personal rules for all projects, then this project\'s AGENTS.md, CLAUDE.md and .nexora/rules.' },
-		{ id: 'platforms', kind: 'platform', title: 'Platforms (MCP)', singular: 'platform',
-			blurb: 'Connected platforms and your own MCP servers. They are managed in the Platforms panel.' }
+		{ id: 'rules', kind: 'rule', title: 'Rules', singular: 'rule', icon: 'law',
+			invite: 'Rules are standing instructions sent with every message.',
+			blurb: 'Standing instructions sent with every message: your personal rules for all projects, then this project\'s AGENTS.md, CLAUDE.md and .nexora/rules.' }
+	];
+
+	/** The scope menu: which items the page shows. */
+	const SCOPES = [
+		{ id: 'all', label: 'All' },
+		{ id: 'user', label: 'You' },
+		{ id: 'project', label: 'This project' },
+		{ id: 'claude', label: 'Claude Code' },
+		{ id: 'cursor', label: 'Cursor' }
 	];
 
 	const ORIGINS = { nexora: 'Nexora', plugin: 'Plugin', claude: 'Claude Code', cursor: 'Cursor' };
+	const SERVER_SCOPES = { user: 'You', project: 'This project', plugin: 'Plugin' };
+	const SERVER_STATES = { connected: 'Connected', available: 'Not connected', needs_approval: 'Needs approval', disabled: 'Off', error: 'Error' };
 
 	/** Every hook event, in the order Customize lists them. matcher: whether a matcher applies. */
 	const EVENT_INFO = {
@@ -120,32 +140,27 @@
 		return kind === 'command' ? 'Chat, Ask, Agent, Plan' : 'Ask, Agent';
 	}
 
-	/** chip: all | user | project | claude | cursor */
-	function filterItems(items, query, chip) {
+	/**
+	 * Whether a row stays in view. entry: { text, scope: user | project, origin }; scope is the
+	 * menu's choice (all | user | project | claude | cursor); query matches anywhere in text.
+	 */
+	function matches(entry, query, scope) {
+		if ((scope === 'user' || scope === 'project') && entry.scope !== scope) {
+			return false;
+		}
+		if ((scope === 'claude' || scope === 'cursor') && entry.origin !== scope) {
+			return false;
+		}
 		const q = String(query || '').trim().toLowerCase();
-		return (items || []).filter(function (item) {
-			if (chip === 'user' || chip === 'project') {
-				if (item.scope !== chip) {
-					return false;
-				}
-			} else if (chip === 'claude' || chip === 'cursor') {
-				if (item.origin !== chip) {
-					return false;
-				}
-			}
-			if (!q) {
-				return true;
-			}
-			return String(item.name || '').toLowerCase().indexOf(q) >= 0
-				|| String(item.description || '').toLowerCase().indexOf(q) >= 0;
-		});
+		return !q || String(entry.text || '').toLowerCase().indexOf(q) >= 0;
 	}
 
-	function groupByScope(items) {
-		return {
-			user: (items || []).filter(function (i) { return i.scope === 'user'; }),
-			project: (items || []).filter(function (i) { return i.scope === 'project'; })
-		};
+	/** "You - Connected - 12 tools" for one of your MCP servers. */
+	function serverSource(server) {
+		const tools = server.tools && server.tools.total
+			? (server.tools.enabled === server.tools.total ? plural(server.tools.total, 'tool', 'tools') : server.tools.enabled + ' of ' + server.tools.total + ' tools on')
+			: '';
+		return [SERVER_SCOPES[server.scope] || 'You', SERVER_STATES[server.state] || server.state, tools].filter(Boolean).join(' - ');
 	}
 
 	/** '' when the name can be used, else what is wrong with it (same rule as the engine). */
@@ -282,6 +297,9 @@
 
 	const api = {
 		SECTIONS: SECTIONS,
+		SCOPES: SCOPES,
+		matches: matches,
+		serverSource: serverSource,
 		learnedLabel: learnedLabel,
 		learnedFacts: learnedFacts,
 		groupRecipes: groupRecipes,
@@ -296,8 +314,6 @@
 		marketplaceSourceHint: marketplaceSourceHint,
 		originLabel: originLabel,
 		useInLabel: useInLabel,
-		filterItems: filterItems,
-		groupByScope: groupByScope,
 		validateNewName: validateNewName,
 		usageLabel: usageLabel,
 		tryText: tryText

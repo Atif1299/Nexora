@@ -86,20 +86,28 @@ export function getChatWebviewHtml(
 						</svg>
 					</div>
 					<div class="nx-welcomeTitle">Nexora AI</div>
-					<div class="nx-welcomeSub">Universal AI Orchestration - Chat, Plan, or Execute</div>
-					
-					<div class="nx-quickActions">
-						<button class="nx-quickBtn" data-action="platforms">
-							<span class="nx-quickIcon" aria-hidden="true">#</span>
-							Browse Platforms
+					<div class="nx-welcomeSub">Chat, plan across your platforms, or let the agent build.</div>
+
+					<div class="nx-welcomeCards">
+						<button type="button" class="nx-welcomeCard" data-page="platforms">
+							<i class="codicon codicon-plug" aria-hidden="true"></i>
+							<span class="nx-welcomeCardTitle">Connect a platform</span>
+							<span class="nx-welcomeCardDesc">GitHub, Vercel, Supabase and your MCP servers</span>
 						</button>
-						<button class="nx-quickBtn" data-action="history">
-							<span class="nx-quickIcon" aria-hidden="true">H</span>
-							View History
+						<button type="button" class="nx-welcomeCard" data-page="recipes">
+							<i class="codicon codicon-play-circle" aria-hidden="true"></i>
+							<span class="nx-welcomeCardTitle">Run a recipe</span>
+							<span class="nx-welcomeCardDesc">Start from a saved multi-step plan</span>
 						</button>
-						<button class="nx-quickBtn" data-action="memory">
-							<span class="nx-quickIcon" aria-hidden="true">I</span>
-							Index Workspace
+						<button type="button" class="nx-welcomeCard" data-page="customize">
+							<i class="codicon codicon-extensions" aria-hidden="true"></i>
+							<span class="nx-welcomeCardTitle">Add a skill or agent</span>
+							<span class="nx-welcomeCardDesc">Plugins, skills, agents, hooks and rules</span>
+						</button>
+						<button type="button" class="nx-welcomeCard" data-action="indexWorkspace">
+							<i class="codicon codicon-database" aria-hidden="true"></i>
+							<span class="nx-welcomeCardTitle">Index this workspace</span>
+							<span class="nx-welcomeCardDesc">Let chat and the agent search your code</span>
 						</button>
 					</div>
 				</div>
@@ -133,15 +141,20 @@ export function getChatWebviewHtml(
 			</div>
 		</footer>
 		</div>
-		<aside class="nx-sessionRail" id="sessionRail" aria-label="Chat sessions">
-			<div class="nx-railResize" id="railResize" role="separator" aria-orientation="vertical" aria-label="Resize session list"></div>
-			<div class="nx-railTop">
-				<button class="nx-railNew" id="newSessionBtn" type="button" title="New chat">
-					<span class="nx-railNewMark" aria-hidden="true">+</span>
-					<span>New chat</span>
-				</button>
+		<aside class="nx-sessionRail${initialState.sessionRailHidden ? ' is-hidden' : ''}" id="sessionRail" aria-label="Chats">
+			<div class="nx-railResize" id="railResize" role="separator" aria-orientation="vertical" aria-label="Resize chat list"></div>
+			<nav class="nx-railNav" aria-label="Chat navigation">
+				<button type="button" class="nx-railNavItem" id="newSessionBtn"><i class="codicon codicon-add" aria-hidden="true"></i><span>New chat</span></button>
+				<button type="button" class="nx-railNavItem" id="railSearchBtn" aria-controls="railSearch"><i class="codicon codicon-search" aria-hidden="true"></i><span>Search chats</span></button>
+				<button type="button" class="nx-railNavItem" data-page="recipes"><i class="codicon codicon-play-circle" aria-hidden="true"></i><span>Recipes</span></button>
+				<button type="button" class="nx-railNavItem" data-page="platforms"><i class="codicon codicon-plug" aria-hidden="true"></i><span>Platforms</span><span class="nx-railNavCount" id="railPlatformCount" hidden></span></button>
+				<button type="button" class="nx-railNavItem" data-page="customize"><i class="codicon codicon-extensions" aria-hidden="true"></i><span>Customize</span></button>
+			</nav>
+			<div class="nx-railSearch" id="railSearchRow" hidden>
+				<i class="codicon codicon-search" aria-hidden="true"></i>
+				<input type="text" id="railSearch" placeholder="Search chats" aria-label="Search chats" autocomplete="off" spellcheck="false" />
 			</div>
-			<div class="nx-railList" id="sessionList" role="list"></div>
+			<div class="nx-railList" id="sessionList"></div>
 		</aside>
 	</div>`
 	});

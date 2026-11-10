@@ -21,10 +21,7 @@ export function getTimelineWebviewHtml(
 		styles: ['timeline.css'],
 		scripts: ['timeline.js'],
 		body: /* html */ `	<div id="timeline-root" role="main" aria-label="Nexora Timeline">
-		<div class="nx-section-head">
-			<h1>Memory Timeline</h1>
-			<button type="button" class="nx-btn nx-btn-secondary" id="refreshBtn" aria-label="Refresh timeline">Refresh</button>
-		</div>
+		<h1>Memory Timeline</h1>
 		<p class="nx-hint">Read-only snapshots. Click a node for detail and a diff against the current snapshot.</p>
 
 		<div id="offline-banner" class="nx-banner" role="alert" hidden></div>

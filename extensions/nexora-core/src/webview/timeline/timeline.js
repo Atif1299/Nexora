@@ -130,10 +130,6 @@
 		announce(`${(data.snapshots || []).length} snapshots`);
 	}
 
-	document.getElementById('refreshBtn')?.addEventListener('click', () => {
-		vscode.postMessage({ type: 'refresh' });
-	});
-
 	document.getElementById('timeline-rail')?.addEventListener('click', (event) => {
 		const node = event.target && event.target.closest ? event.target.closest('.nx-node') : null;
 		if (!node) {

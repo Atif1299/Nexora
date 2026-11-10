@@ -39,31 +39,48 @@
 		// --- Agents page: coding agents and remote agents ---------------------------------------
 
 		function localRow(a) {
-			return '<div class="cz-row" role="listitem"><div class="cz-rowMain cz-static">' +
-				'<span class="cz-rowTop"><span class="cz-name">' + esc(a.name) + '</span>' +
-				(a.installed ? '<span class="cz-chip cz-okChip">Installed</span>' : '<span class="cz-chip">Not installed</span>') +
-				'<span class="cz-chip">Plans</span>' + learned(a.learned) + '</span>' +
-				'<span class="cz-desc">' + (a.installed
-					? 'Plans can hand it a code step. It works in its own git worktree; its changes come back as a diff.'
-					: 'Install it to let plans hand it code steps: <code>' + esc(a.install_hint) + '</code>') + '</span></div>' +
-				'<span class="cz-rowActions">' +
-				(a.installed ? '' : '<button type="button" class="nx-btn nx-btn-secondary" data-ag-copy="' + esc(a.install_hint) + '">Copy install command</button>') +
-				'<button type="button" class="nx-btn nx-btn-ghost" data-ag-docs="' + esc(a.docs_url) + '">Docs</button></span></div>';
+			return ctx.rowHtml({
+				icon: 'terminal',
+				name: a.name,
+				cls: a.installed ? '' : 'cz-off',
+				badges: (a.installed ? '' : '<span class="cz-chip">Not installed</span>') + learned(a.learned),
+				source: a.installed ? 'On this PC - plans can hand it a code step in its own git worktree' : 'Install it to let plans hand it code steps: ' + a.install_hint,
+				actions: (a.installed ? '' : '<button type="button" class="nx-btn nx-btn-secondary" data-ag-copy="' + esc(a.install_hint) + '">Copy install command</button>') +
+					'<button type="button" class="nx-btn nx-btn-ghost" data-ag-docs="' + esc(a.docs_url) + '">Docs</button>'
+			});
 		}
 
 		function remoteRow(a) {
 			const skills = (a.skills || []).map(function (s) { return s.name || s.id; }).filter(Boolean);
-			return '<div class="cz-row" role="listitem"><div class="cz-rowMain cz-static">' +
-				'<span class="cz-rowTop"><span class="cz-name">' + esc(a.title || a.name) + '</span>' +
-				'<span class="cz-chip">' + (a.protocol === 'nexora' ? 'Nexora A2A' : 'A2A') + '</span>' +
-				(a.has_token ? '<span class="cz-chip">Token saved</span>' : (a.needs_token ? '<span class="cz-chip cz-warnChip">Needs a token</span>' : '')) +
-				'<span class="cz-chip">Plans</span>' + learned(a.learned) + '</span>' +
-				'<span class="cz-desc">' + esc(a.description || a.url) + '</span>' +
-				(skills.length ? '<span class="cz-desc nx-hint">Skills: ' + esc(skills.join(', ')) + '</span>' : '') +
-				'<code class="cz-command">' + esc(a.url) + '</code></div>' +
-				'<span class="cz-rowActions">' +
-				'<button type="button" class="nx-btn nx-btn-ghost" data-ag-test="' + esc(a.name) + '"' + busy('test:' + a.name, 'Asking...', 'Test') + '</button>' +
-				'<button type="button" class="nx-btn nx-btn-ghost" data-ag-remove="' + esc(a.name) + '">Remove</button></span></div>';
+			return ctx.rowHtml({
+				icon: 'globe',
+				name: a.title || a.name,
+				badges: (a.has_token ? '' : (a.needs_token ? '<span class="cz-chip cz-warnChip">Needs a token</span>' : '')) + learned(a.learned),
+				source: [a.protocol === 'nexora' ? 'Nexora A2A' : 'A2A', a.url, skills.length ? 'skills: ' + skills.join(', ') : ''].filter(Boolean).join(' - '),
+				desc: a.description || '',
+				actions: '<button type="button" class="nx-btn nx-btn-ghost" data-ag-test="' + esc(a.name) + '"' + busy('test:' + a.name, 'Asking...', 'Test') + '</button>' +
+					'<button type="button" class="nx-btn nx-btn-ghost" data-ag-remove="' + esc(a.name) + '">Remove</button>'
+			});
+		}
+
+		function localAgents() {
+			const info = data('agentsInfo');
+			return info ? info.local.slice().sort(function (a, b) { return LOCAL_ORDER.indexOf(a.id) - LOCAL_ORDER.indexOf(b.id); }) : [];
+		}
+
+		function localEntry(a) {
+			return { item: a, text: a.name + ' coding agent', scope: 'user', origin: '', html: localRow(a) };
+		}
+
+		function remoteEntry(a) {
+			return { item: a, text: (a.title || a.name) + ' ' + (a.description || '') + ' ' + a.url, scope: 'user', origin: '', html: remoteRow(a) };
+		}
+
+		/** Installed coding agents and remote agents; the subagents come from customize.js. */
+		function agentEntries() {
+			const info = data('agentsInfo');
+			return localAgents().filter(function (a) { return a.installed; }).map(localEntry)
+				.concat(info ? info.remote.map(remoteEntry) : []);
 		}
 
 		function agentsExtra() {
@@ -71,16 +88,15 @@
 			if (!info) {
 				return '';
 			}
-			const local = info.local.slice().sort(function (a, b) { return LOCAL_ORDER.indexOf(a.id) - LOCAL_ORDER.indexOf(b.id); });
 			const facts = data('learned');
-			let html = '<div class="cz-group"><div class="cz-groupTitle">Coding agents on this PC <span class="nx-hint">plans can hand them a code step</span></div>' +
-				'<div class="cz-list" role="list">' + local.map(localRow).join('') + '</div></div>';
-			html += '<div class="cz-group"><div class="cz-groupTitle cz-groupHead"><span>Remote agents (A2A) <span class="nx-hint">' + info.remote.length + '</span></span>' +
-				'<button type="button" class="nx-btn nx-btn-secondary" data-ag="add">+ Remote agent</button></div>';
-			html += info.remote.length
-				? '<div class="cz-list" role="list">' + info.remote.map(remoteRow).join('') + '</div>'
-				: '<p class="nx-hint cz-none">Agents on other services that speak the open A2A protocol. Add one by its address; plans can then give it a step, and its answer becomes the step\'s result.</p>';
-			html += '</div>';
+			const local = localAgents().map(localEntry).filter(ctx.keep);
+			const remote = info.remote.map(remoteEntry).filter(ctx.keep);
+			const rows = function (list) { return ctx.listOf(list.map(function (e) { return e.html; })); };
+			let html = local.length ? ctx.listHead('Coding agents on this PC', local.length) + rows(local) : '';
+			html += ctx.listHead('Remote agents (A2A)', remote.length, '<button type="button" class="nx-btn nx-btn-secondary" data-ag="add">' +
+				'<i class="codicon codicon-add" aria-hidden="true"></i> Remote agent</button>');
+			html += remote.length ? rows(remote) : (info.remote.length ? ctx.none()
+				: '<p class="nx-hint cz-none">Agents on other services that speak the open A2A protocol. Add one by its address; plans can then give it a step, and its answer becomes the step\'s result.</p>');
 			if (facts && facts.steps) {
 				html += '<div class="nx-card cz-learned"><div><strong>Routing that learns</strong><p class="nx-hint">' +
 					esc(M.learnedFacts(facts)) + '</p></div><button type="button" class="nx-btn nx-btn-ghost" data-ag="forget"' +
@@ -132,35 +148,42 @@
 		function recipeRow(r) {
 			const own = r.source === 'user' || r.source === 'imported';
 			const plugin = r.metadata && r.metadata.plugin;
-			return '<div class="cz-row" role="listitem"><div class="cz-rowMain cz-static">' +
-				'<span class="cz-rowTop"><span class="cz-name">' + esc(r.name) + '</span>' +
-				'<span class="cz-chip">' + esc(M.recipeSourceLabel(r)) + '</span>' +
-				'<span class="cz-usage">' + esc(M.recipeSummary(r)) + '</span></span>' +
-				'<span class="cz-desc">' + esc(r.description || '') + '</span></div>' +
-				'<span class="cz-rowActions">' +
-				'<button type="button" class="nx-btn" data-rc-use="' + esc(r.id) + '">Use</button>' +
-				'<button type="button" class="nx-btn nx-btn-ghost" data-rc-export="' + esc(r.id) + '">Export</button>' +
-				(own ? '<button type="button" class="nx-btn nx-btn-ghost" data-rc-delete="' + esc(r.id) + '">Delete</button>'
-					: (plugin ? '<button type="button" class="nx-btn nx-btn-ghost" data-rc="plugins">Manage plugin</button>' : '')) +
-				'</span></div>';
+			return ctx.rowHtml({
+				icon: 'play-circle',
+				name: r.name,
+				source: M.recipeSourceLabel(r) + ' - ' + M.recipeSummary(r),
+				desc: r.description || '',
+				actions: '<button type="button" class="nx-btn nx-btn-secondary" data-rc-use="' + esc(r.id) + '">Use</button>' +
+					'<button type="button" class="nx-btn nx-btn-ghost" data-rc-export="' + esc(r.id) + '">Export</button>' +
+					(own ? '<button type="button" class="nx-btn nx-btn-ghost" data-rc-delete="' + esc(r.id) + '">Delete</button>'
+						: (plugin ? '<button type="button" class="nx-btn nx-btn-ghost" data-rc="plugins">Manage plugin</button>' : ''))
+			});
+		}
+
+		function recipeEntries() {
+			const list = data('recipes');
+			return (Array.isArray(list) ? list : []).map(function (r) {
+				return { item: r, text: r.name + ' ' + (r.description || ''), scope: r.source === 'builtin' ? '' : 'user', origin: '', html: recipeRow(r) };
+			});
 		}
 
 		function renderRecipes(s) {
 			const list = data('recipes');
-			const html = ctx.header(s, false).replace('</header>', '<div class="cz-headActions">' +
-				'<button type="button" class="nx-btn nx-btn-secondary" data-rc="import">Import...</button></div></header>');
+			let html = ctx.intro(s);
 			if (!Array.isArray(list)) {
 				return html + ctx.tooOld();
 			}
 			if (!list.length) {
-				return html + '<div class="nx-empty cz-emptyState"><div class="nx-empty-title">No recipes yet</div>' +
-					'<p class="nx-hint">When a plan finishes, its card offers to save it as a recipe. Plugins can bring recipes too: git-helper and web-qa in Nexora\'s marketplace each have one.</p>' +
-					'<div class="nx-row"><button type="button" class="nx-btn nx-btn-secondary" data-rc="browse">Browse plugins</button></div></div>';
+				return html + ctx.invite('recipes');
 			}
-			const groups = M.groupRecipes(list);
-			return html + groups.map(function (g) {
+			const shown = recipeEntries().filter(ctx.keep);
+			html += ctx.listHead('Recipes', shown.length, ctx.addButton('recipes'));
+			if (!shown.length) {
+				return html + ctx.none();
+			}
+			return html + M.groupRecipes(shown.map(function (e) { return e.item; })).map(function (g) {
 				return '<div class="cz-group"><div class="cz-groupTitle">' + esc(g.title) + ' <span class="nx-hint">' + g.items.length + '</span></div>' +
-					'<div class="cz-list" role="list">' + g.items.map(recipeRow).join('') + '</div></div>';
+					ctx.listOf(g.items.map(recipeRow)) + '</div>';
 			}).join('');
 		}
 
@@ -227,11 +250,9 @@
 
 		return {
 			agentsExtra: agentsExtra,
+			agentEntries: agentEntries,
+			recipeEntries: recipeEntries,
 			render: renderRecipes,
-			count: function () {
-				const list = data('recipes');
-				return Array.isArray(list) ? list.length : 0;
-			},
 			click: function (t) {
 				const d = t.dataset;
 				if (d.ag === 'add') {
@@ -277,8 +298,8 @@
 					ctx.post({ type: 'deleteRecipe', id: d.rcDelete });
 				} else if (d.rc === 'import') {
 					ctx.post({ type: 'importRecipe' });
-				} else if (d.rc === 'browse' || d.rc === 'plugins') {
-					ctx.reveal(d.rc === 'browse' ? 'plugins:marketplace' : 'plugins:installed');
+				} else if (d.rc === 'plugins') {
+					ctx.reveal('plugins:installed');
 				} else {
 					return false;
 				}

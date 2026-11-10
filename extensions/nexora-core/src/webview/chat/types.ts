@@ -14,6 +14,10 @@ export interface ContextTag {
 	path?: string;
 	text?: string;
 }
+/** Pages the chat rail and welcome cards can open. */
+export type ChatPage = 'recipes' | 'platforms' | 'customize';
+/** One row of the chat list; the webview groups rows by updatedAt. */
+export type ChatSessionSummary = { id: string; name: string; createdAt: number; updatedAt: number };
 /** What every composer send carries besides the text. */
 type ComposerExtras = { model?: string; effort?: Effort; context?: ContextTag[] };
 
@@ -37,7 +41,10 @@ export type WebviewInboundMessage =
 	| { type: 'newSession' }
 	| { type: 'switchSession'; sessionId: string }
 	| { type: 'deleteSession'; sessionId: string }
+	| { type: 'renameSession'; sessionId: string; name: string }
 	| { type: 'persistSessionRailWidth'; width: number }
+	/** Rail nav and welcome cards; the host maps each page to one fixed command. */
+	| { type: 'openPage'; page: ChatPage }
 	| { type: 'approvePlan'; planId: string }
 	| { type: 'cancelPlan'; planId: string }
 	| { type: 'modifyPlan'; planId: string; modification: any }
@@ -45,10 +52,8 @@ export type WebviewInboundMessage =
 	| { type: 'runFix'; fix: string }
 	/** New inputs for a step that needs input; the engine validates them again. */
 	| { type: 'updateStepInputs'; planId: string; taskId: string; inputs: Record<string, unknown> }
-	| { type: 'getHistory' }
 	| { type: 'getRollbackable' }
 	| { type: 'rollback'; historyId: number }
-	| { type: 'browsePlatforms' }
 	| { type: 'indexWorkspace' }
 	| { type: 'showEngineOutput' }
 	| ({ type: 'executeRequest'; request: string } & ComposerExtras)
@@ -114,7 +119,8 @@ export type WebviewOutboundMessage =
 	| { type: 'authStatus'; github: boolean; vercel: boolean; supabase?: boolean; stripe?: boolean; v0?: boolean; elevenlabs?: boolean; tavily?: boolean }
 	| { type: 'showPlanApproval'; plan: any }
 	| { type: 'loadSession'; sessionId: string; messages: ChatViewMessage[] }
-	| { type: 'updateSessions'; sessions: Array<{ id: string; name: string }>; activeSessionId: string }
+	| { type: 'updateSessions'; sessions: ChatSessionSummary[]; activeSessionId: string }
+	| { type: 'sessionRail'; hidden: boolean }
 	| { type: 'taskUpdate'; planId: string; taskId: string; taskName?: string; status: string; result?: any; error?: string; cost?: number }
 	| { type: 'taskRetry'; planId: string; taskId: string; taskName?: string; attempt: number; maxAttempts: number; platform: string }
 	| { type: 'planCompleted'; planId: string; status: string; actualCost: number }
@@ -173,9 +179,10 @@ export type ChatInitialState = {
 		tavily?: boolean;
 	};
 	messages?: ChatViewMessage[];
-	sessions?: Array<{ id: string; name: string }>;
+	sessions?: ChatSessionSummary[];
 	activeSessionId?: string;
 	sessionRailWidth?: number;
+	sessionRailHidden?: boolean;
 	submitWithCtrlEnter?: boolean;
 	selectedModelId?: string;
 };

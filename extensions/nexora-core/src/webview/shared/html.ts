@@ -54,8 +54,10 @@ export interface WebviewPageOptions {
  * `tokens.css` holds the colour and spacing variables the panels reference;
  * a panel that does not get it renders with every `var(--nx-*)` undefined,
  * which looks like a broken page rather than a missing file.
+ * `codicon.css` is VS Code's own icon font (`<i class="codicon codicon-NAME">`),
+ * so every page draws the same icons as the editor around it.
  */
-const SHARED_STYLESHEETS = ['tokens.css', 'base.css', 'components.css'];
+const SHARED_STYLESHEETS = ['codicon.css', 'tokens.css', 'base.css', 'components.css'];
 
 function getNonce(): string {
 	let text = '';
@@ -92,6 +94,7 @@ export function renderWebviewPage(options: WebviewPageOptions): string {
 	const csp = [
 		`default-src 'none'`,
 		`img-src ${webview.cspSource} https: data:`,
+		`font-src ${webview.cspSource}`,
 		`style-src ${webview.cspSource}${options.allowInlineStyles ? ` 'unsafe-inline'` : ''}`,
 		`script-src 'nonce-${nonce}'`
 	].join('; ');

@@ -14,6 +14,7 @@ import * as vscode from 'vscode';
 import { acquireEditorPanel, gateEditorPanel } from './services/editorPage';
 import { getBackendClient } from './services/backendClient';
 import type { CustomizeItem, CustomizePlural, HookItem } from './services/backend/customize';
+import { useInLabels } from './services/platformUsage';
 import { getCustomizeWebviewHtml } from './webview/customize';
 
 const PLURALS: CustomizePlural[] = ['skills', 'commands', 'agents'];
@@ -43,9 +44,10 @@ export class CustomizePanelProvider {
 
 	constructor(private readonly _extensionUri: vscode.Uri) { }
 
-	/** section: skills | agents | commands | rules | platforms; startNew opens its New form. */
+	/** section: a kind chip (plugins | platforms | skills | agents | recipes | commands | hooks | rules); startNew opens its New form. */
 	public async open(section?: string, startNew = false): Promise<void> {
-		this._pendingSection = section;
+		// No section means the All overview, not whichever chip was open last.
+		this._pendingSection = section || 'all';
 		this._pendingNew = startNew;
 		const panel = acquireEditorPanel({
 			viewType: CustomizePanelProvider.viewType,
@@ -71,6 +73,13 @@ export class CustomizePanelProvider {
 			this._attached = false;
 		});
 		gateEditorPanel(panel, (ready) => this._attach(ready));
+	}
+
+	/** Reloads the page's data if it is open (after a recipe is saved from a plan). */
+	public refresh(): void {
+		if (this._attached) {
+			this._scheduleRefresh();
+		}
 	}
 
 	private _folder(): string | undefined {
@@ -140,7 +149,7 @@ export class CustomizePanelProvider {
 		const folder = this._folder();
 		const client = getBackendClient();
 		const api = client.customize();
-		const [list, examples, rules, hookList, installedPlugins, marketplaces, agentsInfo, learned, recipes] = await Promise.all([
+		const [list, examples, rules, hookList, installedPlugins, marketplaces, agentsInfo, learned, recipes, platformRows] = await Promise.all([
 			api.list(folder),
 			api.examples(folder),
 			client.getProjectRules(folder).catch(() => undefined),
@@ -149,7 +158,8 @@ export class CustomizePanelProvider {
 			api.listMarketplaces(),
 			api.listAgents(folder),
 			api.learnedFacts(),
-			client.listTemplates().then((r) => r.templates, () => null)
+			client.listTemplates().then((r) => r.templates, () => null),
+			this._platformRows(folder)
 		]);
 		this._post({
 			type: 'state',
@@ -170,8 +180,32 @@ export class CustomizePanelProvider {
 			agentsInfo: agentsInfo || null,
 			learned: learned || null,
 			recipes: recipes || null,
+			// The Platforms chip: your MCP servers and the platforms the engine reports connected
+			mcpServers: platformRows.servers,
+			connectedPlatforms: platformRows.platforms,
 			rulesEnabled: vscode.workspace.getConfiguration('nexora.agent').get<boolean>('projectRules', true)
 		});
+	}
+
+	/** Rows for the Platforms chip, as the Platforms panel reads them; whatever fails is left out. */
+	private async _platformRows(folder: string | undefined): Promise<{ servers: object[]; platforms: object[] }> {
+		const client = getBackendClient();
+		const [mine, usage] = await Promise.all([
+			client.setMcpWorkspace(folder).then(() => client.getMyServers(), () => undefined),
+			client.getPlatformUsage().catch(() => undefined)
+		]);
+		const servers = (mine?.servers || []).filter((s) => s.scope !== 'bundled').map((s) => ({
+			id: s.id, name: s.name, scope: s.scope, state: s.state, url: s.url, command: s.command, tools: s.tools
+		}));
+		const report = usage || {};
+		const connected = Object.keys(report).filter((id) => report[id].state === 'connected');
+		const catalogue: Array<{ id?: string; name?: string }> = connected.length ? await client.getPlatforms().catch(() => []) : [];
+		const platforms = connected.map((id) => ({
+			id,
+			name: catalogue.find((p) => String(p.id || '').toLowerCase() === id)?.name || id,
+			usableIn: useInLabels(report[id])
+		}));
+		return { servers, platforms };
 	}
 
 	private async _onMessage(msg: any): Promise<void> {

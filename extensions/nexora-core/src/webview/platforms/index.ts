@@ -19,12 +19,6 @@ export function getPlatformsWebviewHtml(
 		styles: ['platforms.css'],
 		scripts: ['platforms.js'],
 		body: /* html */ `	<div id="platforms-root" role="main" aria-label="Nexora Platforms">
-		<div class="nx-section-head">
-			<h1>Platforms</h1>
-			<button type="button" class="nx-icon-btn" id="refreshBtn" title="Refresh" aria-label="Refresh platforms">
-				<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.55M13 2.5v2.5h-2.5"/></svg>
-			</button>
-		</div>
 		<p class="nx-hint">Connect the services your agents build and deploy with. Catalogue entries are for discovery only.</p>
 		<div class="nx-tools">
 			<div class="nx-search">

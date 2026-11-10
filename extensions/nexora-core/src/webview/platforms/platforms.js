@@ -725,9 +725,6 @@
 		}
 	}
 
-	document.getElementById('refreshBtn')?.addEventListener('click', () => {
-		vscode.postMessage({ type: 'refresh' });
-	});
 
 	const search = document.getElementById('platform-search');
 	search?.addEventListener('input', () => {

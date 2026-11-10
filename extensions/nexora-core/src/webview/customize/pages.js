@@ -12,7 +12,7 @@
 		const M = ctx.M;
 		const esc = ctx.esc;
 		const ui = ctx.ui;
-		const page = { pluginTab: 'installed', market: 'nexora', marketQuery: '', hookForm: false, busy: '', expanded: '', pending: null };
+		const page = { pluginTab: 'installed', market: 'nexora', hookForm: false, focusForm: false, busy: '', expanded: '', pending: null };
 
 		function data(key) {
 			return ui.data ? ui.data[key] : undefined;
@@ -50,48 +50,50 @@
 			const matcher = M.hookMatcherLabel(h.event, h.matcher);
 			const run = (h.recent_runs || [])[0];
 			const runClass = !run ? '' : (run.blocked ? ' cz-runBlocked' : (run.exit_code === 0 ? ' cz-runOk' : ' cz-runBad'));
-			return '<div class="cz-row cz-hookRow" role="listitem"><div class="cz-rowMain cz-static">' +
-				'<span class="cz-rowTop">' + (matcher ? '<span class="cz-chip cz-matcher">' + esc(matcher) + '</span>' : '') +
-				'<span class="cz-chip' + (h.source === 'plugin' ? ' cz-origin-plugin' : '') + '">' + esc(M.hookSourceLabel(h)) + '</span>' +
-				(h.approved ? '' : '<span class="cz-chip cz-warnChip">Needs approval</span>') +
-				'<span class="cz-usage' + runClass + '">' + esc(M.hookRunLabel(run)) + '</span></span>' +
-				'<code class="cz-command" title="' + esc(h.command) + '">' + esc(h.command) + '</code></div>' +
-				'<span class="cz-rowActions">' +
-				(h.approved ? '' : '<button type="button" class="nx-btn nx-btn-secondary" data-hk-approve="' + esc(h.id) + '">Approve</button>') +
-				'<button type="button" class="nx-btn nx-btn-ghost" data-hk-test="' + esc(h.id) + '"' + busy('test:' + h.id, 'Running...', 'Test') + '</button>' +
-				'<button type="button" class="nx-btn nx-btn-ghost" data-open-file="' + esc(h.file) + '">Open</button>' +
-				(h.source === 'plugin' ? '' : '<button type="button" class="nx-btn nx-btn-ghost" data-hk-delete="' + esc(h.id) + '">Delete</button>') +
-				'</span></div>';
+			const info = M.EVENT_INFO[h.event];
+			return ctx.rowHtml({
+				icon: 'zap',
+				name: h.command,
+				nameCls: 'cz-mono',
+				source: [M.hookSourceLabel(h), info ? info.title : h.event, matcher].filter(Boolean).join(' - '),
+				badges: (h.approved ? '' : '<span class="cz-chip cz-warnChip">Needs approval</span>') +
+					'<span class="cz-usage' + runClass + '">' + esc(M.hookRunLabel(run)) + '</span>',
+				actions: (h.approved ? '' : '<button type="button" class="nx-btn nx-btn-secondary" data-hk-approve="' + esc(h.id) + '">Approve</button>') +
+					'<button type="button" class="nx-btn nx-btn-ghost" data-hk-test="' + esc(h.id) + '"' + busy('test:' + h.id, 'Running...', 'Test') + '</button>' +
+					'<button type="button" class="nx-btn nx-btn-ghost" data-open-file="' + esc(h.file) + '">Open</button>' +
+					(h.source === 'plugin' ? '' : '<button type="button" class="nx-btn nx-btn-ghost" data-hk-delete="' + esc(h.id) + '">Delete</button>')
+			});
 		}
 
 		function renderHooks(s) {
 			const list = data('hooks');
-			let html = ctx.header(s, false);
+			let html = ctx.intro(s);
 			if (!Array.isArray(list)) {
 				return html + ctx.tooOld();
 			}
-			html = html.replace('</header>', '<div class="cz-headActions"><button type="button" class="nx-btn nx-btn-secondary" data-hk="import"' +
-				busy('import', 'Importing...', 'Import from Claude Code') + '</button><button type="button" class="nx-btn" data-hk="new">+ New hook</button></div></header>');
+			const shown = entries('hooks').filter(ctx.keep);
+			const importBtn = '<button type="button" class="nx-btn nx-btn-ghost" data-hk="import"' + busy('import', 'Importing...', 'Import from Claude Code') + '</button>';
+			if (list.length) {
+				html += ctx.listHead('Installed', shown.length, importBtn + ctx.addButton('hooks'));
+			}
 			if (page.hookForm) {
 				html += hookForm();
 			}
 			if (!list.length) {
-				return html + '<div class="nx-empty cz-emptyState"><div class="nx-empty-title">No hooks yet</div>' +
-					'<p class="nx-hint">A hook is a command Nexora runs at a fixed point, in Claude Code\'s format. People use them to:</p>' +
-					'<ul class="cz-uses"><li>block risky commands before the agent runs them;</li><li>format or lint files after every edit;</li>' +
-					'<li>add project context (the branch, open tickets) to every message.</li></ul>' +
-					'<div class="nx-row"><button type="button" class="nx-btn" data-hk="new">+ New hook</button>' +
-					'<button type="button" class="nx-btn nx-btn-secondary" data-pl-goto="guardrails">Get the guardrails plugin</button></div></div>';
+				return html + ctx.invite('hooks', importBtn);
+			}
+			if (!shown.length) {
+				return html + ctx.none();
 			}
 			html += '<p class="nx-hint cz-shellLine">Hooks run in ' + esc(data('hookShell') || 'your shell') + '. Project hooks run only after you approve them.</p>';
 			Object.keys(M.EVENT_INFO).forEach(function (event) {
-				const group = list.filter(function (h) { return h.event === event; });
+				const group = shown.filter(function (e) { return e.item.event === event; });
 				if (!group.length) {
 					return;
 				}
 				const info = M.EVENT_INFO[event];
-				html += '<div class="cz-group"><div class="cz-groupTitle">' + esc(info.title) + ' <span class="nx-hint">' + esc(event) + '</span></div>' +
-					'<p class="nx-hint cz-groupDesc">' + esc(info.desc) + '</p><div class="cz-list" role="list">' + group.map(hookRow).join('') + '</div></div>';
+				html += '<div class="cz-group"><div class="cz-groupTitle">' + esc(info.title) + ' <span class="nx-hint">' + esc(event) + ' - ' + esc(info.desc) + '</span></div>' +
+					ctx.listOf(group.map(function (e) { return e.html; })) + '</div>';
 			});
 			return html;
 		}
@@ -135,29 +137,32 @@
 			return rows.length ? '<div class="nx-card cz-meta">' + rows.join('') + '</div>' : '<p class="nx-hint">This plugin adds nothing.</p>';
 		}
 
-		function pluginCard(p) {
+		function pluginRow(p) {
 			const open = page.expanded === p.name;
-			return '<article class="cz-card' + (p.enabled ? '' : ' cz-off') + '">' +
-				'<div class="cz-cardHead"><div><span class="cz-name">' + esc(p.name) + '</span> <span class="nx-hint">' + esc(p.version ? 'v' + p.version : '') + '</span></div>' +
-				'<label class="cz-switch" title="' + (p.enabled ? 'Turn off' : 'Turn on') + '"><input type="checkbox" data-pl-toggle="' + esc(p.name) + '"' + (p.enabled ? ' checked' : '') + '>' +
-				'<span aria-hidden="true"></span><span class="cz-srOnly">' + esc(p.name) + ' on</span></label></div>' +
-				'<p class="cz-desc">' + esc(p.description || '') + '</p>' +
-				(p.error ? '<p class="cz-problem">' + esc(p.error) + '</p>' : '') +
-				'<p class="nx-hint">' + esc(M.pluginContentsLabel(p.contents)) + (p.marketplace ? ' - from ' + esc(p.marketplace) : '') + '</p>' +
-				(open ? contentsList(p.contents || {}) : '') +
-				'<div class="nx-row"><button type="button" class="nx-btn nx-btn-ghost" data-pl-expand="' + esc(p.name) + '">' + (open ? 'Hide details' : 'Details') + '</button>' +
-				'<button type="button" class="nx-btn nx-btn-ghost" data-pl-update="' + esc(p.name) + '"' + busy('update:' + p.name, 'Checking...', 'Update') + '</button>' +
-				'<button type="button" class="nx-btn nx-btn-ghost" data-pl-remove="' + esc(p.name) + '">Remove</button></div></article>';
+			return ctx.rowHtml({
+				icon: 'package',
+				name: p.name,
+				cls: p.enabled ? '' : 'cz-off',
+				badges: (p.version ? '<span class="nx-hint">v' + esc(p.version) + '</span>' : '') + (p.enabled ? '' : '<span class="cz-chip">Off</span>'),
+				source: [p.marketplace ? 'From ' + p.marketplace : 'Plugin', M.pluginContentsLabel(p.contents)].join(' - '),
+				desc: p.description || '',
+				more: (p.error ? '<span class="cz-problem">' + esc(p.error) + '</span>' : '') + (open ? contentsList(p.contents || {}) : ''),
+				actions: '<label class="cz-switch" title="' + (p.enabled ? 'Turn off' : 'Turn on') + '"><input type="checkbox" data-pl-toggle="' + esc(p.name) + '"' + (p.enabled ? ' checked' : '') + '>' +
+					'<span aria-hidden="true"></span><span class="cz-srOnly">' + esc(p.name) + ' on</span></label>' +
+					'<button type="button" class="nx-btn nx-btn-ghost" data-pl-expand="' + esc(p.name) + '">' + (open ? 'Hide details' : 'Details') + '</button>' +
+					'<button type="button" class="nx-btn nx-btn-ghost" data-pl-update="' + esc(p.name) + '"' + busy('update:' + p.name, 'Checking...', 'Update') + '</button>' +
+					'<button type="button" class="nx-btn nx-btn-ghost" data-pl-remove="' + esc(p.name) + '">Remove</button>'
+			});
 		}
 
 		function renderInstalled() {
-			const list = data('plugins') || [];
-			if (!list.length) {
-				return '<div class="nx-empty cz-emptyState"><div class="nx-empty-title">No plugins yet</div>' +
-					'<p class="nx-hint">Nexora\'s marketplace has ready-made plugins, and you can add Claude Code marketplaces such as anthropics/claude-code.</p>' +
-					'<div class="nx-row"><button type="button" class="nx-btn" data-pl-tab="marketplace">Browse the marketplace</button></div></div>';
+			const all = entries('plugins');
+			const shown = all.filter(ctx.keep);
+			if (!all.length) {
+				return ctx.invite('plugins');
 			}
-			return '<div class="cz-cards">' + list.map(pluginCard).join('') + '</div>';
+			return ctx.listHead('Installed', shown.length, ctx.addButton('plugins')) +
+				(shown.length ? ctx.listOf(shown.map(function (e) { return e.html; })) : ctx.none());
 		}
 
 		function renderMarketplace() {
@@ -177,11 +182,10 @@
 			if (market.error) {
 				html += '<p class="cz-problem">' + esc(market.error) + '</p>';
 			}
-			const q = page.marketQuery.trim().toLowerCase();
+			// The search box at the top filters the marketplace too.
 			const shown = market.plugins.filter(function (p) {
-				return !q || (p.name + ' ' + p.description + ' ' + p.category).toLowerCase().indexOf(q) >= 0;
+				return M.matches({ text: p.name + ' ' + p.description + ' ' + p.category }, ctx.ui.query, 'all');
 			});
-			html += '<input class="nx-input cz-search cz-marketSearch" id="cz-marketSearch" type="search" placeholder="Search plugins" value="' + esc(page.marketQuery) + '" aria-label="Search plugins">';
 			html += shown.length ? '<div class="cz-cards">' + shown.map(function (p) {
 				return '<article class="cz-card"><div class="cz-cardHead"><span class="cz-name">' + esc(p.name) + '</span>' +
 					(p.category ? '<span class="cz-chip">' + esc(p.category) + '</span>' : '') + '</div>' +
@@ -190,10 +194,10 @@
 					'<div class="nx-row">' + (p.installed ? '<span class="cz-chip cz-origin-nexora">Installed</span>'
 						: '<button type="button" class="nx-btn nx-btn-secondary" data-pl-install="' + esc(p.name) + '"' + busy('preview:' + p.name, 'Fetching...', 'Install') + '</button>') +
 					'</div></article>';
-			}).join('') + '</div>' : '<p class="nx-hint cz-none">No plugins match.</p>';
+			}).join('') + '</div>' : ctx.none();
 			html += '<div class="nx-card cz-addMarket"><div class="cz-formTitle">Add a marketplace</div>' +
 				'<div class="cz-inputRow"><input class="nx-input" id="cz-marketSource" placeholder="owner/repo, a git URL or a folder" aria-label="Marketplace source">' +
-				'<button type="button" class="nx-btn" data-pl="addMarket"' + busy('addMarket', 'Adding...', 'Add') + '</button></div>' +
+				'<button type="button" class="nx-btn nx-btn-secondary" data-pl="addMarket"' + busy('addMarket', 'Adding...', 'Add') + '</button></div>' +
 				'<p class="nx-hint" id="cz-marketHint">Claude Code marketplaces work as they are. <button type="button" class="cz-link" data-pl-suggest="anthropics/claude-code">anthropics/claude-code</button></p>' +
 				'<div class="cz-formTitle">Install from a URL or folder</div>' +
 				'<div class="cz-inputRow"><input class="nx-input" id="cz-pluginSource" placeholder="owner/repo, a git URL or a folder with .claude-plugin/plugin.json" aria-label="Plugin source">' +
@@ -202,13 +206,12 @@
 		}
 
 		function renderPlugins(s) {
-			let html = ctx.header(s, false);
+			let html = ctx.intro(s);
 			if (!Array.isArray(data('plugins'))) {
 				return html + ctx.tooOld();
 			}
-			const count = (data('plugins') || []).length;
 			html += '<div class="cz-tabs" role="tablist">' +
-				'<button type="button" role="tab" aria-selected="' + (page.pluginTab === 'installed') + '" class="cz-tab' + (page.pluginTab === 'installed' ? ' cz-tabOn' : '') + '" data-pl-tab="installed">Installed <span class="nx-hint">' + count + '</span></button>' +
+				'<button type="button" role="tab" aria-selected="' + (page.pluginTab === 'installed') + '" class="cz-tab' + (page.pluginTab === 'installed' ? ' cz-tabOn' : '') + '" data-pl-tab="installed">Installed</button>' +
 				'<button type="button" role="tab" aria-selected="' + (page.pluginTab === 'marketplace') + '" class="cz-tab' + (page.pluginTab === 'marketplace' ? ' cz-tabOn' : '') + '" data-pl-tab="marketplace">Marketplace</button></div>';
 			return html + (page.pluginTab === 'installed' ? renderInstalled() : renderMarketplace());
 		}
@@ -254,21 +257,14 @@
 					command: command, timeout: Number(document.getElementById('cz-hkTimeout').value) || 30, scope: scope ? scope.value : 'user' });
 				page.hookForm = false;
 			});
-			document.getElementById('cz-hkCommand').focus();
+			// Only when the form opens: a refresh while typing elsewhere must not steal focus.
+			if (page.focusForm) {
+				document.getElementById('cz-hkCommand').focus();
+			}
+			page.focusForm = false;
 		}
 
-		function bindSearch() {
-			const search = document.getElementById('cz-marketSearch');
-			if (search) {
-				search.addEventListener('input', function () {
-					page.marketQuery = search.value;
-					const pos = search.selectionStart;
-					ctx.render();
-					const again = document.getElementById('cz-marketSearch');
-					again.focus();
-					again.setSelectionRange(pos, pos);
-				});
-			}
+		function bindSource() {
 			const source = document.getElementById('cz-marketSource');
 			if (source) {
 				source.addEventListener('input', function () {
@@ -284,17 +280,32 @@
 			ctx.post(message);
 		}
 
+		/** Rows for the overview, the search and the chip count: { item, text, scope, origin, html }. */
+		function entries(id) {
+			const list = data(id);
+			if (!Array.isArray(list)) {
+				return [];
+			}
+			if (id === 'hooks') {
+				return list.map(function (h) {
+					const info = M.EVENT_INFO[h.event];
+					return { item: h, text: h.command + ' ' + h.event + ' ' + (info ? info.title : '') + ' ' + (h.matcher || ''),
+						scope: h.source === 'project' ? 'project' : 'user', origin: '', html: hookRow(h) };
+				});
+			}
+			return list.map(function (p) {
+				return { item: p, text: p.name + ' ' + (p.description || ''), scope: 'user', origin: '', html: pluginRow(p) };
+			});
+		}
+
 		return {
-			count: function (id) {
-				const list = data(id);
-				return Array.isArray(list) ? list.length : 0;
-			},
+			entries: entries,
 			render: function (s) {
 				return s.id === 'hooks' ? renderHooks(s) : renderPlugins(s);
 			},
 			afterRender: function () {
 				bindForm();
-				bindSearch();
+				bindSource();
 			},
 			reveal: function (sub) {
 				if (sub === 'marketplace' || sub === 'installed') {
@@ -302,15 +313,13 @@
 				}
 				if (sub === 'new') {
 					page.hookForm = true;
+					page.focusForm = true;
 				}
 			},
 			/** Handles a click on this page's controls; returns whether it did. */
 			click: function (t) {
 				const d = t.dataset;
-				if (d.hk === 'new') {
-					page.hookForm = true;
-					ctx.render();
-				} else if (d.hk === 'cancel') {
+				if (d.hk === 'cancel') {
 					page.hookForm = false;
 					ctx.render();
 				} else if (d.hk === 'import') {
@@ -324,15 +333,8 @@
 				} else if (d.plTab) {
 					page.pluginTab = d.plTab;
 					ctx.render();
-				} else if (d.plGoto) {
-					ctx.setSection('plugins');
-					page.pluginTab = 'marketplace';
-					page.market = 'nexora';
-					page.marketQuery = d.plGoto;
-					ctx.render();
 				} else if (d.plMarket) {
 					page.market = d.plMarket;
-					page.marketQuery = '';
 					ctx.render();
 				} else if (d.plExpand) {
 					page.expanded = page.expanded === d.plExpand ? '' : d.plExpand;

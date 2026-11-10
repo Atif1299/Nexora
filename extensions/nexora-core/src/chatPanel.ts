@@ -9,7 +9,7 @@ import { promises as fs } from 'fs';
 import { getBackendClient, type AgentMessage, type AgentTurnResponse, type ToolCall, type AgentMode, type TranscriptRound } from './services/backendClient';
 import { RequestCancelledError, isRequestCancelled } from './services/backend/transport';
 import { getChatWebviewHtml } from './webview/chat';
-import type { ChatActivityItem, ChatInitialState, ContextTag, RunMode, WebviewInboundMessage } from './webview/chat/types';
+import type { ChatActivityItem, ChatInitialState, ChatPage, ChatSessionSummary, ContextTag, RunMode, WebviewInboundMessage } from './webview/chat/types';
 import { getOrchestrationWebSocket, type WebSocketMessage } from './services/websocketClient';
 import { executeToolCalls, formatToolResultsAsMessages } from './services/tools';
 import type { ExecuteToolCallsOptions, ToolResult } from './services/tools/executor';
@@ -109,6 +109,19 @@ type ChatSessionRecord = {
 	memoryWorkspacePath?: string;
 };
 
+/** globalState key: the chat list rail is hidden. */
+const SESSION_RAIL_HIDDEN_KEY = 'nexora.sessionRailHidden';
+
+/** The only commands the chat webview may open, keyed by the page it names. */
+const CHAT_PAGES: Record<ChatPage, { command: string; args: unknown[] }> = {
+	recipes: { command: 'nexora.openCustomize', args: ['recipes'] },
+	platforms: { command: 'nexora.openPlatformBrowser', args: [] },
+	customize: { command: 'nexora.openCustomize', args: [] }
+};
+
+/** Longest chat name the rail's rename accepts. */
+const SESSION_NAME_MAX = 80;
+
 type InFlightReply = {
 	controller: AbortController;
 	signal: AbortSignal;
@@ -124,7 +137,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	private _wsUnsubscribe?: () => void;
 	private _currentPlanId?: string;
 	private _saveTemplateOfferedFor?: string;
-	private _onSessionsChanged?: () => void;
 
 	private readonly _context: vscode.ExtensionContext;
 	/** This folder's chat list (workspaceState; globalState when no folder is open). */
@@ -212,7 +224,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	private async _persistSessions(): Promise<void> {
 		this._retitleDefaultSessions();
 		await this._sessionStore.save(this._sessions, this._activeSessionId);
-		this._onSessionsChanged?.();
 	}
 
 	private _pendingPrefill: { text: string; mode: string } | undefined;
@@ -235,27 +246,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		void this._editorPanel?.webview.postMessage(message);
 	}
 
-	public setOnSessionsChanged(cb: () => void): void {
-		this._onSessionsChanged = cb;
+	/** Shows or hides the chat list rail in every chat surface; remembered across restarts. */
+	public async toggleSessionRail(): Promise<void> {
+		const hidden = !this._context.globalState.get<boolean>(SESSION_RAIL_HIDDEN_KEY, false);
+		await this._context.globalState.update(SESSION_RAIL_HIDDEN_KEY, hidden);
+		this._postToWebviews({ type: 'sessionRail', hidden });
 	}
 
 	public isSidebarVisible(): boolean {
 		return !!this._view?.visible;
-	}
-
-	public async switchToSession(sessionId: string): Promise<void> {
-		await this._handleSwitchSession(sessionId);
-	}
-
-	public getSessionList(): Array<{ id: string; name: string; createdAt: number }> {
-		return this._sessions
-			.slice()
-			.sort((a, b) => b.createdAt - a.createdAt)
-			.map(s => ({ id: s.id, name: s.name, createdAt: s.createdAt }));
-	}
-
-	public getActiveSessionId(): string {
-		return this._activeSessionId;
 	}
 
 	/** Open chat as a draggable editor tab (singleton). */
@@ -413,11 +412,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		return session;
 	}
 
-	private _sessionSummaries() {
-		return this._sessions
-			.slice()
-			.sort((a, b) => b.createdAt - a.createdAt)
-			.map(s => ({ id: s.id, name: s.name }));
+	/** Id, name and times only; the webview groups and sorts by updatedAt (last message, else creation). */
+	private _sessionSummaries(): ChatSessionSummary[] {
+		return this._sessions.map((s) => {
+			let updatedAt = s.createdAt;
+			for (let i = s.messages.length - 1; i >= 0; i--) {
+				const ts = s.messages[i].timestamp;
+				if (typeof ts === 'number') {
+					updatedAt = Math.max(ts, s.createdAt);
+					break;
+				}
+			}
+			return { id: s.id, name: s.name, createdAt: s.createdAt, updatedAt };
+		});
 	}
 
 	private async _broadcastSessions(): Promise<void> {
@@ -633,6 +640,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			sessions: this._sessionSummaries(),
 			activeSessionId: this._activeSessionId,
 			sessionRailWidth: this._readSessionRailWidth(),
+			sessionRailHidden: this._context.globalState.get<boolean>(SESSION_RAIL_HIDDEN_KEY, false),
 			submitWithCtrlEnter: getSubmitWithCtrlEnter(),
 			selectedModelId: getSettingsService(this._context).getPreferences().defaultModel || 'auto'
 		};
@@ -695,8 +703,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			await this._handleSwitchSession(data.sessionId);
 		} else if (data.type === 'deleteSession') {
 			await this._handleDeleteSession(data.sessionId);
+		} else if (data.type === 'renameSession') {
+			await this._handleRenameSession(data.sessionId, data.name);
 		} else if (data.type === 'persistSessionRailWidth') {
 			await this._persistSessionRailWidth(data.width);
+		} else if (data.type === 'openPage') {
+			const page = Object.prototype.hasOwnProperty.call(CHAT_PAGES, data.page) ? CHAT_PAGES[data.page] : undefined;
+			if (page) {
+				await vscode.commands.executeCommand(page.command, ...page.args);
+			}
 		} else if (data.type === 'checkBackend') {
 			await this._checkBackendStatus();
 		} else if (data.type === 'generateCode') {
@@ -751,14 +766,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				&& data.inputs && typeof data.inputs === 'object') {
 				await this._handleModifyPlan(data.planId, { update_inputs: { [data.taskId]: data.inputs } });
 			}
-		} else if (data.type === 'getHistory') {
-			await this._handleGetHistory();
 		} else if (data.type === 'getRollbackable') {
 			await this._handleGetRollbackable();
 		} else if (data.type === 'rollback') {
 			await this._handleRollback(data.historyId);
-		} else if (data.type === 'browsePlatforms') {
-			await this._handleBrowsePlatforms();
 		} else if (data.type === 'indexWorkspace') {
 			await this._handleIndexWorkspace();
 		} else if (data.type === 'showEngineOutput') {
@@ -2038,6 +2049,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
+	/** Rail rename: saved, then the new list goes to every open chat surface. */
+	private async _handleRenameSession(sessionId: string, name: string): Promise<void> {
+		const session = this._sessions.find(s => s.id === sessionId);
+		const trimmed = String(name || '').replace(/\s+/g, ' ').trim().slice(0, SESSION_NAME_MAX);
+		if (!session || !trimmed || trimmed === session.name) {
+			return;
+		}
+		session.name = trimmed;
+		await this._persistSessions();
+		await this._broadcastSessions();
+	}
+
 	private async _handleDeleteSession(sessionId: string): Promise<void> {
 		if (!sessionId || !this._sessions.some(s => s.id === sessionId)) {
 			return;
@@ -2256,7 +2279,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			}
 			const errMsg = error instanceof Error ? error.message : 'Unknown error';
 			const errText = `Error: ${errMsg}`;
-			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|Failed to fetch/i.test(errMsg)) {
+			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|404 from|Failed to fetch/i.test(errMsg)) {
 				this._noteBackendDown();
 				this._postToWebviews({
 					type: 'backendStatus',
@@ -2373,7 +2396,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 			const errText = `Ask mode error: ${error instanceof Error ? error.message : 'Unknown error'}`;
-			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|Failed to fetch/i.test(errText)) {
+			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|404 from|Failed to fetch/i.test(errText)) {
 				this._noteBackendDown();
 			}
 			const sessionAfter = this._getActiveSession();
@@ -3321,47 +3344,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	private async _handleGetHistory(): Promise<void> {
-		if (!this._hasChatSurface()) {
-			return;
-		}
-
-		try {
-			const client = getBackendClient();
-			const history = await client.getUserHistory('default', 20);
-			const stats = await client.getHistoryStats('default');
-
-			let response = `**Execution History**\n\n`;
-			response += `**Stats:** ${stats.total_executions} total | ${stats.success_rate}% success | $${stats.total_cost_usd.toFixed(4)} spent\n\n`;
-
-			if (history.length === 0) {
-				response += `No executions recorded yet.`;
-			} else {
-				response += `**Recent Executions:**\n`;
-				for (const item of history) {
-					const icon = item.status === 'success' ? '[ok]' : '[fail]';
-					const rollback = item.can_rollback ? ' [rollbackable]' : '';
-					response += `${icon} ${item.platform}/${item.operation} - $${item.cost_usd.toFixed(4)}${rollback}\n`;
-				}
-			}
-
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: response,
-				isLoading: false
-			});
-
-		} catch (error) {
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: `Error getting history: ${error instanceof Error ? error.message : 'Unknown error'}`,
-				isLoading: false
-			});
-		}
-	}
-
 	private async _handleGetRollbackable(): Promise<void> {
 		if (!this._hasChatSurface()) {
 			return;
@@ -3454,59 +3436,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				type: 'addMessage',
 				role: 'assistant',
 				content: `Error during rollback: ${error instanceof Error ? error.message : 'Unknown error'}`,
-				isLoading: false
-			});
-		}
-	}
-
-	private async _handleBrowsePlatforms(): Promise<void> {
-		if (!this._hasChatSurface()) {
-			return;
-		}
-
-		this._postToWebviews({
-			type: 'addMessage',
-			role: 'assistant',
-			content: 'Fetching available platforms...',
-			isLoading: true
-		});
-
-		try {
-			const client = getBackendClient();
-			const platforms = await client.getPlatforms();
-
-			let response = `**Available Platforms** (${platforms.length})\n\n`;
-
-			// Group by category
-			const byCategory: Record<string, any[]> = {};
-			for (const p of platforms) {
-				const cat = p.category || 'Other';
-				if (!byCategory[cat]) {
-					byCategory[cat] = [];
-				}
-				byCategory[cat].push(p);
-			}
-
-			for (const [category, items] of Object.entries(byCategory)) {
-				response += `**${category}**\n`;
-				for (const p of items) {
-					response += `  - ${p.name} (${p.id})\n`;
-				}
-				response += '\n';
-			}
-
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: response,
-				isLoading: false
-			});
-
-		} catch (error) {
-			this._postToWebviews({
-				type: 'addMessage',
-				role: 'assistant',
-				content: `Error fetching platforms: ${error instanceof Error ? error.message : 'Unknown error'}`,
 				isLoading: false
 			});
 		}
@@ -3892,7 +3821,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 			const errText = `Agent error: ${error instanceof Error ? error.message : 'Unknown error'}`;
-			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|Failed to fetch/i.test(errText)) {
+			if (/fetch|ECONNREFUSED|ENOTFOUND|network|HTTP 5|404 from|Failed to fetch/i.test(errText)) {
 				this._noteBackendDown();
 			}
 			const sessionAfter = this._getActiveSession();
