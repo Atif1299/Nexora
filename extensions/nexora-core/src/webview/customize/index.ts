@@ -14,7 +14,7 @@ export function getCustomizeWebviewHtml(webview: vscode.Webview, extensionUri: v
 		folder: 'customize',
 		title: 'Nexora Customize',
 		styles: ['customize.css'],
-		scripts: ['model.js', 'customize.js'],
+		scripts: ['model.js', 'pages.js', 'customize.js'],
 		body: /* html */ `	<div class="cz-root" role="main" aria-label="Nexora Customize">
 		<nav class="cz-nav" id="cz-nav" aria-label="Customize sections"></nav>
 		<section class="cz-main" id="cz-main" aria-live="polite">

@@ -10,7 +10,7 @@
  */
 
 export type ServerState = 'connected' | 'available' | 'needs_approval' | 'disabled' | 'error';
-export type ServerScope = 'user' | 'project' | 'bundled';
+export type ServerScope = 'user' | 'project' | 'plugin' | 'bundled';
 export type Trust = '' | 'ask' | 'trust-read-only' | 'never-ask';
 
 export interface MyServer {
@@ -124,7 +124,7 @@ export function stateLabel(state: ServerState): string {
 }
 
 export function scopeLabel(scope: ServerScope): string {
-	return scope === 'user' ? 'You' : scope === 'project' ? 'Project' : 'Built in';
+	return scope === 'user' ? 'You' : scope === 'project' ? 'Project' : scope === 'plugin' ? 'Plugin' : 'Built in';
 }
 
 /** KEY=VALUE lines (blank lines and # comments skipped); a line without = is reported as bad. */

@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// Customize (Phase 3): one editor tab for skills, subagents, slash commands and rules,
+// Customize (Phases 3-4): one editor tab for plugins, skills, subagents, slash commands, hooks and rules,
 // read from Nexora's folders and from Claude Code's and Cursor's. Items open in the
 // editor; Nexora's own items can be deleted (to the trash); others can be copied into
 // Nexora to edit. Examples install in one click, and Try puts the item in the chat.
@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { acquireEditorPanel, gateEditorPanel } from './services/editorPage';
 import { getBackendClient } from './services/backendClient';
-import type { CustomizeItem, CustomizePlural } from './services/backend/customize';
+import type { CustomizeItem, CustomizePlural, HookItem } from './services/backend/customize';
 import { getCustomizeWebviewHtml } from './webview/customize';
 
 const PLURALS: CustomizePlural[] = ['skills', 'commands', 'agents'];
@@ -139,10 +139,13 @@ export class CustomizePanelProvider {
 		const folder = this._folder();
 		const client = getBackendClient();
 		const api = client.customize();
-		const [list, examples, rules] = await Promise.all([
+		const [list, examples, rules, hookList, installedPlugins, marketplaces] = await Promise.all([
 			api.list(folder),
 			api.examples(folder),
-			client.getProjectRules(folder).catch(() => undefined)
+			client.getProjectRules(folder).catch(() => undefined),
+			api.listHooks(folder),
+			api.listPlugins(),
+			api.listMarketplaces()
 		]);
 		this._post({
 			type: 'state',
@@ -154,6 +157,11 @@ export class CustomizePanelProvider {
 			agents: list?.agents || [],
 			examples: examples || [],
 			rules: rules || null,
+			// null from an engine without hooks or plugins: those pages then say it is too old.
+			hooks: hookList ? hookList.hooks : null,
+			hookShell: hookList ? hookList.shell : '',
+			plugins: installedPlugins || null,
+			marketplaces: marketplaces || [],
 			rulesEnabled: vscode.workspace.getConfiguration('nexora.agent').get<boolean>('projectRules', true)
 		});
 	}
@@ -199,6 +207,72 @@ export class CustomizePanelProvider {
 				case 'openPersonalRules':
 					await this._openPersonalRules();
 					return;
+				// --- hooks ---
+				case 'newHook':
+					await this._api().addHook({
+						scope: msg.scope === 'project' ? 'project' : 'user', event: String(msg.event || ''),
+						matcher: String(msg.matcher || ''), command: String(msg.command || ''), timeout: Number(msg.timeout) || undefined
+					}, this._folder());
+					await this._pushState();
+					return;
+				case 'deleteHook':
+					await this._deleteHook(String(msg.id || ''));
+					return;
+				case 'approveHook':
+					await this._approveHook(String(msg.id || ''));
+					return;
+				case 'testHook':
+					await this._testHook(String(msg.id || ''));
+					return;
+				case 'importHooks': {
+					const count = await this._api().importHooks(this._folder());
+					await this._pushState();
+					this._post({ type: 'done' });
+					void vscode.window.showInformationMessage(count
+						? `Imported ${count} hook${count === 1 ? '' : 's'} from Claude Code.`
+						: 'No new hooks in ~/.claude/settings.json or .claude/settings.json.');
+					return;
+				}
+				// --- plugins and marketplaces ---
+				case 'previewPlugin': {
+					const preview = await this._api().previewPlugin(msg.source
+						? { source: String(msg.source) } : { marketplace: String(msg.marketplace || ''), plugin: String(msg.plugin || '') });
+					this._post({ type: 'pluginPreview', preview });
+					return;
+				}
+				case 'updatePlugin':
+					this._post({ type: 'pluginPreview', preview: await this._api().updatePlugin(String(msg.name || '')) });
+					return;
+				case 'installPlugin': {
+					const plugin = await this._api().installPlugin(String(msg.token || ''));
+					await this._pushState();
+					this._post({ type: 'pluginInstalled', name: plugin.name });
+					const commands = plugin.contents?.commands || [];
+					void vscode.window.showInformationMessage(`Installed ${plugin.name}.` + (commands.length
+						? ` Try /${commands[0]} in the chat.` : ''));
+					return;
+				}
+				case 'enablePlugin':
+					await this._api().enablePlugin(String(msg.name || ''), msg.enabled === true);
+					await this._pushState();
+					return;
+				case 'removePlugin':
+					await this._removePlugin(String(msg.name || ''));
+					return;
+				case 'addMarketplace': {
+					const market = await this._api().addMarketplace(String(msg.source || ''));
+					await this._pushState();
+					this._post({ type: 'marketplaceAdded', name: market.name });
+					return;
+				}
+				case 'refreshMarketplace':
+					await this._api().refreshMarketplace(String(msg.name || ''));
+					await this._pushState();
+					this._post({ type: 'done' });
+					return;
+				case 'removeMarketplace':
+					await this._removeMarketplace(String(msg.name || ''));
+					return;
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -212,6 +286,74 @@ export class CustomizePanelProvider {
 			return;
 		}
 		await vscode.window.showTextDocument(vscode.Uri.file(filePath), { preview: false });
+	}
+
+	private _api() {
+		return getBackendClient().customize();
+	}
+
+	private async _hook(id: string): Promise<HookItem> {
+		const hook = (await this._api().listHooks(this._folder()))?.hooks.find((h) => h.id === id);
+		if (!hook) {
+			throw new Error('That hook no longer exists.');
+		}
+		return hook;
+	}
+
+	private async _deleteHook(id: string): Promise<void> {
+		const hook = await this._hook(id);
+		const choice = await vscode.window.showWarningMessage(`Delete this ${hook.event} hook?`,
+			{ modal: true, detail: `${hook.command}\n\nIt is removed from ${hook.file}.` }, 'Delete');
+		if (choice === 'Delete') {
+			await this._api().deleteHook(id, this._folder());
+			await this._pushState();
+		}
+	}
+
+	/** A project's hook runs only after the user has seen its exact command and approved it. */
+	private async _approveHook(id: string): Promise<void> {
+		const hook = await this._hook(id);
+		const choice = await vscode.window.showWarningMessage(`Allow this project's ${hook.event} hook to run?`, {
+			modal: true,
+			detail: `It runs on this PC with your permissions:\n\n${hook.command}\n\nFrom ${hook.file}. If the command changes, you are asked again.`
+		}, 'Approve');
+		if (choice === 'Approve') {
+			await this._api().approveHook(id, this._folder());
+			await this._pushState();
+		}
+	}
+
+	private async _testHook(id: string): Promise<void> {
+		const hook = await this._hook(id);
+		if (!hook.approved) {
+			const choice = await vscode.window.showWarningMessage('Run this project hook once to test it?',
+				{ modal: true, detail: hook.command }, 'Run');
+			if (choice !== 'Run') {
+				this._post({ type: 'done' });
+				return;
+			}
+		}
+		const result = await this._api().testHook(id, this._folder());
+		this._post({ type: 'hookTestResult', command: hook.command, result });
+		await this._pushState();
+	}
+
+	private async _removePlugin(name: string): Promise<void> {
+		const choice = await vscode.window.showWarningMessage(`Remove the plugin ${name}?`,
+			{ modal: true, detail: 'Its commands, skills, subagents, hooks and MCP servers are removed with it.' }, 'Remove');
+		if (choice === 'Remove') {
+			await this._api().removePlugin(name);
+			await this._pushState();
+		}
+	}
+
+	private async _removeMarketplace(name: string): Promise<void> {
+		const choice = await vscode.window.showWarningMessage(`Remove the marketplace ${name}?`,
+			{ modal: true, detail: 'Plugins you installed from it stay installed.' }, 'Remove');
+		if (choice === 'Remove') {
+			await this._api().removeMarketplace(name);
+			await this._pushState();
+		}
 	}
 
 	/** A project rule file, given relative to the folder as /api/memory/rules lists it. */

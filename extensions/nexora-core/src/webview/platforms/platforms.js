@@ -359,7 +359,7 @@
 	// --- Your MCP servers -------------------------------------------------------------------
 
 	const SERVER_STATE = { connected: 'Connected', available: 'Not connected', needs_approval: 'Needs approval', disabled: 'Off', error: 'Error' };
-	const SCOPE_LABEL = { user: 'You', project: 'Project', bundled: 'Built in' };
+	const SCOPE_LABEL = { user: 'You', project: 'Project', plugin: 'Plugin', bundled: 'Built in' };
 	const TRUST_LABEL = { '': 'Use my approval setting', ask: 'Ask before every call', 'trust-read-only': 'Run read-only calls without asking', 'never-ask': 'Never ask' };
 	const IMPORT_ID = '__import__';
 	/** The Add/Edit form and the Import screen; both live only in this webview. */
@@ -533,6 +533,12 @@
 	}
 
 	function customActions(s) {
+		// A plugin's server is turned off or removed with its plugin, in Customize.
+		if (s.scope === 'plugin') {
+			return '<div class="nx-platform-actions">' + primaryServerAction(s)
+				+ '<button type="button" class="nx-btn nx-btn-secondary" data-server-action="plugins">Manage in Customize</button></div>'
+				+ '<div class="nx-meta nx-meta-full">Comes with a plugin - ' + escapeHtml(serverSummary(s)) + '</div>';
+		}
 		const buttons = [primaryServerAction(s)];
 		buttons.push('<button type="button" class="nx-btn nx-btn-secondary" data-server-action="edit">Edit</button>');
 		if (s.state !== 'needs_approval') {
@@ -561,6 +567,8 @@
 			vscode.postMessage({ type: 'enableServer', scope: s.scope, name: s.name, enabled: action === 'enable' });
 		} else if (action === 'connect') {
 			vscode.postMessage({ type: 'connectServer', id: s.id });
+		} else if (action === 'plugins') {
+			vscode.postMessage({ type: 'openCustomize', section: 'plugins' });
 		} else if (action === 'remove') {
 			vscode.postMessage({ type: 'removeServer', scope: s.scope, name: s.name });
 		} else if (action === 'edit') {

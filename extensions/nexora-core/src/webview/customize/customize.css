@@ -489,3 +489,299 @@
 		flex-direction: column;
 	}
 }
+
+/* Phase 4: Plugins (cards, tabs, switches) and Hooks (command rows, run states). */
+
+.cz-tabs
+{
+	display: flex;
+	gap: 2px;
+	margin-bottom: var(--nx-space-3);
+	border-bottom: 1px solid var(--nx-border);
+}
+
+.cz-tab
+{
+	padding: 6px 12px;
+	border: 0;
+	border-bottom: 2px solid transparent;
+	background: transparent;
+	color: var(--nx-muted);
+	font: inherit;
+	cursor: pointer;
+}
+
+.cz-tab:hover
+{
+	color: var(--nx-fg);
+}
+
+.cz-tabOn
+{
+	border-bottom-color: var(--nx-focus);
+	color: var(--nx-fg);
+	font-weight: 600;
+}
+
+.cz-cards
+{
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+	gap: var(--nx-space-3);
+	margin-bottom: var(--nx-space-4);
+}
+
+.cz-card
+{
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 12px 14px;
+	border: 1px solid var(--nx-border);
+	border-radius: var(--nx-radius-lg);
+	background: var(--nx-surface);
+	transition: border-color var(--nx-duration) var(--nx-ease);
+}
+
+.cz-card:hover
+{
+	border-color: var(--nx-focus);
+}
+
+.cz-card .cz-desc
+{
+	margin: 0;
+	white-space: normal;
+}
+
+.cz-card p
+{
+	margin: 0;
+}
+
+.cz-card .nx-row
+{
+	margin-top: auto;
+	padding-top: 4px;
+}
+
+.cz-cardHead
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--nx-space-2);
+}
+
+.cz-off
+{
+	opacity: 0.65;
+}
+
+.cz-switch
+{
+	position: relative;
+	display: inline-flex;
+	flex: 0 0 auto;
+	cursor: pointer;
+}
+
+.cz-switch input
+{
+	position: absolute;
+	opacity: 0;
+	width: 32px;
+	height: 18px;
+	margin: 0;
+	cursor: pointer;
+}
+
+.cz-switch span[aria-hidden]
+{
+	width: 32px;
+	height: 18px;
+	border-radius: 9px;
+	background: var(--nx-border);
+	transition: background var(--nx-duration) var(--nx-ease);
+}
+
+.cz-switch span[aria-hidden]::after
+{
+	content: '';
+	display: block;
+	width: 14px;
+	height: 14px;
+	margin: 2px;
+	border-radius: 50%;
+	background: var(--nx-fg);
+	transition: transform var(--nx-duration) var(--nx-ease);
+}
+
+.cz-switch input:checked + span[aria-hidden]
+{
+	background: var(--nx-focus);
+}
+
+.cz-switch input:checked + span[aria-hidden]::after
+{
+	transform: translateX(14px);
+}
+
+.cz-switch input:focus-visible + span[aria-hidden]
+{
+	outline: 1px solid var(--nx-focus);
+	outline-offset: 2px;
+}
+
+.cz-srOnly
+{
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+}
+
+.cz-marketBar
+{
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-bottom: var(--nx-space-2);
+}
+
+.cz-marketHead
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--nx-space-2);
+	margin-bottom: var(--nx-space-2);
+}
+
+.cz-marketHead p
+{
+	margin: 0;
+}
+
+.cz-marketSearch
+{
+	width: 100%;
+	margin-bottom: var(--nx-space-3);
+}
+
+.cz-addMarket
+{
+	display: flex;
+	flex-direction: column;
+	gap: var(--nx-space-2);
+}
+
+.cz-inputRow
+{
+	display: flex;
+	gap: var(--nx-space-2);
+}
+
+.cz-inputRow .nx-input
+{
+	flex: 1 1 auto;
+}
+
+.cz-link
+{
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--vscode-textLink-foreground, var(--nx-focus));
+	font: inherit;
+	cursor: pointer;
+	text-decoration: underline;
+}
+
+.cz-mono,
+.cz-command
+{
+	font-family: var(--nx-font-mono);
+	font-size: 12px;
+}
+
+.cz-command
+{
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
+}
+
+.cz-meta .cz-command
+{
+	display: inline;
+	white-space: normal;
+	word-break: break-all;
+}
+
+.cz-static
+{
+	cursor: default;
+}
+
+.cz-hookRow .cz-rowMain
+{
+	gap: 4px;
+}
+
+.cz-matcher
+{
+	font-family: var(--nx-font-mono);
+	color: var(--nx-fg);
+}
+
+.cz-warnChip
+{
+	border-color: var(--nx-warn);
+	color: var(--nx-warn);
+}
+
+.cz-origin-plugin
+{
+	border-color: var(--nx-accent, var(--nx-focus));
+}
+
+.cz-runOk
+{
+	color: var(--nx-ok);
+}
+
+.cz-runBlocked
+{
+	color: var(--nx-warn);
+}
+
+.cz-runBad
+{
+	color: var(--nx-err);
+}
+
+.cz-groupDesc
+{
+	margin: -4px 0 var(--nx-space-2);
+}
+
+.cz-shellLine
+{
+	margin-bottom: var(--nx-space-3);
+}
+
+.cz-uses
+{
+	margin: 0 0 var(--nx-space-3);
+	padding-left: 18px;
+	color: var(--nx-muted);
+}
+
+.cz-narrow
+{
+	width: 90px;
+}

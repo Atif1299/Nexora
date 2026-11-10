@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// Customize tab (Phase 3): skills, subagents, commands, rules and a link to Platforms.
+// Customize tab: plugins, skills, subagents, commands, hooks, rules and a link to Platforms.
+// The Hooks and Plugins pages live in pages.js.
 (function () {
 	'use strict';
 
@@ -19,15 +20,21 @@
 	const KIND_OF = { skills: 'skill', agents: 'agent', commands: 'command' };
 
 	const ui = {
-		section: 'skills',
+		section: 'plugins',
 		query: '',
 		chip: 'all',
 		detail: null,
 		detailText: null,
 		newForm: false,
 		error: '',
+		dialog: '',
 		data: null
 	};
+	const Pages = window.NexoraCustomizePages({
+		M: M, esc: esc, ui: ui, post: post, header: header, tooOld: tooOld, render: render, setSection: setSection,
+		showDialog: showDialog, closeDialog: closeDialog, dialog: function () { return ui.dialog; }
+	});
+	const PAGE_SECTIONS = ['hooks', 'plugins'];
 
 	function $(id) {
 		return document.getElementById(id);
@@ -58,6 +65,9 @@
 		}
 		if (id === 'platforms') {
 			return -1;
+		}
+		if (PAGE_SECTIONS.indexOf(id) >= 0) {
+			return Pages.count(id);
 		}
 		return items(id).filter(function (i) { return !i.shadowed_by; }).length;
 	}
@@ -286,8 +296,7 @@
 		const kinds = [['agent', 'Subagents'], ['skill', 'Skills'], ['command', 'Commands']];
 		const current = KIND_OF[ui.section];
 		kinds.sort(function (a, b) { return (b[0] === current) - (a[0] === current); });
-		const box = $('cz-dialog');
-		box.innerHTML = '<div class="cz-dialogBox"><header class="cz-dialogHead"><h2>Examples</h2><button type="button" class="nx-btn nx-btn-ghost" data-act="closeDialog" aria-label="Close">Close</button></header>' +
+		showDialog('examples', '<div class="cz-dialogBox"><header class="cz-dialogHead"><h2>Examples</h2><button type="button" class="nx-btn nx-btn-ghost" data-act="closeDialog" aria-label="Close">Close</button></header>' +
 			'<p class="nx-hint">Ready-made items you can install and then edit. Each one is a normal file in Nexora\'s folder.</p>' +
 			'<label class="cz-field cz-inline"><span>Install for</span><select class="nx-select" id="cz-exScope"><option value="user">You (all projects)</option>' +
 			(hasWs ? '<option value="project">This project</option>' : '') + '</select></label>' +
@@ -302,9 +311,16 @@
 						(done.length ? '<div class="nx-hint">Installed for ' + esc(done.join(' and ')) + '</div>' : '') + '</div>' +
 						'<button type="button" class="nx-btn nx-btn-secondary" data-install="' + esc(e.id) + '">Install</button></div>';
 				}).join('');
-			}).join('') + '</div>';
+			}).join('') + '</div>');
+	}
+
+	/** One dialog at a time; ui.dialog says which, so a refresh redraws the right one. */
+	function showDialog(kind, html) {
+		const box = $('cz-dialog');
+		box.innerHTML = html;
 		box.hidden = false;
-		const first = box.querySelector('[data-install]');
+		ui.dialog = kind;
+		const first = box.querySelector('.cz-dialogBox [data-install], .cz-dialogBox .nx-btn:not(.nx-btn-ghost), .cz-dialogBox button');
 		if (first) {
 			first.focus();
 		}
@@ -313,6 +329,7 @@
 	function closeDialog() {
 		$('cz-dialog').hidden = true;
 		$('cz-dialog').innerHTML = '';
+		ui.dialog = '';
 	}
 
 	// --- render ---------------------------------------------------------------------------
@@ -325,6 +342,11 @@
 			return;
 		}
 		const s = section();
+		if (PAGE_SECTIONS.indexOf(s.id) >= 0) {
+			main.innerHTML = Pages.render(s);
+			Pages.afterRender();
+			return;
+		}
 		if (s.id === 'rules') {
 			main.innerHTML = renderRules(s);
 		} else if (s.id === 'platforms') {
@@ -379,6 +401,9 @@
 			return;
 		}
 		const d = t.dataset;
+		if (Pages.click(t)) {
+			return;
+		}
 		if (d.section) {
 			setSection(d.section);
 		} else if (d.chip) {
@@ -428,6 +453,10 @@
 		}
 	});
 
+	document.addEventListener('change', function (e) {
+		Pages.change(e.target);
+	});
+
 	document.addEventListener('keydown', function (e) {
 		if (e.key === 'Escape') {
 			if (!$('cz-dialog').hidden) {
@@ -444,17 +473,23 @@
 
 	window.addEventListener('message', function (event) {
 		const m = event.data || {};
+		if (Pages.message(m)) {
+			return;
+		}
 		switch (m.type) {
 			case 'state':
 				ui.data = m;
-				if (!$('cz-dialog').hidden) {
+				if (ui.dialog === 'examples') {
 					openExamples();
 				}
 				render();
 				break;
 			case 'reveal':
 				if (m.section) {
-					setSection(m.section);
+					// 'plugins:marketplace' or 'hooks:new' opens a page's tab or form.
+					const parts = String(m.section).split(':');
+					Pages.reveal(parts[1] || '');
+					setSection(parts[0]);
 				}
 				if (m.startNew) {
 					ui.newForm = true;
@@ -481,7 +516,7 @@
 				break;
 			case 'error':
 				ui.error = String(m.message || 'Something went wrong.');
-				if (!$('cz-dialog').hidden) {
+				if (ui.dialog === 'examples') {
 					openExamples();
 				}
 				render();

@@ -467,7 +467,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	 */
 	private async _handleServerMessage(msg: {
 		type?: string; id?: string; form?: ServerForm; edit?: { scope: string; name: string } | null;
-		scope?: string; name?: string; enabled?: boolean; items?: { source: string; name: string; scope: string }[];
+		scope?: string; name?: string; enabled?: boolean; items?: { source: string; name: string; scope: string }[]; section?: string;
 	}): Promise<boolean> {
 		const client = getBackendClient();
 		const notify = getNotificationService();
@@ -487,6 +487,9 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 					await this._refreshMyServers();
 					return true;
 				}
+				case 'openCustomize':
+					await vscode.commands.executeCommand('nexora.openCustomize', typeof msg.section === 'string' ? msg.section : undefined);
+					return true;
 				case 'removeServer': {
 					if (!msg.scope || !msg.name) {
 						return true;
