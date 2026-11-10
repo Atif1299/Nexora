@@ -1882,9 +1882,41 @@
 	const EFFECT_LABELS = { read: 'reads', write: 'changes', destructive: 'destructive' };
 
 	/** "GitHub via MCP", "github API", "IDE agent": which route the step will take. */
-	function planRouteLabel(route) {
+	const LOCAL_AGENT_NAMES = { 'claude-code': 'Claude Code', cursor: 'Cursor', cline: 'Cline' };
+
+	/** Who runs an agent step (Phase 5), or '' for any other capability. */
+	function planAgentLabel(capability) {
+		const id = String(capability || '');
+		const name = id.split('.').slice(2).join('.');
+		if (id.indexOf('agent.local.') === 0) {
+			return (LOCAL_AGENT_NAMES[name] || name) + ' (local agent)';
+		}
+		if (id.indexOf('agent.sub.') === 0) {
+			return 'subagent ' + name;
+		}
+		if (id.indexOf('agent.a2a.') === 0) {
+			return 'remote agent ' + name;
+		}
+		return '';
+	}
+
+	/** "4 of 5 past runs worked, about 40 s" from what past runs taught the router. */
+	function planLearnedLabel(learned) {
+		if (!learned || !learned.runs) {
+			return '';
+		}
+		const seconds = Math.round(Number(learned.avg_ms || 0) / 1000);
+		const took = seconds >= 120 ? 'about ' + Math.round(seconds / 60) + ' min' : 'about ' + seconds + ' s';
+		return learned.ok + ' of ' + learned.runs + ' past runs worked, ' + took;
+	}
+
+	function planRouteLabel(route, capability) {
 		if (!route || !route.kind) {
 			return '';
+		}
+		const agent = planAgentLabel(capability);
+		if (agent) {
+			return agent;
 		}
 		const provider = String(route.target || '').split('/')[0];
 		if (route.kind === 'mcp') {
@@ -1973,7 +2005,7 @@
 			return '';
 		}
 		const meta = [`<span class="nx-stepCap">${escapeHtml(task.capability)}</span>`];
-		const route = planRouteLabel(task.route);
+		const route = planRouteLabel(task.route, task.capability);
 		if (route) {
 			meta.push(`<span class="nx-stepRoute">${escapeHtml(route)}</span>`);
 		}
@@ -1987,6 +2019,13 @@
 			meta.push(`<span class="nx-stepBadge nx-noUndo" title="${escapeHtml(task.undo_reason || '')}">can't be undone</span>`);
 		}
 		meta.push(`<span class="nx-stepCost">${task.cost_known === false ? 'cost ?' : '$' + Number(task.estimated_cost || 0).toFixed(4)}</span>`);
+		if (Array.isArray(task.skills) && task.skills.length) {
+			meta.push(`<span class="nx-stepSkills" title="Skills this step's agent loads">skills: ${task.skills.map(escapeHtml).join(', ')}</span>`);
+		}
+		const learned = planLearnedLabel(task.learned);
+		if (learned) {
+			meta.push(`<span class="nx-stepLearned" title="Nexora orders routes and agents by what worked before">${escapeHtml(learned)}</span>`);
+		}
 
 		let readiness = '';
 		const fixes = task.readiness && !task.readiness.ready && Array.isArray(task.readiness.fixes) ? task.readiness.fixes : [];

@@ -3291,7 +3291,9 @@ body
 
 .nx-stepRoute::before,
 .nx-stepUndo::before,
-.nx-stepCost::before
+.nx-stepCost::before,
+.nx-stepSkills::before,
+.nx-stepLearned::before
 {
 	content: "-";
 	margin-right: 6px;

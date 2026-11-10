@@ -4129,8 +4129,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			this._emitChatActivity([{ id: `ws-task-${taskId}`, label: firstLine, done: false }]);
 
-			// A plan step may name the agent; otherwise the user's setting does.
-			const executor = getCodeExecutor(message.executor);
+			// A plan step may name the agent; otherwise the user's setting does. A subagent step
+			// always runs in Nexora's own loop.
+			const executor = message.agent ? 'nexora' : getCodeExecutor(message.executor);
 			if (executor !== 'nexora') {
 				await this._runWorkspaceTaskWithLocalAgent(
 					executor,
@@ -4149,6 +4150,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			// The step's own LLM spend, reported with the result so the plan records it.
 			const stepCost = { usd: 0 };
+			if (message.agent) {
+				// A subagent step (agent.sub.*): the subagent's own loop, shown as its card in the chat.
+				const result = await this._runSubagent(
+					{ id: 'plan-' + taskId, agent: message.agent, task: userMessage, model: message.agent_model || '' },
+					{ workspaceId, workspacePath, mode: 'agent', model: llmModel, modifiedFiles, costOut: stepCost }
+				);
+				const answer = String((result.data as { answer?: string } | undefined)?.answer || result.error || '');
+				await client.submitTaskResult({
+					plan_id: planId,
+					task_id: taskId,
+					success: result.success !== false,
+					summary: answer || 'Done',
+					files: Array.from(modifiedFiles),
+					cost_usd: stepCost.usd
+				});
+				this._emitChatActivity([{ id: `ws-task-${taskId}`, label: firstLine, done: true }]);
+				return;
+			}
 			const finalAnswer = await this._runAgentLoopWithMode(
 				userMessage,
 				workspaceId,

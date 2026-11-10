@@ -33,6 +33,9 @@ export interface WebSocketMessage {
 	context?: string;
 	/** Agent the plan wants for this step; absent means the user's setting decides. */
 	executor?: string;
+	/** A subagent step (agent.sub.*): the subagent to run, and its own model ('' = the plan's). */
+	agent?: string;
+	agent_model?: string;
 }
 
 export type MessageCallback = (message: WebSocketMessage) => void;
