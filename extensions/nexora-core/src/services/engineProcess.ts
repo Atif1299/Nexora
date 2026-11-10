@@ -252,8 +252,9 @@ async function probeHealth(baseUrl: string, localToken: string, timeoutMs: numbe
 		if (!response.ok) {
 			return false;
 		}
-		const body = await response.json() as { status?: string };
-		return body?.status === 'ok';
+		// Another app on this port can answer ok too; only a Nexora engine names itself.
+		const body = await response.json() as { status?: string; service?: string };
+		return body?.status === 'ok' && body.service === 'nexora-engine';
 	} catch {
 		return false;
 	} finally {

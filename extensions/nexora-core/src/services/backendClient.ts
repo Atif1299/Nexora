@@ -119,7 +119,8 @@ export class BackendClient {
 	private async _checkHealthOnce(): Promise<boolean> {
 		try {
 			const response = await this.transport.get('/api/health');
-			const ok = response?.status === 'ok';
+			// Same identity check as the engine start: another app answering ok is not the engine.
+			const ok = response?.status === 'ok' && response?.service === 'nexora-engine';
 			this._healthyUntil = ok ? Date.now() + 20_000 : 0;
 			return ok;
 		} catch {

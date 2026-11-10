@@ -52,15 +52,25 @@ export class RequestCancelledError extends Error {
 }
 
 async function errorFromHttpResponse(response: Response): Promise<Error> {
+	let detail = '';
 	try {
 		const body = await response.json() as { detail?: unknown };
-		if (typeof body?.detail === 'string' && body.detail.trim()) {
-			return new Error(body.detail);
-		}
+		detail = typeof body?.detail === 'string' ? body.detail.trim() : '';
 	} catch {
 		// body was not JSON
 	}
-	return new Error(`HTTP ${response.status}`);
+	// The engine's own errors explain themselves; a bare or route-level 404 names the address,
+	// so a wrong server on the port reads as that rather than as a broken feature.
+	if (detail && detail !== 'Not Found') {
+		return new Error(detail);
+	}
+	let path = response.url;
+	try {
+		path = new URL(response.url).pathname;
+	} catch {
+		// keep the raw url
+	}
+	return new Error(`${detail || 'HTTP ' + response.status} (${response.status} from ${path || 'the engine'})`);
 }
 
 export function isRequestCancelled(error: unknown): boolean {
@@ -248,7 +258,7 @@ export function createTransport(
 				clearTimeout(timer);
 
 				if (!response.ok) {
-					throw new Error(`HTTP ${response.status}`);
+					throw await errorFromHttpResponse(response);
 				}
 				const body = response.body as { getReader?: () => { read(): Promise<{ done: boolean; value?: Uint8Array }>; releaseLock(): void } } | null;
 				if (!body || typeof body.getReader !== 'function') {
