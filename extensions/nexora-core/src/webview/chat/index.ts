@@ -79,10 +79,30 @@ export function getChatWebviewHtml(
 			<section class="nx-messages" id="messages" aria-label="Messages">
 				<div class="nx-welcome" id="welcome">
 					<div class="nx-welcomeIcon">
-						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-							<path d="M12 2L2 7l10 5 10-5-10-5z"/>
-							<path d="M2 17l10 5 10-5"/>
-							<path d="M2 12l10 5 10-5"/>
+						<svg width="56" height="56" viewBox="13 11 78 78" aria-hidden="true">
+							<defs>
+								<linearGradient id="nxw-green" x1="0" y1="0" x2="1" y2="1">
+									<stop offset="0" stop-color="#43E6A1"/>
+									<stop offset="1" stop-color="#0B8550"/>
+								</linearGradient>
+								<filter id="nxw-glow" x="-100%" y="-100%" width="300%" height="300%">
+									<feGaussianBlur stdDeviation="2.5"/>
+								</filter>
+								<filter id="nxw-shadow" x="-20%" y="-20%" width="140%" height="140%">
+									<feGaussianBlur stdDeviation="1.3"/>
+								</filter>
+							</defs>
+							<rect x="18" y="25" width="48" height="38" rx="8" fill="#3A4641"/>
+							<rect x="27.5" y="37.8" width="48" height="38" rx="8" fill="#000000" fill-opacity="0.22" filter="url(#nxw-shadow)"/>
+							<rect x="27" y="36" width="48" height="38" rx="8" fill="url(#nxw-green)"/>
+							<circle cx="33.5" cy="42.5" r="1.5" fill="#FFFFFF" fill-opacity="0.85"/>
+							<circle cx="38" cy="42.5" r="1.5" fill="#FFFFFF" fill-opacity="0.6"/>
+							<circle cx="42.5" cy="42.5" r="1.5" fill="#FFFFFF" fill-opacity="0.4"/>
+							<path d="M36 52 L43 57.5 L36 63" fill="none" stroke="#FFFFFF" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+							<path d="M48 63 H60" fill="none" stroke="#FFFFFF" stroke-width="4.4" stroke-linecap="round"/>
+							<circle cx="75" cy="36" r="7" fill="#7CF7C0" fill-opacity="0.8" filter="url(#nxw-glow)"/>
+							<circle cx="75" cy="36" r="5" fill="#5EF2B5" stroke="#0B6B43" stroke-width="1.2"/>
+							<circle cx="75" cy="36" r="2.3" fill="#FFFFFF"/>
 						</svg>
 					</div>
 					<div class="nx-welcomeTitle">Nexora AI</div>

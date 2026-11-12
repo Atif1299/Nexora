@@ -837,20 +837,6 @@ body
 .nx-welcomeIcon
 {
 	margin-bottom: var(--nx-space-4);
-	background: linear-gradient(135deg, var(--vscode-charts-blue, #58a6ff) 0%, var(--vscode-charts-purple, #a371f7) 50%, var(--vscode-charts-green, #3fb950) 100%);
-	-webkit-background-clip: text;
-	-webkit-text-fill-color: transparent;
-	background-clip: text;
-}
-
-.nx-welcomeIcon svg
-{
-	stroke: url(#nexora-gradient);
-}
-
-.nx-welcomeIcon svg path
-{
-	stroke: var(--vscode-charts-blue, #58a6ff);
 }
 
 .nx-welcomeTitle
