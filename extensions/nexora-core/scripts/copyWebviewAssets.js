@@ -65,6 +65,9 @@ function main() {
 
 	// Customize editor page assets (Phase 3)
 	copyWebviewFolder(root, 'customize', ['customize.css', 'model.js', 'pages.js', 'orchestration.js', 'customize.js']);
+
+	// Constellation editor page assets: the workspace graph lit by the running plan
+	copyWebviewFolder(root, 'constellation', ['constellation.css', 'constellation.js']);
 }
 
 main();

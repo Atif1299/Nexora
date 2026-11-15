@@ -15,7 +15,7 @@ export interface ContextTag {
 	text?: string;
 }
 /** Pages the chat rail and welcome cards can open. */
-export type ChatPage = 'recipes' | 'platforms' | 'customize';
+export type ChatPage = 'recipes' | 'platforms' | 'customize' | 'constellation';
 /** One row of the chat list; the webview groups rows by updatedAt. */
 export type ChatSessionSummary = { id: string; name: string; createdAt: number; updatedAt: number };
 /** What every composer send carries besides the text. */

@@ -114,8 +114,53 @@ export interface TimelineDiff {
 	modified_status: string;
 }
 
+/** GET /api/memory/graph: the workspace as a graph, for the Constellation page. */
+export interface CodeGraphNode {
+	/** Workspace-relative POSIX path. The same id a plan step reports changing. */
+	id: string;
+	label: string;
+	dir: string;
+	/** Top-level folder, or "root" for a file at the top. The page colours by this. */
+	group: string;
+	language: string;
+	size_bytes: number;
+	key: boolean;
+}
+
+export interface CodeGraphFolder {
+	id: string;
+	label: string;
+	parent: string | null;
+	group: string;
+	files: number;
+}
+
+export interface CodeGraphEdge {
+	source: string;
+	target: string;
+	kind: 'imports';
+}
+
+export interface CodeGraph {
+	workspace_id: string;
+	workspace_path: string;
+	nodes: CodeGraphNode[];
+	folders: CodeGraphFolder[];
+	edges: CodeGraphEdge[];
+	/** True when the walk stopped at max_files, so the page can say it is partial. */
+	truncated: boolean;
+	counts: { files: number; folders: number; edges: number };
+}
+
 export function createMemoryApi(transport: Transport) {
 	return {
+		getCodeGraph: async (workspacePath: string, maxFiles?: number): Promise<CodeGraph> => {
+			const limit = maxFiles ? `&max_files=${encodeURIComponent(String(maxFiles))}` : '';
+			return await transport.get(
+				`/api/memory/graph?workspace_path=${encodeURIComponent(workspacePath)}${limit}`
+			);
+		},
+
 		indexWorkspace: async (workspacePath: string, timeoutMs?: number): Promise<any> => {
 			try {
 				return await transport.post('/api/memory/index', { workspace_path: workspacePath }, timeoutMs);

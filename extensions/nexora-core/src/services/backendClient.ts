@@ -14,7 +14,7 @@ import type { PlatformUsage, ServerTools } from './platformUsage';
 import type { ImportSource, MyServer, MyServers, ServerBody } from './mcpServers';
 import { createPlatformsApi } from './backend/platforms';
 import { createCustomizeApi } from './backend/customize';
-import { createMemoryApi, type MemorySuggestion, type ProjectFact, type ProjectFactsResponse, type ProjectRulesResponse, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
+import { createMemoryApi, type CodeGraph, type MemorySuggestion, type ProjectFact, type ProjectFactsResponse, type ProjectRulesResponse, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
 import { createWorkflowsApi, type WorkflowTemplate, type TemplateListResponse, type SuggestFromPlanResponse, type SaveFromPlanRequest, type ImportPreview } from './backend/workflows';
 import { createCognitiveApi } from './backend/cognitive';
 import { createAuthApi, type AuthStatus, type SaasConnector } from './backend/auth';
@@ -221,6 +221,11 @@ export class BackendClient {
 
 	async getWorkspaceIdForPath(workspacePath: string): Promise<{ workspace_path: string; workspace_id: string }> {
 		return createMemoryApi(this.transport).getWorkspaceIdForPath(workspacePath);
+	}
+
+	/** The workspace as a graph (files, folders, resolved imports) for the Constellation page. */
+	async getCodeGraph(workspacePath: string, maxFiles?: number): Promise<CodeGraph> {
+		return createMemoryApi(this.transport).getCodeGraph(workspacePath, maxFiles);
 	}
 
 	/**

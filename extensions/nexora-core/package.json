@@ -158,6 +158,12 @@
         "icon": "$(extensions)"
       },
       {
+        "command": "nexora.openConstellation",
+        "title": "Constellation",
+        "category": "Nexora",
+        "icon": "$(circuit-board)"
+      },
+      {
         "command": "nexora.refreshPlatforms",
         "title": "Refresh Platforms",
         "category": "Nexora",

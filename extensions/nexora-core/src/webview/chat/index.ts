@@ -168,6 +168,7 @@ export function getChatWebviewHtml(
 				<button type="button" class="nx-railNavItem" id="railSearchBtn" aria-controls="railSearch"><i class="codicon codicon-search" aria-hidden="true"></i><span>Search chats</span></button>
 				<button type="button" class="nx-railNavItem" data-page="recipes"><i class="codicon codicon-play-circle" aria-hidden="true"></i><span>Recipes</span></button>
 				<button type="button" class="nx-railNavItem" data-page="platforms"><i class="codicon codicon-plug" aria-hidden="true"></i><span>Platforms</span><span class="nx-railNavCount" id="railPlatformCount" hidden></span></button>
+				<button type="button" class="nx-railNavItem" data-page="constellation"><i class="codicon codicon-circuit-board" aria-hidden="true"></i><span>Constellation</span></button>
 				<button type="button" class="nx-railNavItem" data-page="customize"><i class="codicon codicon-extensions" aria-hidden="true"></i><span>Customize</span></button>
 			</nav>
 			<div class="nx-railSearch" id="railSearchRow" hidden>

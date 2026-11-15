@@ -116,7 +116,8 @@ const SESSION_RAIL_HIDDEN_KEY = 'nexora.sessionRailHidden';
 const CHAT_PAGES: Record<ChatPage, { command: string; args: unknown[] }> = {
 	recipes: { command: 'nexora.openCustomize', args: ['recipes'] },
 	platforms: { command: 'nexora.openPlatformBrowser', args: [] },
-	customize: { command: 'nexora.openCustomize', args: [] }
+	customize: { command: 'nexora.openCustomize', args: [] },
+	constellation: { command: 'nexora.openConstellation', args: [] }
 };
 
 /** Longest chat name the rail's rename accepts. */
@@ -3611,8 +3612,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 	}
 
 	/** Agent runs an existing plan only when the user asks to execute that plan. */
+	/**
+	 * Is this message "run the plan I already have", rather than a sentence that merely
+	 * contains both words?
+	 *
+	 * The old test matched any `run|execute|approve|start` within 48 characters of
+	 * "plan" anywhere in the message, so "can you make the plan ... in claude run ...
+	 * something you can plan" was read as an instruction to execute, and the user was
+	 * told to switch modes instead of getting the plan they asked for. Asking *for* a
+	 * plan now never matches, and the instruction has to be the message, not buried in one.
+	 */
 	private _wantsExistingPlanRun(text: string): boolean {
-		return /\b(execute|run|approve|start)\b[\s\S]{0,48}\bplan\b/i.test(text.trim());
+		const trimmed = text.trim();
+		if (/\b(make|create|draft|build|write|generate|prepare|propose|suggest)\b[\s\S]{0,32}\bplan\b/i.test(trimmed)) {
+			return false;
+		}
+		return /^(?:please\s+|now\s+|ok(?:ay)?[,\s]+|yes[,\s]+|go\s+ahead(?:\s+and)?[,\s]+)*(execute|run|approve|start)\s+(?:the\s+|this\s+|that\s+|it\s*)?plan\b/i
+			.test(trimmed);
 	}
 
 	private async _approveCurrentPlan(sessionId: string | undefined, workspaceId: string | undefined): Promise<void> {
@@ -3730,7 +3746,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 			if (this._wantsExistingPlanRun(request)) {
 				if (!this._currentPlanId) {
-					const none = 'No plan is waiting. Switch to Plan mode, describe the work, then come back and say execute the plan.';
+					const none = 'There is no plan waiting to run. Describe what you want built and Nexora will plan it first: in **Plan** mode it always plans and waits for your approval, and in **Agent** mode you can ask for a plan ("plan this first") when the work touches platforms or several steps.';
 					const sNone = this._getActiveSession();
 					if (sNone) {
 						sNone.messages.push({ role: 'assistant', content: none, mode: 'agent', timestamp: Date.now() });

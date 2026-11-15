@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import { ChatPanelProvider } from './chatPanel';
 import { PlatformBrowserProvider } from './platformPanel';
 import { TaskTreeProvider } from './taskTreeProvider';
+import { ConstellationPanelProvider } from './constellationPanel';
 import { WorkflowPanelProvider, workflowPlanFromSnapshot } from './workflowPanel';
 import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { SettingsPanelProvider } from './settingsPanel';
@@ -338,6 +339,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	menuStatusBar.show();
 	context.subscriptions.push(menuStatusBar);
 
+	// Constellation: the workspace as a graph in its own editor tab, lit by the running plan.
+	const constellationProvider = new ConstellationPanelProvider(context.extensionUri);
+	context.subscriptions.push(constellationProvider);
+
 	// Week 11: Workflow / Output live in the bottom panel as horizontal tabs
 	const workflowProvider = new WorkflowPanelProvider(context.extensionUri);
 	context.subscriptions.push(
@@ -411,6 +416,7 @@ export async function activate(context: vscode.ExtensionContext) {
 				{ label: '$(play-circle) Recipes', description: 'Run a saved plan', run: () => vscode.commands.executeCommand('nexora.openCustomize', 'recipes') },
 				{ label: '$(plug) Platforms', description: 'Connect services', run: () => vscode.commands.executeCommand('nexora.openPlatformBrowser') },
 				{ label: '$(extensions) Customize', description: 'Plugins, skills, agents, hooks, rules', run: () => vscode.commands.executeCommand('nexora.openCustomize') },
+				{ label: '$(circuit-board) Constellation', description: 'The workspace as a graph, lit by the running plan', run: () => vscode.commands.executeCommand('nexora.openConstellation') },
 				{ label: '$(discard) Undo a platform action', description: 'Reverse what a plan did on a platform', run: () => vscode.commands.executeCommand('nexora.undoPlatformAction') },
 				{ label: '$(history) Memory timeline', run: () => vscode.commands.executeCommand('nexora.openTimeline') },
 				{ label: '$(settings-gear) Settings', run: () => vscode.commands.executeCommand('nexora.openSettings') },
@@ -640,11 +646,26 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.openOutput', async () => {
 			await showOnlyNexoraPanelView('nexora.outputViewer');
 		}),
+		// The one place a plan is published. Four call sites in the chat panel reach it,
+		// so every surface that draws a plan is fed from here rather than from each of
+		// them remembering to call one more command.
 		vscode.commands.registerCommand('nexora.updateWorkflowPlan', (plan: any) => {
 			if (plan && plan.tasks) {
 				workflowProvider.updatePlan(plan);
+				constellationProvider.setPlan(plan);
 				outputProvider.clearOutputs();
-				void showOnlyNexoraPanelView('nexora.workflowViewer');
+				// The bottom panel is no longer forced open: a plan belongs in the
+				// Constellation tab and in the chat card, not on top of the terminal.
+			}
+		}),
+		vscode.commands.registerCommand('nexora.openConstellation', async () => {
+			await constellationProvider.open();
+		}),
+		// Kept so an older call site or a recipe naming it still works; the plan reaches
+		// the Constellation through nexora.updateWorkflowPlan above.
+		vscode.commands.registerCommand('nexora.updateConstellationPlan', (plan: any) => {
+			if (plan && plan.tasks) {
+				constellationProvider.setPlan(plan);
 			}
 		}),
 		vscode.commands.registerCommand('nexora.cancelOperation', async () => {

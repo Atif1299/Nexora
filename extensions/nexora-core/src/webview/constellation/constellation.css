@@ -1,0 +1,373 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Constellation: the workspace as a graph, with the files a running plan touches lit up.
+ * Colours come from the shared tokens so the page matches whatever theme the editor is in.
+ */
+
+.cn-root {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	grid-template-rows: auto 1fr auto;
+	background: var(--nx-bg);
+	color: var(--nx-fg);
+	overflow: hidden;
+}
+
+/* ---------- top bar ---------- */
+
+.cn-top {
+	display: flex;
+	align-items: center;
+	gap: var(--nx-space-2);
+	padding: var(--nx-space-2) var(--nx-space-3);
+	border-bottom: 1px solid var(--nx-border);
+	background: var(--nx-surface-2);
+	flex-wrap: wrap;
+}
+
+.cn-title {
+	display: flex;
+	align-items: center;
+	gap: var(--nx-space-2);
+	font-weight: 600;
+	min-width: 0;
+}
+
+.cn-title .codicon {
+	color: var(--nx-accent);
+}
+
+.cn-repo {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 32ch;
+}
+
+.cn-spacer {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.cn-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-family: var(--nx-font-mono);
+	font-size: 11px;
+	padding: 2px 8px;
+	border-radius: var(--nx-radius);
+	background: var(--nx-surface);
+	color: var(--nx-muted);
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+
+.cn-chip[hidden] {
+	display: none;
+}
+
+.cn-chip-live {
+	background: color-mix(in srgb, var(--nx-info) 18%, transparent);
+	color: var(--nx-info);
+}
+
+.cn-chip-blast {
+	background: color-mix(in srgb, var(--nx-warn) 18%, transparent);
+	color: var(--nx-warn);
+}
+
+.cn-chip-spend {
+	background: color-mix(in srgb, var(--nx-ok) 18%, transparent);
+	color: var(--nx-ok);
+}
+
+.cn-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: currentColor;
+}
+
+/* ---------- stage ---------- */
+
+.cn-stage {
+	display: grid;
+	grid-template-columns: 1fr 300px;
+	min-height: 0;
+}
+
+.cn-canvasWrap {
+	position: relative;
+	min-width: 0;
+	min-height: 0;
+	background: var(--nx-bg);
+}
+
+.cn-canvas {
+	display: block;
+	width: 100%;
+	height: 100%;
+	cursor: default;
+}
+
+.cn-canvas:active {
+	cursor: grabbing;
+}
+
+.cn-overlay {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	pointer-events: none;
+	color: var(--nx-muted);
+	font-size: 13px;
+	padding: var(--nx-space-4);
+	text-align: center;
+}
+
+.cn-overlay[hidden] {
+	display: none;
+}
+
+.cn-legend {
+	position: absolute;
+	left: var(--nx-space-3);
+	bottom: var(--nx-space-3);
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 12px;
+	font-family: var(--nx-font-mono);
+	font-size: 10px;
+	color: var(--nx-muted);
+	pointer-events: none;
+	max-width: 70%;
+}
+
+.cn-legend span {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.cn-swatch {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	display: inline-block;
+}
+
+.cn-hint {
+	position: absolute;
+	right: var(--nx-space-3);
+	top: var(--nx-space-3);
+	font-family: var(--nx-font-mono);
+	font-size: 10px;
+	color: var(--nx-disabled);
+	pointer-events: none;
+}
+
+/* ---------- inspector ---------- */
+
+.cn-side {
+	border-left: 1px solid var(--nx-border);
+	background: var(--nx-surface-2);
+	padding: var(--nx-space-3);
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: var(--nx-space-3);
+	min-width: 0;
+}
+
+.cn-k {
+	font-family: var(--nx-font-mono);
+	font-size: 10px;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--nx-disabled);
+}
+
+.cn-selName {
+	font-family: var(--nx-font-mono);
+	font-size: 12px;
+	line-height: 1.5;
+	word-break: break-all;
+	margin-top: 3px;
+}
+
+.cn-empty {
+	color: var(--nx-muted);
+	font-size: 12px;
+	line-height: 1.6;
+}
+
+.cn-kv {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--nx-space-2);
+	font-size: 12px;
+	padding: 2px 0;
+}
+
+.cn-kv span {
+	color: var(--nx-muted);
+}
+
+.cn-kv b {
+	font-weight: 500;
+	font-family: var(--nx-font-mono);
+	font-size: 11px;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+.cn-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin-top: 4px;
+}
+
+.cn-listItem {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	font-family: var(--nx-font-mono);
+	font-size: 11px;
+	color: var(--nx-muted);
+	background: none;
+	border: none;
+	padding: 3px 4px;
+	text-align: left;
+	border-radius: var(--nx-radius);
+	cursor: pointer;
+	width: 100%;
+}
+
+.cn-listItem:hover {
+	background: var(--nx-surface-hover);
+	color: var(--nx-fg);
+}
+
+.cn-listItem em {
+	font-style: normal;
+	color: var(--nx-disabled);
+	flex-shrink: 0;
+}
+
+.cn-listItem span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.cn-step {
+	background: var(--nx-surface);
+	border-left: 2px solid var(--nx-info);
+	border-radius: 0 var(--nx-radius) var(--nx-radius) 0;
+	padding: 7px 9px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.cn-step b {
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.cn-step small {
+	font-family: var(--nx-font-mono);
+	font-size: 10px;
+	color: var(--nx-muted);
+}
+
+.cn-actions {
+	display: flex;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+/* ---------- step rail ---------- */
+
+.cn-rail {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: var(--nx-space-2) var(--nx-space-3);
+	border-top: 1px solid var(--nx-border);
+	background: var(--nx-surface-2);
+	overflow-x: auto;
+	min-height: 38px;
+}
+
+.cn-railEmpty {
+	font-size: 12px;
+	color: var(--nx-muted);
+}
+
+.cn-stepBtn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-family: var(--nx-font-mono);
+	font-size: 11px;
+	padding: 4px 9px;
+	border-radius: var(--nx-radius);
+	border: 1px solid var(--nx-border);
+	background: var(--nx-surface);
+	color: var(--nx-muted);
+	white-space: nowrap;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.cn-stepBtn:hover {
+	background: var(--nx-surface-hover);
+	color: var(--nx-fg);
+}
+
+.cn-stepBtn[aria-pressed="true"] {
+	border-color: var(--nx-info);
+	color: var(--nx-fg);
+	background: color-mix(in srgb, var(--nx-info) 12%, transparent);
+}
+
+.cn-stepBtn .cn-dot {
+	background: var(--nx-disabled);
+}
+
+.cn-stepBtn[data-status="running"] .cn-dot {
+	background: var(--nx-info);
+}
+
+.cn-stepBtn[data-status="success"] .cn-dot {
+	background: var(--nx-ok);
+}
+
+.cn-stepBtn[data-status="failed"] .cn-dot,
+.cn-stepBtn[data-status="timeout"] .cn-dot {
+	background: var(--nx-err);
+}
+
+.cn-stepBtn[data-status="pending"],
+.cn-stepBtn[data-status="queued"],
+.cn-stepBtn[data-status="skipped"] {
+	opacity: 0.6;
+}
+
+@media (max-width: 760px) {
+	.cn-stage {
+		grid-template-columns: 1fr;
+	}
+
+	.cn-side {
+		display: none;
+	}
+}
