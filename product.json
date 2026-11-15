@@ -3,6 +3,7 @@
 "nameLong": "Nexora - Agentic IDE for AI Orchestration",
 "applicationName": "nexora",
 "quality": "exploration",
+"updateUrl": "https://nexora.visionscraft.tech",
 "dataFolderName": ".nexora",
 "win32MutexName": "nexora",
 "licenseName": "MIT",

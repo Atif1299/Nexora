@@ -90,6 +90,37 @@ jobs:
           # The packaging tasks only warn when the engine is missing; an installer without it is useless.
           if (-not (Test-Path ..\VSCode-win32-x64\engine\nexora-engine.exe)) { throw 'The engine is not in the packaged app' }
 
+      # The update feed answers from this, so it never has to guess what was built.
+      # The client checks the sha256 before installing, so a wrong one here means
+      # every installed Nexora refuses the update.
+      - name: Write the update manifest
+        working-directory: Nexora
+        run: |
+          $setup = Get-ChildItem .build\win32-x64\user-setup\*.exe | Select-Object -First 1
+          $sha = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
+          # Same tag the release step uses, so the download URL it writes resolves.
+          $tag = '${{ github.ref_type == ''tag'' && github.ref_name || format(''build-{0}'', github.run_number) }}'
+          $manifest = [ordered]@{
+            version        = '${{ github.sha }}'
+            productVersion = $tag.TrimStart('v')
+            name           = "Nexora $tag"
+            url            = "https://github.com/${{ github.repository }}/releases/download/$tag/$($setup.Name)"
+            sha256hash     = $sha
+            timestamp      = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+            supportsFastUpdate = $true
+          }
+          $out = Join-Path $setup.DirectoryName 'nexora-update-win32-x64-user.json'
+          # Written through .NET with a BOM-less encoder on purpose: Set-Content -Encoding utf8
+          # emits a BOM on Windows PowerShell, and JSON.parse in the update feed throws on it,
+          # which would make every update check answer "nothing to do" and never say why.
+          $json = $manifest | ConvertTo-Json
+          [System.IO.File]::WriteAllText($out, $json, (New-Object System.Text.UTF8Encoding $false))
+          Write-Host "Update manifest: $out"
+          Get-Content $out
+          # The feed cannot read a manifest the build could not parse itself.
+          $null = Get-Content $out -Raw | ConvertFrom-Json
+          if ((Get-Content $out -AsByteStream -TotalCount 3) -join ',' -eq '239,187,191') { throw 'Manifest was written with a BOM' }
+
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
@@ -98,5 +129,7 @@ jobs:
           make_latest: ${{ github.ref_type == 'tag' }}
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
           name: Nexora ${{ github.ref_type == 'tag' && github.ref_name || format('build {0}', github.run_number) }}
-          files: Nexora/.build/win32-x64/user-setup/*.exe
+          files: |
+            Nexora/.build/win32-x64/user-setup/*.exe
+            Nexora/.build/win32-x64/user-setup/nexora-update-win32-x64-user.json
           fail_on_unmatched_files: true
