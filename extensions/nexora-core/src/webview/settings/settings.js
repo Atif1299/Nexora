@@ -481,8 +481,9 @@
 					/>
 					<div class="nx-actions">
 						<button type="button" class="nx-btn nx-btn-secondary" data-action="test" data-provider="${p.id}" aria-label="Test ${escapeHtml(p.label)} key">Test</button>
-						<button type="button" class="nx-btn" data-action="save" data-provider="${p.id}" aria-label="Save ${escapeHtml(p.label)} key">Save</button>
+						<button type="button" class="nx-btn nx-btn-secondary" data-action="save" data-provider="${p.id}" aria-label="Save ${escapeHtml(p.label)} key">Save</button>
 						<button type="button" class="nx-btn nx-btn-secondary" data-action="replace" data-provider="${p.id}" aria-label="Replace ${escapeHtml(p.label)} key" ${configured ? '' : 'disabled'}>Replace</button>
+						<span class="nx-actionsGap"></span>
 						<button type="button" class="nx-btn nx-btn-danger" data-action="clear" data-provider="${p.id}" aria-label="Clear ${escapeHtml(p.label)} key" ${configured ? '' : 'disabled'}>Clear</button>
 					</div>
 					<div class="nx-msg ${escapeHtml(msg.cls)}" id="msg-${p.id}" role="status">${escapeHtml(msg.text)}</div>
@@ -495,6 +496,20 @@
 			if (input) {
 				input.value = drafts[id];
 			}
+		});
+
+		// Save is the only coloured button on a card, and only once there is a key to
+		// save. Five filled buttons down the column read as a wall of controls and give
+		// the eye nowhere to land; this way the page is quiet until you type.
+		PROVIDERS.forEach(p => {
+			const input = document.getElementById(`key-${p.id}`);
+			const save = root.querySelector(`button[data-action="save"][data-provider="${p.id}"]`);
+			if (!input || !save) {
+				return;
+			}
+			const syncSave = () => save.classList.toggle('nx-btn-secondary', !input.value.trim());
+			syncSave();
+			input.addEventListener('input', syncSave);
 		});
 
 		root.querySelectorAll('button[data-action]').forEach(btn => {

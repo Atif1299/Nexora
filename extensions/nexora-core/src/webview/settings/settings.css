@@ -1569,3 +1569,38 @@ textarea.nx-input
 		display: none;
 	}
 }
+
+/* API key and connector cards
+ *
+ * One card per provider makes a long column, and four equally weighted buttons
+ * on each turned the page into a wall of controls. These rules give the column
+ * a calmer rhythm: tighter cards, a quiet row of actions, and the destructive
+ * one pushed away from the rest so Clear is never next to Save.
+ */
+.nx-card[data-provider]
+{
+	padding: 13px 16px;
+}
+
+.nx-card[data-provider] > .nx-input
+{
+	margin-top: 8px;
+}
+
+.nx-card[data-provider] .nx-actions
+{
+	margin-top: 8px;
+	gap: 6px;
+}
+
+/* Pushes Clear to the trailing edge, away from Save. */
+.nx-actionsGap
+{
+	flex: 1 1 auto;
+}
+
+/* A disabled action should recede rather than hold the same weight as a live one. */
+.nx-card[data-provider] .nx-btn:disabled
+{
+	opacity: 0.4;
+}
