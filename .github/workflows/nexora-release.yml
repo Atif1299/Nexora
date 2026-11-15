@@ -95,16 +95,22 @@ jobs:
       # every installed Nexora refuses the update.
       - name: Write the update manifest
         working-directory: Nexora
+        # Passed as environment values rather than interpolated into the script: an
+        # expression inside a run block has to be quoted for both GitHub and the shell,
+        # and getting that wrong fails the whole workflow before any job starts.
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_REPO: ${{ github.repository }}
         run: |
           $setup = Get-ChildItem .build\win32-x64\user-setup\*.exe | Select-Object -First 1
           $sha = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLower()
-          # Same tag the release step uses, so the download URL it writes resolves.
-          $tag = '${{ github.ref_type == ''tag'' && github.ref_name || format(''build-{0}'', github.run_number) }}'
+          $tag = $env:RELEASE_TAG
           $manifest = [ordered]@{
-            version        = '${{ github.sha }}'
+            version        = $env:RELEASE_SHA
             productVersion = $tag.TrimStart('v')
             name           = "Nexora $tag"
-            url            = "https://github.com/${{ github.repository }}/releases/download/$tag/$($setup.Name)"
+            url            = "https://github.com/$($env:RELEASE_REPO)/releases/download/$tag/$($setup.Name)"
             sha256hash     = $sha
             timestamp      = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
             supportsFastUpdate = $true
