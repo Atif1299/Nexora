@@ -28,6 +28,7 @@ import { formatAfterWrite } from '../tools/writeFile';
 import { agentCheckpoints } from '../checkpoints';
 import {
 	collectChanges,
+	initRepository,
 	prepareWorktree,
 	removeWorktree,
 	worktreeStorageDir,
@@ -151,11 +152,30 @@ export async function runWorkspaceTaskWithAgent(
 	}
 
 	const storageDir = await worktreeStorageDir(options.context);
-	const prepareResult = await prepareWorktree({
+	const prepare = () => prepareWorktree({
 		workspacePath: options.workspacePath,
 		runId: options.runId,
 		storageDir
 	});
+	let prepareResult = await prepare();
+	if (!prepareResult.ok && prepareResult.notARepository) {
+		// A new folder has no repository and no commit, so every local-agent step fails
+		// before it starts. Offer the one-time setup rather than leaving the user with
+		// an error that names a cause but no cure.
+		const answer = await vscode.window.showWarningMessage(
+			`${spec.name} runs in a git worktree, and this folder is not a repository yet.`,
+			{ modal: true, detail: 'Nexora can run "git init" here and make one empty commit. Nothing of yours is committed.' },
+			'Initialise and run'
+		);
+		if (answer === 'Initialise and run') {
+			const init = await initRepository(options.workspacePath);
+			if (!init.ok) {
+				const error = `Could not make this folder a git repository: ${init.error}`;
+				return { success: false, summary: error, files: [], error };
+			}
+			prepareResult = await prepare();
+		}
+	}
 	if (!prepareResult.ok) {
 		return {
 			success: false,

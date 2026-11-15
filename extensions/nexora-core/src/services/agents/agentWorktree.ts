@@ -66,10 +66,38 @@ export async function findRepoRoot(dir: string): Promise<string | undefined> {
 	return root ? path.normalize(root) : undefined;
 }
 
+export const NOT_A_REPOSITORY =
+	'This folder is not a git repository, so a local coding agent has nothing to diff its run against.';
+
+/**
+ * Make this folder a repository with one empty commit, so worktrees work.
+ *
+ * A local coding agent runs in a worktree detached at HEAD, which needs a commit
+ * to detach from. A brand new folder has neither, and the run fails before it
+ * starts; this is the one-time setup that unblocks it. The caller asks first,
+ * because it writes to the user's folder.
+ */
+export async function initRepository(workspacePath: string): Promise<{ ok: boolean; error?: string }> {
+	const init = await git(['init'], workspacePath);
+	if (!init.ok) {
+		return { ok: false, error: init.stderr.trim() || 'git init failed' };
+	}
+	// An empty first commit: nothing of the user's is staged or committed by this.
+	const commit = await git(
+		['-c', 'user.name=Nexora', '-c', 'user.email=nexora@localhost',
+			'commit', '--allow-empty', '-m', 'Initial commit'],
+		workspacePath
+	);
+	if (!commit.ok) {
+		return { ok: false, error: commit.stderr.trim() || 'could not make the first commit' };
+	}
+	return { ok: true };
+}
+
 /** Either a worktree ready for the agent, or why one could not be made. */
 export type PrepareWorktreeResult =
 	| { ok: true; worktree: PreparedWorktree }
-	| { ok: false; error: string };
+	| { ok: false; error: string; notARepository?: boolean };
 
 export interface PreparedWorktree {
 	/** Absolute path the agent runs in. */
@@ -94,11 +122,7 @@ export async function prepareWorktree(options: {
 }): Promise<PrepareWorktreeResult> {
 	const repoRoot = await findRepoRoot(options.workspacePath);
 	if (!repoRoot) {
-		return {
-			ok: false,
-			error:
-				'This workspace is not a git repository, so there is nothing to diff an agent run against.'
-		};
+		return { ok: false, notARepository: true, error: NOT_A_REPOSITORY };
 	}
 
 	const worktreePath = path.join(options.storageDir, options.runId);
