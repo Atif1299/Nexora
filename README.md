@@ -19,8 +19,10 @@ The **editor**: a VS Code OSS fork whose product behaviour lives in one built-in
 - **An agent** that edits files live (Keep / Undo), runs commands in a *Nexora Agent* tab, drives a real browser (*Nexora Browser*), suggests code at the cursor, loads skills, hands work to subagents, runs your hooks, and calls your connected platforms after your approval.
 - **Customize:** plugins and marketplaces, platforms and your own MCP servers, skills, agents (subagents, coding agents, remote A2A agents), recipes, `/commands`, hooks and rules, reading Claude Code's and Cursor's files as they are.
 - **Plans** shown as an approval card and a live **workflow graph**; steps run on platforms, on Nexora's agent, on Claude Code / Cursor / Cline inside a git worktree with diff review, on your subagents or on remote A2A agents. Finished plans become recipes; routing learns from past runs.
-- **Panels:** Platforms, Customize, Timeline, Settings (incl. Plan & Usage and Cost & Analytics), Workflow, Task Plan, Output.
-- **Nexora Cloud** sign-in for using models without your own key.
+- **Constellation:** the workspace as a graph of files and imports in its own tab; the files each running plan step changes light up, and everything importing them is ringed as the blast radius.
+- **Panels:** Platforms, Customize, Constellation, Timeline, Settings (incl. Plan & Usage and Cost & Analytics), Workflow, Task Plan, Output.
+- **Nexora Cloud** sign-in (GitHub, Google or email) for using models without your own key.
+- **In-app updates:** `product.json` points `updateUrl` at the website's feed, so VS Code's own updater downloads, checks and installs new releases; a status bar entry follows each step (`src/vs/workbench/contrib/update/browser/update.ts`).
 - **The engine supervisor:** it starts the local Nexora engine on `127.0.0.1`, generates its secrets in SecretStorage, and restarts it if it stops. It reuses a running engine only when `/api/health` names itself `nexora-engine`, so this repository and the engine are released together.
 
 The **engine** (planner, DAG executor, capability registry, memory, connectors, Customize, MCP sign-in) and the **documentation hub** live in [Atif1299/Nexora-IDE-Backend-Architecture](https://github.com/Atif1299/Nexora-IDE-Backend-Architecture). Start with its [`docs/README.md`](https://github.com/Atif1299/Nexora-IDE-Backend-Architecture/blob/ide-benchmarking/docs/README.md).
@@ -56,13 +58,13 @@ npm run compile
 | Plans, approval, execution, agents as steps, recipes, routing that learns | `architecture/orchestration-and-hitl.md` |
 | Platforms and MCP servers | `architecture/integrations-and-mcp.md` |
 | Settings reference | `reference/settings-and-env.md` |
-| Building a release | `guides/packaging-and-release.md` |
+| Building a release, the update feed | `guides/packaging-and-release.md` |
 
 Notes on the fork itself (build, structure) are in [`vscode-structure-notes.md`](vscode-structure-notes.md).
 
 ## Status
 
-A Final Year Project (COMSATS University Islamabad, Lahore Campus) growing into a product. FYP-2 freeze tag: `v1.0-fyp2`; current work: `ide-benchmarking`, released as `v0.1.x` with the engine (latest v0.1.6; v0.1.7 next). Installer: [nexora.visionscraft.tech/download](https://nexora.visionscraft.tech/download).
+A Final Year Project (COMSATS University Islamabad, Lahore Campus) growing into a product. FYP-2 freeze tag: `v1.0-fyp2`; current work: `ide-benchmarking`, released as `v0.1.x` with the engine (latest v0.1.10, 16 Nov 2026). Installer: [nexora.visionscraft.tech/download](https://nexora.visionscraft.tech/download).
 
 **Team:** Muhammad Atif (SP23-BAI-031), Talha Asif (SP23-BAI-042). **Supervisor:** Dr. Muhammad Shahid Bhatti.
 

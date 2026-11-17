@@ -3,7 +3,7 @@
 The built-in extension that is Nexora's IDE. Everything Nexora adds to VS Code lives here; the Python engine lives in the [engine repository](https://github.com/Atif1299/Nexora-IDE-Backend-Architecture).
 
 Architecture reference: engine repo `docs/architecture/ide-extension.md` and `docs/architecture/agent-loop.md`. User guide: `docs/guides/user-guide.md`.
-Verified against `Nexora@eede9bce039` (`ide-benchmarking`), 10 Nov 2026.
+Verified against `Nexora@035cec5fd93` (`ide-benchmarking`, v0.1.10), 17 Nov 2026.
 
 This extension and the engine ship together: the extension reuses a server on the engine port only when `/api/health` answers `"service": "nexora-engine"`, so a release must bundle an engine built from the same tag.
 
@@ -20,8 +20,9 @@ Source must stay ASCII-only (the fork's commit hygiene checks it).
 
 | Path | Responsibility |
 |---|---|
-| `extension.ts` | Activation: settings, key-header provider, OAuth/MCP handlers, inline completion, webview registration (gated on engine state), the Nexora status-bar and Command Center menu, engine start, WebSocket routing, ~30 commands |
+| `extension.ts` | Activation: settings, key-header provider, OAuth/MCP handlers, inline completion, webview registration (gated on engine state), the Nexora status-bar and Command Center menu, engine start, WebSocket routing, 33 commands |
 | `chatPanel.ts` | The chat surface: the chat list rail (New chat, Search chats, Recipes, Platforms, Customize, chats by date with rename and delete), five modes, model picker, `@mentions`, `/commands`, plan card (who runs each step, skills, past runs), the agent loop driver (`_runAgentLoopWithMode`), subagents (`_runSubagent`), hooks around prompts and tools, plan code and agent steps (`_handleWorkspaceTask`) |
+| `constellationPanel.ts` | Constellation: the workspace graph from `GET /api/memory/graph` in an editor tab, the running plan (`nexora.updateConstellationPlan`) and step events from the orchestration WebSocket lit on it |
 | `customizePanel.ts` | Customize: plugins, platforms, skills, agents (subagents, coding agents, remote A2A agents, routing that learns), recipes, commands, hooks, rules |
 | `platformPanel.ts` | Platforms panel: rows with where each works, Discover, platform detail with tool switches and Try, your MCP servers (add, import, approve) |
 | `workflowPanel.ts`, `taskTreeProvider.ts`, `outputPanel.ts` | Plan graph, task tree, step output |
@@ -35,7 +36,7 @@ Source must stay ASCII-only (the fork's commit hygiene checks it).
 | `services/cloudAccount.ts` | Nexora Cloud sign-in, status-bar credit, account menu |
 | `services/mcpServers.ts`, `services/platformUsage.ts` | Your MCP servers; where each platform works |
 | `services/tools/*` | Agent tools: read/list/ripgrep, write/patch with live editing and Keep / Undo, command runner and runtime probe, diagnostics, browser, platform calls with approval |
-| `services/agents/*` | Local coding agents: specs (`localAgents.ts`), runner, git worktree sandbox, plan-step adapter |
+| `services/agents/*` | Local coding agents: specs (`localAgents.ts`), runner, git worktree sandbox (offers `git init` in a folder that is not a repository), plan-step adapter |
 | `services/inlineCompletion.ts` | Inline suggestions: local cache, debounce, abort |
 | `services/browser.ts` | The Nexora Browser editor tab (Playwright screencast) |
 | `services/mcpConnect.ts`, `services/oauthConnect.ts` | Vendor MCP sign-in; GitHub/Vercel OAuth |
