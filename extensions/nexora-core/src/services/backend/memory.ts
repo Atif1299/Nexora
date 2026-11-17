@@ -343,6 +343,22 @@ export function createMemoryApi(transport: Transport) {
 				qs.set('workspace_id', workspaceId);
 			}
 			return await transport.getStrict(`/api/memory/timeline/diff?${qs.toString()}`);
+		},
+
+		/**
+		 * Delete one snapshot and its index file.
+		 *
+		 * The engine refuses the newest one with 409: it is the index chat and the
+		 * agent read from, so removing it would change what they can see.
+		 */
+		deleteTimelineSnapshot: async (
+			snapshotId: string,
+			workspaceId?: string
+		): Promise<{ deleted: string; workspace_id: string }> => {
+			const qs = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : '';
+			return await transport.delete(
+				`/api/memory/timeline/${encodeURIComponent(snapshotId)}${qs}`
+			);
 		}
 	};
 }

@@ -164,6 +164,16 @@ export function createOrchestrateApi(transport: Transport) {
 			return await transport.post(`/api/orchestrate/modify/${planId}`, modification);
 		},
 
+		/**
+		 * Ask again whether each step can run, after a platform has been connected.
+		 *
+		 * Readiness is decided when the plan is built, so a card that said
+		 * "Not ready - Connect github" kept saying it after GitHub was connected.
+		 */
+		recheckPlan: async (planId: string): Promise<PlanResponse> => {
+			return await transport.post(`/api/orchestrate/recheck/${planId}`, {});
+		},
+
 		estimatePlan: async (
 			request: string,
 			userId: string = 'default',

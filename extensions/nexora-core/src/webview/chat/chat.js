@@ -2212,7 +2212,7 @@
 		} else if (kind && kind !== 'read') {
 			meta.push(`<span class="nx-stepBadge nx-noUndo" title="${escapeHtml(task.undo_reason || '')}">can't be undone</span>`);
 		}
-		meta.push(`<span class="nx-stepCost">${task.cost_known === false ? 'cost ?' : '$' + Number(task.estimated_cost || 0).toFixed(4)}</span>`);
+		meta.push(`<span class="nx-stepCost" title="${escapeHtml(task.cost_known === false ? 'This route cannot say what a call costs' : planMoneyExact(task.estimated_cost, task.estimated_cost_range))}">${task.cost_known === false ? 'cost ?' : escapeHtml(planMoney(task.estimated_cost))}</span>`);
 		if (Array.isArray(task.skills) && task.skills.length) {
 			meta.push(`<span class="nx-stepSkills" title="Skills this step's agent loads">skills: ${task.skills.map(escapeHtml).join(', ')}</span>`);
 		}
@@ -2288,23 +2288,41 @@
 
 		const header = document.createElement('div');
 		header.className = 'nx-planHeader';
+		const exact = planMoneyExact(plan.estimated_cost, plan.estimated_cost_range);
+		const costHint = plan.estimated_cost_range
+			? `${exact} · code steps run the agent for several turns, so their cost is a range`
+			: exact;
+		const noUndo = irreversibleCount(plan.tasks);
 		header.innerHTML = `
 			<div class="nx-planTitle">Execution Plan</div>
 			<div class="nx-planMeta">
 				<span class="nx-planId">${plan.plan_id}</span>
-				<span class="nx-planCost" title="${plan.estimated_cost_range ? 'Code steps run the agent for several turns, so their cost is a range' : ''}">Est. $${(plan.estimated_cost || 0).toFixed(4)}${costRangeText(plan.estimated_cost_range)}</span>
+				<span class="nx-planCost" title="${escapeHtml(costHint)}">Est. ${escapeHtml(planMoney(plan.estimated_cost))}</span>
 			</div>
 		`;
 		card.appendChild(header);
 
-		if (Array.isArray(plan.cost_breakdown) && plan.cost_breakdown.length) {
+		// Said once, in words, instead of a red badge shouting on every step.
+		if (noUndo > 0) {
+			const warn = document.createElement('div');
+			warn.className = 'nx-planUndoNote';
+			warn.textContent = noUndo === 1
+				? '1 step changes something that cannot be undone.'
+				: `${noUndo} steps change things that cannot be undone.`;
+			card.appendChild(warn);
+		}
+
+		// Only steps that actually cost something: a column of "free" rows says nothing.
+		const priced = (Array.isArray(plan.cost_breakdown) ? plan.cost_breakdown : [])
+			.filter(item => Number(item.estimated_cost || 0) > 0);
+		if (priced.length) {
 			const breakdown = document.createElement('div');
 			breakdown.className = 'nx-costBreakdown';
 			breakdown.innerHTML = '<div class="nx-costBreakdownTitle">Cost breakdown</div>' +
-				plan.cost_breakdown.map(item => `
+				priced.map(item => `
 					<div class="nx-costRow">
-						<span>${escapeHtml(item.task || item.platform || 'task')} · ${escapeHtml(item.platform || '')}</span>
-						<span>$${(item.estimated_cost || 0).toFixed(4)}${costRangeText(item.estimated_cost_range)}</span>
+						<span>${escapeHtml(item.task || item.platform || 'task')} &middot; ${escapeHtml(item.platform || '')}</span>
+						<span title="${escapeHtml(planMoneyExact(item.estimated_cost, item.estimated_cost_range))}">${escapeHtml(planMoney(item.estimated_cost))}</span>
 					</div>
 				`).join('');
 			card.appendChild(breakdown);
@@ -2359,6 +2377,40 @@
 			return '';
 		}
 		return ` ($${Number(range[0]).toFixed(4)}\u2013$${Number(range[1]).toFixed(4)})`;
+	}
+
+	/**
+	 * Money as a person reads it.
+	 *
+	 * An estimate printed to four decimals, with a four-decimal range beside it,
+	 * reads as precision the figure does not have, and a column of $0.0000 rows
+	 * reads as broken. The exact number stays available in the tooltip.
+	 */
+	function planMoney(value) {
+		const amount = Number(value || 0);
+		if (!isFinite(amount) || amount <= 0) {
+			return 'free';
+		}
+		if (amount < 0.01) {
+			return '<$0.01';
+		}
+		return '$' + amount.toFixed(2);
+	}
+
+	/** The exact figures, for the tooltip. */
+	function planMoneyExact(value, range) {
+		return `$${Number(value || 0).toFixed(4)}${costRangeText(range)}`;
+	}
+
+	/** Steps that change something the engine cannot reverse. */
+	function irreversibleCount(tasks) {
+		if (!Array.isArray(tasks)) {
+			return 0;
+		}
+		return tasks.filter(task => {
+			const kind = task && task.effects && task.effects.kind;
+			return !task.undo_available && kind && kind !== 'read';
+		}).length;
 	}
 
 	function updateTaskStatus(taskId, status, error, cost) {

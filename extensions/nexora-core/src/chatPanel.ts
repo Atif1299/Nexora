@@ -22,7 +22,7 @@ import { LiveEditView } from './services/tools/liveEdit';
 import { agentEditHighlights } from './services/tools/editHighlights';
 import { getSettingsService } from './services/settingsService';
 import { oauthProviderLabel, onDidCompleteOAuth, startOAuthConnect, type OAuthProvider } from './services/oauthConnect';
-import { connectMcpServer, mcpServerLabel } from './services/mcpConnect';
+import { connectMcpServer, mcpServerLabel, onDidConnectMcpServer } from './services/mcpConnect';
 import {
 	getAgentFlag,
 	getAgentRunMode,
@@ -169,6 +169,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 		});
 		onDidCompleteOAuth(() => {
 			void this._checkAuthStatus();
+			// The card that sent them to sign in is still on screen saying "Not ready".
+			void this._recheckWaitingPlan();
+		});
+		// The card's other button: a step whose route is an MCP server rather than OAuth.
+		onDidConnectMcpServer(() => {
+			void this._recheckWaitingPlan();
 		});
 		context.subscriptions.push(
 			vscode.workspace.onDidChangeConfiguration((e) => {
@@ -2709,6 +2715,32 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 			void vscode.window.showInformationMessage(`Install the ${name} command-line tool, then run the step again.`);
 		} else if (kind === 'open-folder') {
 			await vscode.commands.executeCommand('workbench.action.files.openFolder');
+		}
+	}
+
+	/**
+	 * Ask the engine again whether the waiting plan's steps can run, and redraw the card.
+	 *
+	 * Readiness is settled when a plan is built. Someone reads "Not ready - Connect
+	 * github", connects GitHub, and comes back to a card that still says Not ready,
+	 * with Approve still out of reach, because nothing had asked again. This runs
+	 * whenever a sign-in finishes, which is exactly when the answer can have changed.
+	 */
+	private async _recheckWaitingPlan(): Promise<void> {
+		const planId = this._currentPlanId;
+		if (!planId || !this._hasChatSurface()) {
+			return;
+		}
+		try {
+			const response = await getBackendClient().recheckPlan(planId);
+			const plan = response?.plan;
+			if (!plan || plan.plan_id !== this._currentPlanId) {
+				return;
+			}
+			this._postToWebviews({ type: 'showPlanApproval', plan });
+			void vscode.commands.executeCommand('nexora.updateWorkflowPlan', plan);
+		} catch {
+			// The plan was approved, cancelled or has aged out. Nothing to redraw.
 		}
 	}
 

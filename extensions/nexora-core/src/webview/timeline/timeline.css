@@ -234,3 +234,57 @@ h1
 		grid-template-columns: 1fr;
 	}
 }
+/* Snapshot rows
+ *
+ * Delete sits beside the node rather than inside it: a button cannot be nested
+ * in another button, and the row itself has to stay clickable for selection.
+ * It stays out of the way until the row is hovered or the button is focused,
+ * so the rail reads as a list of moments rather than a list of controls.
+ */
+.nx-nodeRow
+{
+	display: flex;
+	align-items: stretch;
+	gap: 4px;
+}
+
+.nx-nodeRow > .nx-node
+{
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.nx-nodeDelete
+{
+	flex: 0 0 auto;
+	align-self: center;
+	display: grid;
+	place-items: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	border: none;
+	border-radius: 4px;
+	background: none;
+	color: var(--nx-muted);
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity var(--nx-transition, 100ms);
+}
+
+.nx-nodeRow:hover .nx-nodeDelete,
+.nx-nodeDelete:focus-visible
+{
+	opacity: 1;
+}
+
+.nx-nodeDelete:hover
+{
+	background: var(--nx-surface-hover);
+	color: var(--nx-err);
+}
+
+@media (prefers-reduced-motion: reduce)
+{
+	.nx-nodeDelete { transition: none; }
+}

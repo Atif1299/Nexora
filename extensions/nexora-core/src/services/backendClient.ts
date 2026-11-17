@@ -794,6 +794,11 @@ export class BackendClient {
 		return createOrchestrateApi(this.transport).modifyPlan(planId, modification);
 	}
 
+	/** Recompute a waiting plan's readiness after a platform sign-in. */
+	async recheckPlan(planId: string): Promise<any> {
+		return createOrchestrateApi(this.transport).recheckPlan(planId);
+	}
+
 	/**
 	 * List all plans.
 	 * 
@@ -927,6 +932,11 @@ export class BackendClient {
 
 	async getTimeline(workspaceId: string): Promise<TimelineResponse> {
 		return createMemoryApi(this.transport).getTimeline(workspaceId);
+	}
+
+	/** Delete one snapshot; the engine refuses the current one. */
+	async deleteTimelineSnapshot(snapshotId: string, workspaceId?: string): Promise<{ deleted: string; workspace_id: string }> {
+		return createMemoryApi(this.transport).deleteTimelineSnapshot(snapshotId, workspaceId);
 	}
 
 	async getTimelineSnapshot(snapshotId: string, workspaceId?: string): Promise<TimelineEntry> {

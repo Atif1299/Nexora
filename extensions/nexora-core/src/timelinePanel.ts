@@ -59,6 +59,8 @@ export class TimelinePanelProvider implements vscode.WebviewViewProvider {
 					await this._pushState();
 				} else if (msg.type === 'selectSnapshot') {
 					await this._pushDetail(String(msg.id || ''));
+				} else if (msg.type === 'deleteSnapshot') {
+					await this._deleteSnapshot(String(msg.id || ''));
 				}
 			}),
 			view.onDidChangeVisibility(() => {
@@ -130,6 +132,38 @@ export class TimelinePanelProvider implements vscode.WebviewViewProvider {
 				}
 			});
 		}
+	}
+
+	/**
+	 * Delete one snapshot, after asking.
+	 *
+	 * A snapshot is a real index file on disk, and deleting it cannot be undone,
+	 * so this confirms first and names what goes. The engine refuses the current
+	 * one with 409 - it is what chat and the agent read from - and that reason is
+	 * shown as it comes back rather than being guessed at here.
+	 */
+	private async _deleteSnapshot(snapshotId: string): Promise<void> {
+		if (!snapshotId) {
+			return;
+		}
+		const entry = this._snapshots.find(s => s.id === snapshotId);
+		const when = entry?.summary || snapshotId;
+		const answer = await vscode.window.showWarningMessage(
+			`Delete the snapshot "${when}"?`,
+			{ modal: true, detail: 'Its index file is removed from disk. This cannot be undone.' },
+			'Delete'
+		);
+		if (answer !== 'Delete') {
+			return;
+		}
+		try {
+			await getBackendClient().deleteTimelineSnapshot(snapshotId, this._workspaceId);
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			void vscode.window.showWarningMessage(`Could not delete the snapshot. ${reason}`);
+		}
+		// Either way the list is re-read, so the rail always shows what is really there.
+		await this._pushState();
 	}
 
 	private async _pushDetail(snapshotId: string): Promise<void> {
