@@ -5,6 +5,7 @@
   "version": "1.0.0",
   "publisher": "nexora-team",
   "license": "MIT",
+  "icon": "media/nexora-logo.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -34,11 +35,6 @@
           "id": "nexora-sidebar",
           "title": "Nexora AI",
           "icon": "media/nexora-icon.svg"
-        },
-        {
-          "id": "nexora-sessions",
-          "title": "Nexora Sessions",
-          "icon": "media/icon-timeline.svg"
         }
       ],
       "panel": [
@@ -55,14 +51,6 @@
           "type": "webview",
           "id": "nexora.chatPanel",
           "name": "Chat",
-          "visibility": "visible"
-        }
-      ],
-      "nexora-sessions": [
-        {
-          "type": "webview",
-          "id": "nexora.sessionsPanel",
-          "name": "Nexora Sessions",
           "visibility": "visible"
         }
       ],
@@ -142,9 +130,9 @@
       },
       {
         "command": "nexora.toggleSessions",
-        "title": "Toggle Nexora Sessions",
+        "title": "Toggle Chat List",
         "category": "Nexora",
-        "icon": "$(history)"
+        "icon": "$(layout-sidebar-right)"
       },
       {
         "command": "nexora.openBrowser",
@@ -164,6 +152,18 @@
         "icon": "$(plug)"
       },
       {
+        "command": "nexora.openCustomize",
+        "title": "Customize",
+        "category": "Nexora",
+        "icon": "$(extensions)"
+      },
+      {
+        "command": "nexora.openConstellation",
+        "title": "Constellation",
+        "category": "Nexora",
+        "icon": "$(circuit-board)"
+      },
+      {
         "command": "nexora.refreshPlatforms",
         "title": "Refresh Platforms",
         "category": "Nexora",
@@ -177,7 +177,8 @@
       {
         "command": "nexora.showEngineOutput",
         "title": "Show Engine Output",
-        "category": "Nexora"
+        "category": "Nexora",
+        "icon": "$(output)"
       },
       {
         "command": "nexora.decomposeRequest",
@@ -214,8 +215,9 @@
       },
       {
         "command": "nexora.newSession",
-        "title": "New Chat Session",
-        "category": "Nexora"
+        "title": "New Chat",
+        "category": "Nexora",
+        "icon": "$(add)"
       },
       {
         "command": "nexora.cancelOperation",
@@ -226,10 +228,7 @@
         "command": "nexora.openSettings",
         "title": "Settings",
         "category": "Nexora",
-        "icon": {
-          "light": "media/tab/light/settings.svg",
-          "dark": "media/tab/dark/settings.svg"
-        }
+        "icon": "$(settings-gear)"
       },
       {
         "command": "nexora.showKeyboardShortcuts",
@@ -248,28 +247,10 @@
         "icon": "$(graph)"
       },
       {
-        "command": "nexora.refreshAnalytics",
-        "title": "Refresh Analytics",
-        "category": "Nexora",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "nexora.useTemplate",
-        "title": "Use Template",
-        "category": "Nexora",
-        "icon": "$(notebook-template)"
-      },
-      {
         "command": "nexora.openTemplates",
-        "title": "Templates",
+        "title": "Recipes",
         "category": "Nexora",
-        "icon": "$(notebook-template)"
-      },
-      {
-        "command": "nexora.refreshTemplates",
-        "title": "Refresh Templates",
-        "category": "Nexora",
-        "icon": "$(refresh)"
+        "icon": "$(play-circle)"
       },
       {
         "command": "nexora.openTimeline",
@@ -298,34 +279,76 @@
         "command": "nexora.cloudSignOut",
         "title": "Sign Out of Nexora Cloud",
         "category": "Nexora"
+      },
+      {
+        "command": "nexora.cloudOpenDashboard",
+        "title": "Open Nexora Cloud Dashboard",
+        "category": "Nexora"
+      },
+      {
+        "command": "nexora.quickMenu",
+        "title": "Nexora Menu",
+        "category": "Nexora",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "nexora.undoPlatformAction",
+        "title": "Undo a Platform Action",
+        "category": "Nexora",
+        "icon": "$(discard)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "nexora.openChatInEditor",
+          "command": "nexora.newSession",
           "when": "view == nexora.chatPanel",
           "group": "navigation@0"
         },
         {
-          "command": "nexora.toggleChatSidebar",
-          "when": "view == nexora.chatPanel",
-          "group": "navigation@0"
-        },
-        {
-          "command": "nexora.openSettings",
+          "command": "nexora.toggleSessions",
           "when": "view == nexora.chatPanel",
           "group": "navigation@1"
         },
         {
-          "command": "nexora.openBrowser",
+          "command": "nexora.openCustomize",
           "when": "view == nexora.chatPanel",
           "group": "navigation@2"
         },
         {
-          "command": "nexora.useTemplate",
+          "command": "nexora.openSettings",
           "when": "view == nexora.chatPanel",
-          "group": "navigation@3"
+          "group": "1_open@1"
+        },
+        {
+          "command": "nexora.openTemplates",
+          "when": "view == nexora.chatPanel",
+          "group": "1_open@2"
+        },
+        {
+          "command": "nexora.openPlatformBrowser",
+          "when": "view == nexora.chatPanel",
+          "group": "1_open@3"
+        },
+        {
+          "command": "nexora.openBrowser",
+          "when": "view == nexora.chatPanel",
+          "group": "2_view@1"
+        },
+        {
+          "command": "nexora.showEngineOutput",
+          "when": "view == nexora.chatPanel",
+          "group": "2_view@3"
+        },
+        {
+          "command": "nexora.openChatInEditor",
+          "when": "view == nexora.chatPanel",
+          "group": "2_view@0"
+        },
+        {
+          "command": "nexora.toggleChatSidebar",
+          "when": "view == nexora.chatPanel",
+          "group": "2_view@2"
         },
         {
           "command": "nexora.decomposeRequest",
@@ -346,18 +369,63 @@
           "command": "nexora.refreshTimeline",
           "when": "view == nexora.timeline",
           "group": "navigation"
+        },
+        {
+          "command": "nexora.undoPlatformAction",
+          "when": "view == nexora.chatPanel",
+          "group": "3_undo@1"
         }
       ],
       "editor/title": [
         {
+          "command": "nexora.newSession",
+          "when": "activeWebviewPanelId == nexora.chatEditor",
+          "group": "navigation@0"
+        },
+        {
           "command": "nexora.toggleSessions",
-          "group": "navigation@0",
-          "when": "activeWebviewPanelId == nexora.chatEditor"
+          "when": "activeWebviewPanelId == nexora.chatEditor",
+          "group": "navigation@1"
+        },
+        {
+          "command": "nexora.openCustomize",
+          "when": "activeWebviewPanelId == nexora.chatEditor",
+          "group": "navigation@2"
+        },
+        {
+          "command": "nexora.openSettings",
+          "when": "activeWebviewPanelId == nexora.chatEditor",
+          "group": "1_open@1"
+        },
+        {
+          "command": "nexora.openTemplates",
+          "when": "activeWebviewPanelId == nexora.chatEditor",
+          "group": "1_open@2"
+        },
+        {
+          "command": "nexora.openPlatformBrowser",
+          "when": "activeWebviewPanelId == nexora.chatEditor",
+          "group": "1_open@3"
+        },
+        {
+          "command": "nexora.openBrowser",
+          "when": "activeWebviewPanelId == nexora.chatEditor",
+          "group": "2_view@1"
+        },
+        {
+          "command": "nexora.showEngineOutput",
+          "when": "activeWebviewPanelId == nexora.chatEditor",
+          "group": "2_view@3"
+        },
+        {
+          "command": "nexora.undoPlatformAction",
+          "when": "activeWebviewPanelId == nexora.chatEditor",
+          "group": "3_undo@1"
         }
       ],
       "commandCenter": [
         {
-          "command": "nexora.toggleSessions",
+          "command": "nexora.quickMenu",
           "group": "navigation@0"
         }
       ]
@@ -514,9 +582,10 @@
             10,
             15,
             25,
-            40
+            50,
+            100
           ],
-          "default": 25,
+          "default": 50,
           "description": "Maximum LLM turns in the Ask/Agent loop before the agent stops."
         },
         "nexora.agent.includeOpenEditors": {
@@ -532,7 +601,7 @@
         "nexora.agent.inlineDiffs": {
           "type": "boolean",
           "default": true,
-          "description": "When Auto-edit applies files, open a non-blocking diff preview. Ask mode still waits for Accept/Reject."
+          "description": "After the agent edits a file, mark the changed lines in the editor (green added, red removed) with Keep / Undo. The marks clear when you send the next message. Ask mode still waits for Accept/Reject."
         },
         "nexora.agent.autoFormat": {
           "type": "boolean",
@@ -547,7 +616,26 @@
         "nexora.agent.autoCloseTerminal": {
           "type": "boolean",
           "default": true,
-          "description": "Close the Nexora Agent terminal shortly after a command finishes."
+          "description": "Close the Nexora Agent tab shortly after a command finishes."
+        },
+        "nexora.agent.shell": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "bash",
+            "pwsh",
+            "powershell",
+            "cmd"
+          ],
+          "enumDescriptions": [
+            "Git Bash on Windows when installed, then PowerShell 7, then Windows PowerShell; your login shell elsewhere",
+            "Git Bash on Windows; bash elsewhere",
+            "PowerShell 7",
+            "Windows PowerShell 5.1",
+            "cmd.exe (the folder is not tracked between commands)"
+          ],
+          "default": "auto",
+          "description": "Shell the agent runs commands in."
         },
         "nexora.chat.submitWithCtrlEnter": {
           "type": "boolean",
@@ -567,12 +655,17 @@
         "nexora.browser.chromePath": {
           "type": "string",
           "default": "",
-          "description": "Optional path to chrome.exe. Used when Chrome is not found in the default install locations."
+          "description": "Optional path to chrome.exe or msedge.exe. Without it, Nexora uses Chrome, or Microsoft Edge when Chrome is not installed."
         },
         "nexora.cloud.url": {
           "type": "string",
           "default": "https://nexora-gateway-4idrhaffca-ew.a.run.app",
           "description": "Nexora Cloud gateway: sign-in, credit and models for users without their own API keys."
+        },
+        "nexora.cloud.webUrl": {
+          "type": "string",
+          "default": "https://nexora.visionscraft.tech",
+          "description": "Nexora website: where you sign in to Nexora Cloud and manage your plan, credit and devices."
         }
       }
     }
@@ -586,7 +679,8 @@
     "@types/node": "^18.x",
     "@types/vscode": "^1.85.0",
     "@types/ws": "^8.18.1",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "@vscode/codicons": "0.0.36"
   },
   "dependencies": {
     "playwright-core": "^1.56.1",

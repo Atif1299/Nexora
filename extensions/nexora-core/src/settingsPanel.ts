@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import { getSettingsWebviewHtml } from './webview/settings';
 import { acquireEditorPanel, gateEditorPanel } from './services/editorPage';
 import { getSettingsService, type ApiKeyProvider, type NexoraPreferences } from './services/settingsService';
+import type { CloudAccount, CloudAccountInfo, DashboardPage } from './services/cloudAccount';
 import { getAgentUiSettings, type AgentRunMode } from './services/agentRunMode';
 import { getBrowserUiSettings } from './services/browser';
 import { getBackendClient } from './services/backendClient';
@@ -15,7 +16,7 @@ import { oauthProviderLabel, onDidCompleteOAuth, startOAuthConnect } from './ser
 import type { SaasConnector } from './services/backend/auth';
 import type { McpServerRow } from './services/backend/mcp';
 import type { ModelCatalog } from './services/backend/models';
-import type { ProjectFactsResponse, ProjectRulesResponse } from './services/backend/memory';
+import type { ProjectFactsResponse } from './services/backend/memory';
 import { currentWorkspaceId } from './services/workspaceId';
 import {
 	getCachedCapabilities,
@@ -24,8 +25,8 @@ import {
 	type CapabilitiesReport
 } from './services/backend/capabilities';
 
-const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'gemini', 'openrouter'];
-const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0', 'elevenlabs', 'tavily'] as const;
+const LLM_PROVIDERS: ApiKeyProvider[] = ['openai', 'anthropic', 'gemini', 'openrouter', 'groq', 'mistral'];
+const SAAS_PROVIDERS = ['supabase_url', 'supabase_key', 'stripe', 'v0', 'elevenlabs', 'tavily', 'perplexity'] as const;
 const OAUTH_APP_PROVIDERS = [
 	'github_client_id',
 	'github_client_secret',
@@ -66,7 +67,8 @@ export class SettingsPanelProvider {
 
 	constructor(
 		private readonly _extensionUri: vscode.Uri,
-		private readonly _context: vscode.ExtensionContext
+		private readonly _context: vscode.ExtensionContext,
+		private readonly _cloud?: CloudAccount
 	) { }
 
 	public async open(section?: string): Promise<void> {
@@ -131,6 +133,20 @@ export class SettingsPanelProvider {
 					case 'refreshStatus':
 						await this._pushState(msg.type === 'refreshStatus');
 						this._revealSection(this._pendingSection);
+						await this._postAccount();
+						void this._cloud?.refresh();
+						break;
+					case 'cloudSignIn':
+						await vscode.commands.executeCommand('nexora.cloudSignIn');
+						break;
+					case 'cloudSignOut':
+						await this._cloud?.signOut();
+						break;
+					case 'cloudRefresh':
+						await this._cloud?.refresh();
+						break;
+					case 'openDashboard':
+						await this._openDashboard(msg.page, msg.query);
 						break;
 					case 'refreshAnalytics':
 						await this._pushState(true);
@@ -200,6 +216,9 @@ export class SettingsPanelProvider {
 					case 'forgetFact':
 						await this._forgetFact(msg.factId);
 						break;
+					case 'openCustomize':
+						await vscode.commands.executeCommand('nexora.openCustomize', typeof msg.section === 'string' ? msg.section : undefined);
+						break;
 				}
 			}),
 			panel.onDidChangeViewState(() => {
@@ -213,6 +232,8 @@ export class SettingsPanelProvider {
 				}
 				this._view.postMessage({ type: 'updateState', capabilities: capabilities || null });
 			}),
+			// Signed in or out, a purchase seen on focus, or the 5-minute refresh: redraw Account.
+			...(this._cloud ? [this._cloud.onDidChangeAccount((account) => void this._postAccount(account))] : []),
 			onDidCompleteOAuth((provider) => {
 				this._view?.postMessage({
 					type: 'oauthResult',
@@ -233,6 +254,26 @@ export class SettingsPanelProvider {
 				}
 			})
 		];
+	}
+
+	private async _postAccount(account: CloudAccountInfo | undefined = this._cloud?.cached()): Promise<void> {
+		if (!this._view || !this._cloud) {
+			return;
+		}
+		const signedIn = Boolean(await this._cloud.token());
+		void this._view.postMessage({ type: 'cloudAccount', account: account || null, signedIn });
+		// Plan & Usage: the last 30 days by day and by model, sent after the account so the page fills at once.
+		if (account) {
+			const usage = await this._cloud.usage(30);
+			void this._view?.postMessage({ type: 'cloudUsage', usage: usage || null });
+		}
+	}
+
+	private async _openDashboard(page: unknown, query: unknown): Promise<void> {
+		const pages: DashboardPage[] = ['', 'billing', 'usage', 'devices', 'settings'];
+		const target = pages.find((candidate) => candidate === page) ?? '';
+		const search = query === 'upgrade=pro' ? 'upgrade=pro' : '';
+		await this._cloud?.openDashboard(target, search);
 	}
 
 	private _revealSection(section?: string): void {
@@ -331,6 +372,7 @@ export class SettingsPanelProvider {
 		configured['v0'] = !!authStatus.v0_configured;
 		configured['elevenlabs'] = !!authStatus.elevenlabs_configured;
 		configured['tavily'] = !!authStatus.tavily_configured;
+		configured['perplexity'] = !!authStatus.perplexity_configured;
 		configured['github_client_id'] = !!authStatus.github_oauth_configured;
 		configured['github_client_secret'] = !!authStatus.github_oauth_configured;
 		configured['vercel_client_id'] = !!authStatus.vercel_oauth_configured;
@@ -374,23 +416,14 @@ export class SettingsPanelProvider {
 	 * transcript uses. With no folder open there is no project to remember
 	 * about, so the section says that rather than showing an empty list.
 	 */
-	private async _loadFacts(): Promise<ProjectFactsResponse & {
-		has_workspace: boolean;
-		rules?: ProjectRulesResponse;
-		rules_enabled?: boolean;
-	}> {
+	private async _loadFacts(): Promise<ProjectFactsResponse & { has_workspace: boolean }> {
 		const workspaceId = currentWorkspaceId();
 		const workspacePath = this._workspacePath();
 		if (!workspaceId || !workspacePath) {
 			return { workspace_id: '', facts: [], total: 0, injected: '', has_workspace: false };
 		}
-		const client = getBackendClient();
-		const [facts, rules] = await Promise.all([
-			client.getProjectFacts(workspaceId),
-			client.getProjectRules(workspacePath)
-		]);
-		const rulesEnabled = vscode.workspace.getConfiguration('nexora.agent').get<boolean>('projectRules', true);
-		return { ...facts, has_workspace: true, rules, rules_enabled: rulesEnabled };
+		const facts = await getBackendClient().getProjectFacts(workspaceId);
+		return { ...facts, has_workspace: true };
 	}
 
 	private async _pushFacts(): Promise<void> {
@@ -519,7 +552,7 @@ export class SettingsPanelProvider {
 		const cfg = vscode.workspace.getConfiguration('nexora');
 		if (key === 'agent.maxTurns') {
 			const n = Number(value);
-			if (n === 10 || n === 15 || n === 25 || n === 40) {
+			if (n === 10 || n === 15 || n === 25 || n === 50 || n === 100) {
 				await cfg.update('agent.maxTurns', n, vscode.ConfigurationTarget.Global);
 			} else {
 				return;
@@ -756,6 +789,7 @@ export class SettingsPanelProvider {
 			'v0': 'V0_API_KEY',
 			'elevenlabs': 'ELEVENLABS_API_KEY',
 			'tavily': 'TAVILY_API_KEY',
+			'perplexity': 'PERPLEXITY_API_KEY',
 			'github_client_id': 'GITHUB_CLIENT_ID',
 			'github_client_secret': 'GITHUB_CLIENT_SECRET',
 			'vercel_client_id': 'VERCEL_CLIENT_ID',

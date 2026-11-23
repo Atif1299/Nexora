@@ -6,6 +6,12 @@
 import type { Transport } from './transport';
 
 /**
+ * Connect may start a local server, whose first start downloads it (npx, uvx): the engine
+ * waits up to MCP_STDIO_START_TIMEOUT_SECONDS (120 s), so the IDE waits a little longer.
+ */
+export const MCP_CONNECT_TIMEOUT_MS = 150_000;
+
+/**
  * Client for the engine's generic remote-MCP connect endpoints.
  *
  * The engine decides how each server is authorized; the IDE only reacts to the
@@ -34,6 +40,8 @@ export interface McpConnectRow {
 	endpoint: string;
 	connected: boolean;
 	has_client_id: boolean;
+	/** 'http' (hosted, signs in) or 'stdio' (runs on this PC). */
+	transport?: string;
 }
 
 export function createMcpConnectApi(transport: Transport) {
@@ -59,7 +67,7 @@ export function createMcpConnectApi(transport: Transport) {
 			return await transport.post(`/api/mcp/connect/${encodeURIComponent(serverId)}`, {
 				user_id: userId,
 				return_uri: returnUri
-			});
+			}, MCP_CONNECT_TIMEOUT_MS);
 		},
 
 		/** Ask once whether a device sign-in has been approved. */

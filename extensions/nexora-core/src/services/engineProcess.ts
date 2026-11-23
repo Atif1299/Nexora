@@ -25,7 +25,9 @@ const DEV_PYTHON = path.join(DEV_BACKEND_DIR, '.venv', process.platform === 'win
 const SECRET_ENCRYPTION_KEY = 'nexora.engine.TOKEN_ENCRYPTION_KEY';
 const SECRET_LOCAL_TOKEN = 'nexora.engine.NEXORA_LOCAL_TOKEN';
 
-const HEALTH_TIMEOUT_MS = 60_000;
+// A live engine that is not answering yet is "starting" for this long. The first start of an install
+// can take minutes while Windows Defender scans the unsigned engine; a crash restarts it at once instead.
+const HEALTH_TIMEOUT_MS = 180_000;
 const HEALTH_POLL_MS = 500;
 const RESTART_BACKOFF_MIN_MS = 1_000;
 const RESTART_BACKOFF_MAX_MS = 30_000;
@@ -250,8 +252,9 @@ async function probeHealth(baseUrl: string, localToken: string, timeoutMs: numbe
 		if (!response.ok) {
 			return false;
 		}
-		const body = await response.json() as { status?: string };
-		return body?.status === 'ok';
+		// Another app on this port can answer ok too; only a Nexora engine names itself.
+		const body = await response.json() as { status?: string; service?: string };
+		return body?.status === 'ok' && body.service === 'nexora-engine';
 	} catch {
 		return false;
 	} finally {

@@ -25,11 +25,14 @@ export interface ProjectFactsResponse {
 
 /** GET /api/memory/rules: the rule files the agent adds to its prompt. */
 export interface ProjectRulesResponse {
-	files: Array<{ path: string; chars: number; truncated: boolean }>;
+	/** personal: the user's own rules file in NEXORA_HOME, used in every project. */
+	files: Array<{ path: string; chars: number; truncated: boolean; personal?: boolean }>;
 	/** Found but over the budget, so not sent. */
 	omitted: string[];
 	total_chars: number;
 	max_chars: number;
+	/** Where the personal rules file lives (it may not exist yet); '' if unknown. */
+	personal_path: string;
 }
 
 export interface MemorySuggestion {
@@ -111,8 +114,53 @@ export interface TimelineDiff {
 	modified_status: string;
 }
 
+/** GET /api/memory/graph: the workspace as a graph, for the Constellation page. */
+export interface CodeGraphNode {
+	/** Workspace-relative POSIX path. The same id a plan step reports changing. */
+	id: string;
+	label: string;
+	dir: string;
+	/** Top-level folder, or "root" for a file at the top. The page colours by this. */
+	group: string;
+	language: string;
+	size_bytes: number;
+	key: boolean;
+}
+
+export interface CodeGraphFolder {
+	id: string;
+	label: string;
+	parent: string | null;
+	group: string;
+	files: number;
+}
+
+export interface CodeGraphEdge {
+	source: string;
+	target: string;
+	kind: 'imports';
+}
+
+export interface CodeGraph {
+	workspace_id: string;
+	workspace_path: string;
+	nodes: CodeGraphNode[];
+	folders: CodeGraphFolder[];
+	edges: CodeGraphEdge[];
+	/** True when the walk stopped at max_files, so the page can say it is partial. */
+	truncated: boolean;
+	counts: { files: number; folders: number; edges: number };
+}
+
 export function createMemoryApi(transport: Transport) {
 	return {
+		getCodeGraph: async (workspacePath: string, maxFiles?: number): Promise<CodeGraph> => {
+			const limit = maxFiles ? `&max_files=${encodeURIComponent(String(maxFiles))}` : '';
+			return await transport.get(
+				`/api/memory/graph?workspace_path=${encodeURIComponent(workspacePath)}${limit}`
+			);
+		},
+
 		indexWorkspace: async (workspacePath: string, timeoutMs?: number): Promise<any> => {
 			try {
 				return await transport.post('/api/memory/index', { workspace_path: workspacePath }, timeoutMs);
@@ -170,19 +218,20 @@ export function createMemoryApi(transport: Transport) {
 			}
 		},
 
-		getRules: async (workspacePath: string): Promise<ProjectRulesResponse> => {
+		/** Without a folder, only the personal rules come back. */
+		getRules: async (workspacePath?: string): Promise<ProjectRulesResponse> => {
 			try {
-				const response = await transport.get(
-					`/api/memory/rules?workspace_path=${encodeURIComponent(workspacePath)}`
-				);
+				const query = workspacePath ? `?workspace_path=${encodeURIComponent(workspacePath)}` : '';
+				const response = await transport.get(`/api/memory/rules${query}`);
 				return {
 					files: Array.isArray(response?.files) ? response.files : [],
 					omitted: Array.isArray(response?.omitted) ? response.omitted : [],
 					total_chars: Number(response?.total_chars) || 0,
-					max_chars: Number(response?.max_chars) || 0
+					max_chars: Number(response?.max_chars) || 0,
+					personal_path: typeof response?.personal_path === 'string' ? response.personal_path : ''
 				};
 			} catch {
-				return { files: [], omitted: [], total_chars: 0, max_chars: 0 };
+				return { files: [], omitted: [], total_chars: 0, max_chars: 0, personal_path: '' };
 			}
 		},
 
@@ -294,6 +343,22 @@ export function createMemoryApi(transport: Transport) {
 				qs.set('workspace_id', workspaceId);
 			}
 			return await transport.getStrict(`/api/memory/timeline/diff?${qs.toString()}`);
+		},
+
+		/**
+		 * Delete one snapshot and its index file.
+		 *
+		 * The engine refuses the newest one with 409: it is the index chat and the
+		 * agent read from, so removing it would change what they can see.
+		 */
+		deleteTimelineSnapshot: async (
+			snapshotId: string,
+			workspaceId?: string
+		): Promise<{ deleted: string; workspace_id: string }> => {
+			const qs = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : '';
+			return await transport.delete(
+				`/api/memory/timeline/${encodeURIComponent(snapshotId)}${qs}`
+			);
 		}
 	};
 }

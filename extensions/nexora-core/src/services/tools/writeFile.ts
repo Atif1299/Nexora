@@ -6,14 +6,16 @@
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import * as vscode from 'vscode';
-import { getAgentFlag, shouldConfirmFileEdits } from '../agentRunMode';
+import { getAgentFlag } from '../agentRunMode';
 import type { ToolResult } from './executor';
 import { confirmOrPreviewDiff } from './diffProvider';
 import { agentCheckpoints } from '../checkpoints';
+import { readCurrentText, writeContent } from './documentWrite';
+import { agentEditHighlights } from './editHighlights';
 
 const SKIP_PATTERNS = ['.env', '.pem', 'credentials', 'secret', '.key', 'node_modules', '.git'];
 
-function isPathSafe(workspaceRoot: string, filePath: string): boolean {
+export function isPathSafe(workspaceRoot: string, filePath: string): boolean {
 	const resolved = path.resolve(workspaceRoot, filePath);
 	const normalizedRoot = path.resolve(workspaceRoot);
 
@@ -24,7 +26,7 @@ function isPathSafe(workspaceRoot: string, filePath: string): boolean {
 	return resolved.startsWith(normalizedRoot + path.sep) || resolved === normalizedRoot;
 }
 
-function isSensitivePath(filePath: string): boolean {
+export function isSensitivePath(filePath: string): boolean {
 	const lower = filePath.toLowerCase();
 	return SKIP_PATTERNS.some(p => lower.includes(p));
 }
@@ -75,7 +77,7 @@ export async function writeFileTool(
 
 	const fullPath = path.resolve(workspaceRoot, filePath);
 	const isNewFile = !await fs.access(fullPath).then(() => true).catch(() => false);
-	const originalContent = isNewFile ? '' : await fs.readFile(fullPath, 'utf8').catch(() => '');
+	const originalContent = isNewFile ? '' : await readCurrentText(fullPath).catch(() => '');
 
 	const accepted = await confirmOrPreviewDiff({
 		filePath,
@@ -94,18 +96,9 @@ export async function writeFileTool(
 
 	try {
 		await agentCheckpoints.recordBeforeWrite(fullPath);
-
-		// Ensure parent directory exists
-		const dir = path.dirname(fullPath);
-		await fs.mkdir(dir, { recursive: true });
-
-		// Write file
-		await fs.writeFile(fullPath, content, 'utf8');
+		await writeContent(fullPath, content);
 		await formatAfterWrite(fullPath);
-
-		if (requireConfirmation && !shouldConfirmFileEdits()) {
-			void vscode.window.showInformationMessage(`Applied edit to ${filePath}`);
-		}
+		await agentEditHighlights.recordEdit(fullPath, originalContent, !isNewFile);
 
 		return {
 			success: true,

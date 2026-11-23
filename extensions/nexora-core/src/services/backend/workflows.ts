@@ -18,15 +18,18 @@ export interface TemplateParameter {
 	choices?: string[];
 }
 
+/** One step of a template (a recipe): a capability with its inputs, as the engine stores it. */
 export interface TemplateTask {
 	key: string;
 	name: string;
 	description: string;
-	platform: string;
-	operation: string;
-	params: Record<string, unknown>;
+	capability: string;
+	inputs: Record<string, unknown>;
 	depends_on: string[];
 	when?: string;
+	needs_input?: string[];
+	/** Skills a code or agent step loads (Phase 5). */
+	skills?: string[];
 }
 
 export interface WorkflowTemplate {
@@ -37,7 +40,8 @@ export interface WorkflowTemplate {
 	version: number;
 	parameters: TemplateParameter[];
 	tasks: TemplateTask[];
-	source: 'builtin' | 'user' | 'imported';
+	/** plugin: shipped in a turned-on plugin's recipes/ folder; metadata.plugin names it. */
+	source: 'builtin' | 'user' | 'imported' | 'plugin';
 	metadata: Record<string, unknown>;
 }
 

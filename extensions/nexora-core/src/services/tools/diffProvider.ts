@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { getAgentFlag, shouldConfirmFileEdits } from '../agentRunMode';
+import { shouldConfirmFileEdits } from '../agentRunMode';
 
 export const NEXORA_DIFF_SCHEME = 'nexora-diff';
 
@@ -44,7 +44,7 @@ function toDiffPath(filePath: string): string {
 	return posix.startsWith('/') ? posix : `/${posix}`;
 }
 
-function makeDiffUri(filePath: string, side: 'original' | 'proposed'): vscode.Uri {
+export function makeDiffUri(filePath: string, side: 'original' | 'proposed'): vscode.Uri {
 	diffSeq += 1;
 	return vscode.Uri.from({
 		scheme: NEXORA_DIFF_SCHEME,
@@ -53,7 +53,7 @@ function makeDiffUri(filePath: string, side: 'original' | 'proposed'): vscode.Ur
 	});
 }
 
-async function closeDiffEditors(originalUri: vscode.Uri, proposedUri: vscode.Uri): Promise<void> {
+export async function closeDiffEditors(originalUri: vscode.Uri, proposedUri: vscode.Uri): Promise<void> {
 	const toClose: vscode.Tab[] = [];
 	for (const group of vscode.window.tabGroups.all) {
 		for (const tab of group.tabs) {
@@ -116,16 +116,7 @@ export async function previewDiffAndConfirm(options: {
 	}
 }
 
-/** Non-blocking diff tab. Does not wait for Accept/Reject. */
-export function previewInlineDiff(filePath: string, originalContent: string, proposedContent: string): void {
-	const originalUri = makeDiffUri(filePath, 'original');
-	const proposedUri = makeDiffUri(filePath, 'proposed');
-	nexoraDiffProvider.setContent(originalUri, originalContent);
-	nexoraDiffProvider.setContent(proposedUri, proposedContent);
-	void vscode.commands.executeCommand('vscode.diff', originalUri, proposedUri, `Nexora: ${filePath}`);
-}
-
-/** Ask mode: blocking Accept/Reject. Auto-edit: optional inline preview, never waits. */
+/** Ask mode: blocking Accept/Reject. Auto-edit applies at once; the changed lines are marked in the file afterwards (editHighlights). */
 export async function confirmOrPreviewDiff(options: {
 	filePath: string;
 	fullPath: string;
@@ -142,9 +133,6 @@ export async function confirmOrPreviewDiff(options: {
 			proposedContent: options.proposedContent,
 			existsOnDisk: options.existsOnDisk
 		});
-	}
-	if (options.requireConfirmation && getAgentFlag('inlineDiffs')) {
-		previewInlineDiff(options.filePath, options.originalContent, options.proposedContent);
 	}
 	return true;
 }

@@ -51,14 +51,19 @@
 			root.innerHTML = '<div class="nx-empty">No snapshots for this workspace.</div>';
 			return;
 		}
+		// The row is a wrapper rather than one button, because Delete sits beside the
+		// node and a button cannot be nested inside another button.
 		root.innerHTML = snapshots.map(entry => `
-			<button type="button" class="nx-node" data-id="${escapeHtml(entry.id)}" data-selected="${entry.id === selectedId ? 'true' : 'false'}">
-				<div class="nx-nodeTitle">
-					${escapeHtml(entry.summary || entry.id)}
-					${entry.is_newest ? '<span class="nx-newest" title="Latest snapshot for this workspace">current</span>' : ''}
-				</div>
-				<div class="nx-nodeMeta">${escapeHtml(formatWhen(entry.created_at))} · ${escapeHtml(String(entry.file_count || 0))} files</div>
-			</button>
+			<div class="nx-nodeRow">
+				<button type="button" class="nx-node" data-id="${escapeHtml(entry.id)}" data-selected="${entry.id === selectedId ? 'true' : 'false'}">
+					<div class="nx-nodeTitle">
+						${escapeHtml(entry.summary || entry.id)}
+						${entry.is_newest ? '<span class="nx-newest" title="Latest snapshot for this workspace">current</span>' : ''}
+					</div>
+					<div class="nx-nodeMeta">${escapeHtml(formatWhen(entry.created_at))} &middot; ${escapeHtml(String(entry.file_count || 0))} files</div>
+				</button>
+				${entry.is_newest ? '' : `<button type="button" class="nx-nodeDelete" data-delete="${escapeHtml(entry.id)}" title="Delete this snapshot" aria-label="Delete the snapshot from ${escapeHtml(formatWhen(entry.created_at))}"><i class="codicon codicon-trash" aria-hidden="true"></i></button>`}
+			</div>
 		`).join('');
 	}
 
@@ -130,12 +135,18 @@
 		announce(`${(data.snapshots || []).length} snapshots`);
 	}
 
-	document.getElementById('refreshBtn')?.addEventListener('click', () => {
-		vscode.postMessage({ type: 'refresh' });
-	});
-
 	document.getElementById('timeline-rail')?.addEventListener('click', (event) => {
-		const node = event.target && event.target.closest ? event.target.closest('.nx-node') : null;
+		const target = event.target && event.target.closest ? event.target : null;
+		const remove = target ? target.closest('.nx-nodeDelete') : null;
+		if (remove) {
+			const removeId = remove.getAttribute('data-delete');
+			if (removeId) {
+				// The host asks for confirmation; a snapshot is a real file on disk.
+				vscode.postMessage({ type: 'deleteSnapshot', id: removeId });
+			}
+			return;
+		}
+		const node = target ? target.closest('.nx-node') : null;
 		if (!node) {
 			return;
 		}
@@ -144,6 +155,7 @@
 			return;
 		}
 		selectedId = id;
+
 		document.querySelectorAll('.nx-node').forEach(el => {
 			el.setAttribute('data-selected', el.getAttribute('data-id') === id ? 'true' : 'false');
 		});

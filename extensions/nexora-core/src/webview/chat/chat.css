@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-:root {
+:root
+{
 	/* Chat overrides the shared recessed surface: its session rail sits
 	beside the transcript, so it blends toward the editor background
 	instead of taking the sidebar's full contrast. */
@@ -47,10 +48,13 @@
 	display: none;
 }
 
+/* The page never scrolls; only the message list does (overscroll contained). */
+/* Before, the top of the list passed the wheel to the page and the whole panel slid up. */
 html,
 body
 {
 	height: 100%;
+	overflow: hidden;
 }
 
 body
@@ -60,7 +64,6 @@ body
 	font-family: var(--nx-font-ui);
 	color: var(--nx-fg);
 	background: var(--nx-bg);
-	overflow-x: hidden;
 }
 
 .nx-root
@@ -241,12 +244,26 @@ body
 	cursor: pointer;
 }
 
-.nx-firstRunSave
+.nx-firstRunCloud
 {
+	border: none;
+	border-radius: var(--nx-radius-1);
+	padding: 6px 10px;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
 	background: var(--nx-primary);
 	color: var(--nx-primaryFg);
 }
 
+.nx-firstRunOr
+{
+	font-size: 11px;
+	color: var(--nx-muted);
+	margin-top: var(--nx-space-1);
+}
+
+.nx-firstRunSave,
 .nx-firstRunSettings,
 .nx-firstRunDismiss
 {
@@ -408,47 +425,125 @@ body
 	user-select: none;
 }
 
-.nx-railTop
+.nx-sessionRail.is-hidden
 {
-	flex: 0 0 auto;
-	padding: 8px;
-	border-bottom: 1px solid var(--nx-border);
+	display: none;
 }
 
-.nx-railNew
+/* Nav rows above the chat list: icon and label, no boxes. */
+.nx-railNav
+{
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding: 8px 6px 4px;
+}
+
+.nx-railNavItem
 {
 	display: flex;
 	align-items: center;
-	justify-content: center;
-	gap: 6px;
-	width: 100%;
+	gap: 8px;
 	height: 28px;
 	padding: 0 8px;
-	border-radius: var(--nx-radius-1);
-	border: 1px solid var(--vscode-button-secondaryBorder, var(--nx-border));
-	background: var(--vscode-button-secondaryBackground, var(--nx-surface));
-	color: var(--vscode-button-secondaryForeground, var(--nx-fg));
-	font-size: 12px;
-	font-weight: 600;
+	border: none;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--nx-fg);
+	font-family: inherit;
+	font-size: 13px;
+	text-align: left;
 	cursor: pointer;
 }
 
-.nx-railNew:hover
+.nx-railNavItem .codicon,
+.nx-railSearch .codicon
 {
-	background: var(--vscode-button-secondaryHoverBackground, var(--nx-surface));
+	flex: 0 0 auto;
+	font-size: 16px;
+	color: var(--nx-muted);
 }
 
-.nx-railNew:focus-visible
+.nx-railNavItem:hover
+{
+	background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--nx-fg) 8%, transparent));
+}
+
+.nx-railNavItem:focus-visible,
+.nx-railOpen:focus-visible,
+.nx-railAction:focus-visible
 {
 	outline: 1px solid var(--nx-focus);
-	outline-offset: 1px;
+	outline-offset: -1px;
 }
 
-.nx-railNewMark
+.nx-railNavCount
 {
-	font-size: 14px;
-	line-height: 1;
-	font-weight: 600;
+	margin-left: auto;
+	min-width: 16px;
+	padding: 0 5px;
+	border-radius: 8px;
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+	font-size: 11px;
+	line-height: 16px;
+	text-align: center;
+}
+
+.nx-railSearch
+{
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 4px 6px;
+	padding: 0 8px;
+	height: 26px;
+	border: 1px solid var(--nx-input-border);
+	border-radius: 6px;
+	background: var(--nx-input-bg);
+}
+
+.nx-railSearch[hidden]
+{
+	display: none;
+}
+
+.nx-railSearch:focus-within
+{
+	border-color: var(--nx-focus);
+}
+
+.nx-railSearch input
+{
+	flex: 1 1 auto;
+	min-width: 0;
+	border: none;
+	outline: none;
+	background: transparent;
+	color: var(--nx-input-fg);
+	font-family: inherit;
+	font-size: 12px;
+}
+
+.nx-railSearch input::placeholder
+{
+	color: var(--nx-input-placeholder);
+}
+
+.nx-railGroup
+{
+	padding: 12px 8px 4px;
+	color: var(--nx-muted);
+	font-size: 11px;
+}
+
+.nx-railEmpty
+{
+	padding: 8px;
+	color: var(--nx-muted);
+	font-size: 12px;
 }
 
 .nx-railList
@@ -495,30 +590,23 @@ body
 
 .nx-railItem
 {
+	position: relative;
 	display: flex;
-	flex-wrap: nowrap;
 	align-items: center;
-	gap: 2px;
 	height: 28px;
-	min-height: 28px;
-	max-height: 28px;
-	overflow: hidden;
-	margin: 1px 0;
-	padding: 0 2px 0 4px;
-	border-radius: var(--nx-radius-1);
-	color: var(--nx-muted);
+	border-radius: 6px;
+	color: var(--nx-fg);
 }
 
 .nx-railItem:hover
 {
 	background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--nx-fg) 8%, transparent));
-	color: var(--nx-fg);
 }
 
 .nx-railItem.is-active
 {
-	background: var(--vscode-list-inactiveSelectionBackground, color-mix(in srgb, var(--nx-fg) 12%, transparent));
-	color: var(--vscode-list-inactiveSelectionForeground, var(--nx-fg));
+	background: var(--vscode-list-activeSelectionBackground, color-mix(in srgb, var(--nx-fg) 12%, transparent));
+	color: var(--vscode-list-activeSelectionForeground, var(--nx-fg));
 }
 
 .nx-railOpen
@@ -527,18 +615,16 @@ body
 	min-width: 0;
 	display: flex;
 	align-items: center;
+	gap: 8px;
 	height: 28px;
-	max-height: 28px;
-	padding: 0 6px;
+	padding: 0 8px 0 10px;
 	border: none;
+	border-radius: 6px;
 	background: transparent;
 	color: inherit;
-	font-size: 12px;
-	line-height: 1.3;
+	font-family: inherit;
+	font-size: 13px;
 	text-align: left;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
 	cursor: pointer;
 }
 
@@ -551,46 +637,81 @@ body
 	white-space: nowrap;
 }
 
-.nx-railOpen:focus-visible
+.nx-railAge
 {
-	outline: 1px solid var(--nx-focus);
-	outline-offset: -1px;
+	flex: 0 0 auto;
+	color: var(--nx-muted);
+	font-size: 11px;
 }
 
-.nx-railDelete
+.nx-railItem.is-active .nx-railAge
 {
-	flex: 0 0 22px;
-	flex-shrink: 0;
+	color: inherit;
+	opacity: 0.75;
+}
+
+/* Rename and Delete replace the age on hover or keyboard focus. */
+.nx-railActions
+{
+	display: none;
+	position: absolute;
+	right: 4px;
+	top: 3px;
+	gap: 2px;
+}
+
+.nx-railItem:hover .nx-railActions,
+.nx-railItem:focus-within .nx-railActions
+{
+	display: flex;
+}
+
+.nx-railItem:hover .nx-railAge,
+.nx-railItem:focus-within .nx-railAge
+{
+	visibility: hidden;
+}
+
+.nx-railItem:hover .nx-railOpenText,
+.nx-railItem:focus-within .nx-railOpenText
+{
+	margin-right: 16px;
+}
+
+.nx-railAction
+{
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	width: 22px;
 	height: 22px;
-	margin-right: 2px;
 	padding: 0;
 	border: none;
 	border-radius: 4px;
 	background: transparent;
 	color: inherit;
-	opacity: 0.7;
-	font-size: 14px;
-	line-height: 1;
 	cursor: pointer;
 }
 
-.nx-railItem:hover .nx-railDelete,
-.nx-railItem.is-active .nx-railDelete,
-.nx-railDelete:focus-visible
+.nx-railAction:hover
 {
-	opacity: 1;
+	background: var(--vscode-toolbar-hoverBackground, color-mix(in srgb, var(--nx-fg) 12%, transparent));
 }
 
-.nx-railDelete:hover
+.nx-railRename
 {
-	background: color-mix(in srgb, var(--nx-fg) 12%, transparent);
-}
-
-.nx-railDelete:focus-visible
-{
-	outline: 1px solid var(--nx-focus);
-	outline-offset: 0;
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 24px;
+	margin: 0 2px;
+	padding: 0 8px;
+	border: 1px solid var(--nx-focus);
+	border-radius: 6px;
+	outline: none;
+	background: var(--nx-input-bg);
+	color: var(--nx-input-fg);
+	font-family: inherit;
+	font-size: 13px;
 }
 
 .nx-status
@@ -642,10 +763,12 @@ body
 
 .nx-messages
 {
+	box-sizing: border-box;
 	height: 100%;
 	padding: var(--nx-space-4);
 	overflow: auto;
 	overflow-x: hidden;
+	overscroll-behavior: contain;
 	scrollbar-width: thin;
 	scrollbar-color: transparent transparent;
 }
@@ -714,20 +837,6 @@ body
 .nx-welcomeIcon
 {
 	margin-bottom: var(--nx-space-4);
-	background: linear-gradient(135deg, var(--vscode-charts-blue, #58a6ff) 0%, var(--vscode-charts-purple, #a371f7) 50%, var(--vscode-charts-green, #3fb950) 100%);
-	-webkit-background-clip: text;
-	-webkit-text-fill-color: transparent;
-	background-clip: text;
-}
-
-.nx-welcomeIcon svg
-{
-	stroke: url(#nexora-gradient);
-}
-
-.nx-welcomeIcon svg path
-{
-	stroke: var(--vscode-charts-blue, #58a6ff);
 }
 
 .nx-welcomeTitle
@@ -746,56 +855,63 @@ body
 	max-width: 320px;
 }
 
-.nx-quickActions
+.nx-welcomeCards
 {
-	display: flex;
-	gap: var(--nx-space-2);
-	margin-top: var(--nx-space-5);
-	flex-wrap: wrap;
-	justify-content: center;
-}
-
-.nx-quickBtn
-{
-	display: inline-flex;
-	align-items: center;
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 	gap: 8px;
-	padding: 7px 10px;
-	border: 1px solid color-mix(in srgb, var(--nx-border) 75%, transparent);
-	border-radius: 999px;
-	background: color-mix(in srgb, var(--nx-surface) 88%, transparent);
-	color: var(--nx-fg);
-	font-size: 12px;
-	cursor: pointer;
-	transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+	width: 100%;
+	max-width: 440px;
+	margin-top: 24px;
 }
 
-.nx-quickBtn:hover
+.nx-welcomeCard
 {
-	background: color-mix(in srgb, var(--nx-surface-2) 92%, transparent);
-	border-color: color-mix(in srgb, var(--nx-focus) 35%, var(--nx-border));
-	transform: translateY(-0.5px);
-}
-
-.nx-quickBtn:focus
-{
-	outline: 1px solid color-mix(in srgb, var(--nx-focus) 70%, transparent);
-	outline-offset: 2px;
-}
-
-.nx-quickIcon
-{
-	display: inline-flex;
+	display: grid;
+	grid-template-columns: auto 1fr;
+	column-gap: 10px;
+	row-gap: 2px;
 	align-items: center;
-	justify-content: center;
-	width: 20px;
-	height: 20px;
+	padding: 10px 12px;
+	border: 1px solid var(--nx-border);
 	border-radius: 6px;
-	border: 1px solid color-mix(in srgb, var(--nx-border) 80%, transparent);
-	background: color-mix(in srgb, var(--nx-surface-2) 65%, transparent);
+	background: transparent;
+	color: var(--nx-fg);
+	font-family: inherit;
+	text-align: left;
+	cursor: pointer;
+	transition: background var(--nx-transition), border-color var(--nx-transition);
+}
+
+.nx-welcomeCard:hover
+{
+	background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--nx-fg) 8%, transparent));
+}
+
+.nx-welcomeCard:focus-visible
+{
+	outline: 1px solid var(--nx-focus);
+	outline-offset: -1px;
+}
+
+.nx-welcomeCard .codicon
+{
+	grid-row: 1 / span 2;
+	font-size: 18px;
+	color: var(--nx-muted);
+}
+
+.nx-welcomeCardTitle
+{
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.nx-welcomeCardDesc
+{
 	color: var(--nx-muted);
 	font-size: 12px;
-	line-height: 1;
+	line-height: 1.4;
 }
 
 /* Messages */
@@ -875,35 +991,129 @@ body
 	color: var(--nx-fg);
 }
 
+/* Answer text: formatContent builds p, lists, headings, quotes, tables and code blocks. */
+/* Even spacing between blocks; no margin above the first or below the last. */
+.nx-msg.nx-assistant .nx-msgBody
+{
+	line-height: 1.6;
+}
+
+.nx-msg.nx-assistant .nx-msgBody p
+{
+	margin: 0 0 0.7em;
+}
+
+.nx-msg.nx-assistant .nx-msgBody> :first-child
+{
+	margin-top: 0;
+}
+
+.nx-msg.nx-assistant .nx-msgBody> :last-child
+{
+	margin-bottom: 0;
+}
+
 .nx-msg.nx-assistant .nx-msgBody .nx-mdH
 {
 	display: block;
-	margin: 0.65em 0 0.3em;
-	font-size: 1.05em;
+	margin: 1em 0 0.4em;
 	font-weight: 650;
 	line-height: 1.35;
 }
 
-.nx-msg.nx-assistant .nx-msgBody .nx-mdH:first-child
+.nx-msg.nx-assistant .nx-msgBody .nx-mdH1
 {
-	margin-top: 0;
+	font-size: 1.15em;
+}
+
+.nx-msg.nx-assistant .nx-msgBody .nx-mdH2
+{
+	font-size: 1.08em;
+}
+
+.nx-msg.nx-assistant .nx-msgBody .nx-mdH3
+{
+	font-size: 1em;
 }
 
 .nx-msg.nx-assistant .nx-msgBody ul,
 .nx-msg.nx-assistant .nx-msgBody ol
 {
-	margin: 0.35em 0 0.55em;
-	padding-left: 1.35em;
+	margin: 0 0 0.7em;
+	padding-left: 1.4em;
 }
 
 .nx-msg.nx-assistant .nx-msgBody li
 {
-	margin: 0.12em 0;
+	margin: 0.15em 0;
+	padding-left: 0.15em;
 }
 
-.nx-msg.nx-assistant .nx-msgBody li + li
+.nx-msg.nx-assistant .nx-msgBody li>ul,
+.nx-msg.nx-assistant .nx-msgBody li>ol
 {
-	margin-top: 0.18em;
+	margin: 0.15em 0 0.2em;
+}
+
+.nx-msg.nx-assistant .nx-msgBody .nx-mdQuote
+{
+	margin: 0 0 0.7em;
+	padding: 2px 0 2px 10px;
+	border-left: 3px solid var(--nx-border);
+	color: var(--nx-muted);
+}
+
+.nx-msg.nx-assistant .nx-msgBody .nx-mdHr
+{
+	margin: 0.9em 0;
+	border: none;
+	border-top: 1px solid var(--nx-border);
+}
+
+.nx-mdTableWrap
+{
+	margin: 0 0 0.7em;
+	overflow-x: auto;
+}
+
+.nx-mdTable
+{
+	border-collapse: collapse;
+	font-size: 12px;
+	line-height: 1.45;
+}
+
+.nx-mdTable th,
+.nx-mdTable td
+{
+	padding: 4px 10px;
+	border: 1px solid var(--nx-border);
+	text-align: left;
+	vertical-align: top;
+}
+
+.nx-mdTable th
+{
+	font-weight: 600;
+	background: var(--nx-surface-2);
+}
+
+/* "[x]" / "[ ]" at the start of a list item */
+.nx-mdTask
+{
+	display: inline-block;
+	width: 9px;
+	height: 9px;
+	margin-right: 6px;
+	border: 1px solid var(--nx-muted);
+	border-radius: 2px;
+	vertical-align: 0;
+}
+
+.nx-mdTaskDone
+{
+	border-color: var(--vscode-testing-iconPassed, var(--nx-primary));
+	background: var(--vscode-testing-iconPassed, var(--nx-primary));
 }
 
 .nx-msg.nx-msgStopped .nx-msgBody
@@ -939,16 +1149,22 @@ body
 	background: var(--nx-codeBg);
 }
 
+/* One block per code fence: a slim header (language and Copy) over the code. */
+.nx-codeWrap
+{
+	margin: 0.2em 0 0.8em;
+}
+
 .nx-codeHeader
 {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	margin-top: var(--nx-space-2);
-	padding: 8px 10px;
+	min-height: 26px;
+	padding: 3px 6px 3px 10px;
 	border: 1px solid var(--nx-border);
 	border-bottom: none;
-	border-radius: var(--nx-radius-2) var(--nx-radius-2) 0 0;
+	border-radius: var(--nx-radius-1) var(--nx-radius-1) 0 0;
 	background: var(--nx-surface-2);
 }
 
@@ -976,10 +1192,10 @@ body
 
 .nx-codeBlock
 {
-	margin: 0 0 var(--nx-space-2) 0;
-	padding: var(--nx-space-3);
+	margin: 0;
+	padding: 10px 12px;
 	border: 1px solid var(--nx-border);
-	border-radius: 0 0 var(--nx-radius-2) var(--nx-radius-2);
+	border-radius: 0 0 var(--nx-radius-1) var(--nx-radius-1);
 	background: var(--nx-codeBg);
 	overflow-x: auto;
 	font-family: var(--nx-font-mono);
@@ -1033,6 +1249,7 @@ body
 	border: 0;
 	background: transparent;
 	color: var(--nx-inputFg);
+	font-family: inherit;
 	font-size: 13px;
 	line-height: 1.45;
 	height: auto;
@@ -1510,8 +1727,8 @@ body
 .nx-sendBtn.nx-btnPrimary
 {
 	border: none;
-	background: color-mix(in srgb, var(--nx-fg) 16%, var(--nx-bg));
-	color: color-mix(in srgb, var(--nx-fg) 94%, white);
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
 }
 
 .nx-sendBtn
@@ -1520,26 +1737,20 @@ body
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 42px;
-	height: 42px;
+	width: 28px;
+	height: 28px;
 	padding: 0;
-	border-radius: 999px;
-	box-shadow:
-		0 2px 12px color-mix(in srgb, #000 32%, transparent),
-		0 1px 4px color-mix(in srgb, #000 22%, transparent);
+	border-radius: 6px;
 }
 
 .nx-sendBtn.nx-btnPrimary:hover
 {
-	background: color-mix(in srgb, var(--nx-fg) 24%, var(--nx-bg));
-	box-shadow:
-		0 4px 16px color-mix(in srgb, #000 38%, transparent),
-		0 2px 6px color-mix(in srgb, #000 26%, transparent);
+	background: var(--vscode-button-hoverBackground);
 }
 
 .nx-sendBtn.nx-isStop
 {
-	border-radius: 999px;
+	border-radius: 6px;
 }
 
 .nx-sendGlyph
@@ -1566,15 +1777,12 @@ body
 .nx-sendGlyph svg
 {
 	display: block;
-	transform: rotate(46deg);
-	transform-origin: center;
 }
 
 .nx-sendBtn.nx-isStop .nx-sendGlyphStop svg
 {
-	width: 18px;
-	height: 18px;
-	transform: none;
+	width: 12px;
+	height: 12px;
 }
 
 .nx-sendBtnSr
@@ -1590,26 +1798,7 @@ body
 	border: 0;
 }
 
-.nx-modeHint
-{
-	position: relative;
-	z-index: 0;
-	margin-top: 6px;
-	padding: 2px 4px 0;
-	background: transparent;
-	border-radius: 0;
-	border: none;
-}
 
-.nx-modeHint[data-mode="chat"],
-.nx-modeHint[data-mode="ask"],
-.nx-modeHint[data-mode="plan"],
-.nx-modeHint[data-mode="execute"],
-.nx-modeHint[data-mode="agent"]
-{
-	border: none;
-	background: transparent;
-}
 
 .nx-hintText
 {
@@ -1631,26 +1820,9 @@ body
 	opacity: 0.55;
 }
 
-.nx-modeHint[data-mode="ask"] .nx-hintText::before
-{
-	background: var(--vscode-charts-purple, #a371f7);
-}
 
-.nx-modeHint[data-mode="plan"] .nx-hintText::before
-{
-	background: var(--vscode-charts-orange, #d29922);
-}
 
-.nx-modeHint[data-mode="execute"] .nx-hintText::before
-{
-	background: var(--vscode-charts-green, #3fb950);
-}
 
-.nx-modeHint[data-mode="agent"] .nx-hintText::before
-{
-	background: color-mix(in srgb, var(--vscode-charts-red, #f85149) 40%, var(--nx-muted));
-	opacity: 0.5;
-}
 
 /* Plan Approval Card */
 .nx-planCard
@@ -1971,6 +2143,18 @@ body
 {
 	background: transparent;
 	color: var(--vscode-charts-red);
+}
+
+/* A refused approve: the reason takes the whole row, Cancel sits under it. */
+.nx-planActions:has(.nx-planApproveError)
+{
+	flex-wrap: wrap;
+}
+
+.nx-planApproveError
+{
+	flex-basis: 100%;
+	font-weight: 400;
 }
 
 .nx-resultIcon
@@ -2644,7 +2828,9 @@ body
 	margin: 0;
 	border: 0;
 	overflow: hidden;
-	white-space: pre;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+	word-break: break-word;
 	font-size: 13px;
 	line-height: 1.45;
 	font-family: inherit;
@@ -2684,6 +2870,7 @@ body
 	padding: 0 3px;
 	background: color-mix(in srgb, var(--nx-primary) 18%, transparent);
 }
+
 /* "Remembered: ..." note after a remember directive in chat */
 
 .nx-memoryNote
@@ -2750,6 +2937,27 @@ body
 
 .nx-stepRetryBtn:hover,
 .nx-stepRetryBtn:focus-visible
+{
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+/* Run in Agent mode: under a Chat-mode reply, which has no tools. */
+.nx-agentOffer
+{
+	display: block;
+	margin-top: 8px;
+	padding: 2px 8px;
+	border: 1px solid var(--vscode-button-border, var(--vscode-panel-border));
+	border-radius: 3px;
+	background: transparent;
+	color: var(--vscode-textLink-foreground);
+	font-size: 12px;
+	font-family: inherit;
+	cursor: pointer;
+}
+
+.nx-agentOffer:hover,
+.nx-agentOffer:focus-visible
 {
 	background: var(--vscode-toolbar-hoverBackground);
 }
@@ -2873,7 +3081,7 @@ body
 .nx-restoreBtn
 {
 	display: block;
-	margin: 4px 0 0 auto;
+	margin: 4px auto 0 0;
 	padding: 0;
 	border: none;
 	background: none;
@@ -2889,4 +3097,590 @@ body
 {
 	opacity: 1;
 	text-decoration: underline;
+}
+
+/* Composer chips, menus and tags (composer.js) */
+.nx-composerCard
+{
+	position: relative;
+}
+
+.nx-composerChips
+{
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	flex-wrap: wrap;
+}
+
+.nx-chip
+{
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	max-width: 220px;
+	height: 24px;
+	padding: 0 8px;
+	border: 1px solid color-mix(in srgb, var(--nx-border) 70%, transparent);
+	border-radius: var(--nx-radius-1);
+	background: transparent;
+	color: var(--nx-muted);
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.nx-chip:hover,
+.nx-chip[aria-expanded="true"]
+{
+	color: var(--nx-fg);
+	background: var(--nx-ddListHover);
+}
+
+.nx-chip[hidden]
+{
+	display: none;
+}
+
+.nx-chipIcon
+{
+	width: 24px;
+	padding: 0;
+	justify-content: center;
+	font-size: 15px;
+	line-height: 1;
+}
+
+.nx-chipText
+{
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.nx-chipChevron
+{
+	flex: 0 0 auto;
+	opacity: 0.7;
+}
+
+.nx-composerMenu
+{
+	position: absolute;
+	z-index: 50;
+	min-width: 220px;
+	max-width: min(320px, calc(100% - 8px));
+	max-height: 320px;
+	overflow-y: auto;
+	padding: 4px;
+	border: 1px solid var(--nx-ddMenuBorder);
+	border-radius: var(--nx-radius-2);
+	background: var(--nx-ddMenuBg);
+	color: var(--nx-ddMenuFg);
+	box-shadow: var(--nx-ddShadow);
+}
+
+.nx-composerMenu[hidden]
+{
+	display: none;
+}
+
+.nx-menuHeader
+{
+	padding: 6px 8px 2px;
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-menuNote
+{
+	padding: 6px 8px;
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-menuItem
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	width: 100%;
+	padding: 5px 8px;
+	border: 0;
+	border-radius: var(--nx-radius-1);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.nx-menuItem:hover,
+.nx-menuItem.nx-isActive
+{
+	background: var(--nx-ddListHover);
+}
+
+.nx-menuItem.nx-isSelected .nx-menuLabel
+{
+	color: var(--nx-fg);
+	font-weight: 600;
+}
+
+.nx-menuMain
+{
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.nx-menuLabel
+{
+	font-size: 12px;
+}
+
+.nx-menuDesc
+{
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-menuHint
+{
+	flex: 0 0 auto;
+	font-size: 11px;
+	color: var(--nx-muted);
+	font-variant-numeric: tabular-nums;
+}
+
+.nx-menuFooter
+{
+	margin-top: 4px;
+	padding-top: 4px;
+	border-top: 1px solid color-mix(in srgb, var(--nx-border) 55%, transparent);
+}
+
+.nx-menuSearch
+{
+	width: 100%;
+	margin: 2px 0 4px;
+	padding: 4px 8px;
+	border: 1px solid var(--nx-inputBorder, var(--nx-border));
+	border-radius: var(--nx-radius-1);
+	background: var(--nx-inputBg);
+	color: var(--nx-inputFg);
+	font: inherit;
+	font-size: 12px;
+}
+
+.nx-menuEffort
+{
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	padding: 4px 8px;
+}
+
+.nx-menuEffortLabel
+{
+	font-size: 12px;
+}
+
+.nx-menuEffortGroup
+{
+	display: inline-flex;
+	gap: 2px;
+}
+
+.nx-effortBtn
+{
+	padding: 2px 8px;
+	border: 1px solid transparent;
+	border-radius: var(--nx-radius-1);
+	background: transparent;
+	color: var(--nx-muted);
+	font: inherit;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.nx-effortBtn:hover
+{
+	color: var(--nx-fg);
+}
+
+.nx-effortBtn.nx-isSelected
+{
+	color: var(--nx-fg);
+	border-color: color-mix(in srgb, var(--nx-border) 80%, transparent);
+	background: var(--nx-ddListHover);
+}
+
+.nx-menuEffort .nx-menuNote
+{
+	flex-basis: 100%;
+	padding: 0;
+}
+
+.nx-composerTags
+{
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 8px 12px 0;
+}
+
+.nx-composerTags[hidden]
+{
+	display: none;
+}
+
+.nx-composerTag
+{
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	max-width: 100%;
+	padding: 1px 4px 1px 8px;
+	border-radius: var(--nx-radius-1);
+	background: color-mix(in srgb, var(--nx-primary) 18%, transparent);
+	color: var(--nx-fg);
+	font-size: 11px;
+}
+
+.nx-composerTagLabel
+{
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.nx-composerTagRemove
+{
+	border: 0;
+	background: transparent;
+	color: var(--nx-muted);
+	font: inherit;
+	cursor: pointer;
+}
+
+/* --- capability step details on the plan card (spec section 8) --- */
+
+.nx-stepMeta
+{
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	margin-top: 4px;
+	font-size: 11px;
+	color: var(--nx-muted);
+}
+
+.nx-stepCap
+{
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.nx-stepRoute::before,
+.nx-stepUndo::before,
+.nx-stepCost::before,
+.nx-stepSkills::before,
+.nx-stepLearned::before
+{
+	content: "-";
+	margin-right: 6px;
+	opacity: 0.6;
+}
+
+.nx-stepBadge
+{
+	padding: 0 6px;
+	border-radius: 999px;
+	border: 1px solid var(--nx-border);
+	line-height: 16px;
+}
+
+.nx-effect-read
+{
+	color: var(--vscode-charts-green);
+	border-color: color-mix(in srgb, var(--vscode-charts-green) 50%, transparent);
+}
+
+.nx-effect-write
+{
+	color: var(--vscode-charts-yellow);
+	border-color: color-mix(in srgb, var(--vscode-charts-yellow) 50%, transparent);
+}
+
+.nx-effect-destructive,
+.nx-noUndo
+{
+	color: var(--vscode-errorForeground);
+	border-color: color-mix(in srgb, var(--vscode-errorForeground) 50%, transparent);
+}
+
+.nx-stepFixes
+{
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	margin-top: 6px;
+	font-size: 11px;
+}
+
+.nx-stepNotReady
+{
+	color: var(--vscode-charts-yellow);
+}
+
+.nx-fixBtn,
+.nx-saveInputsBtn,
+.nx-removeStepBtn
+{
+	padding: 2px 8px;
+	font-size: 11px;
+	border: none;
+	border-radius: var(--nx-radius-1);
+	background: var(--nx-secondary);
+	color: var(--nx-secondaryFg);
+	cursor: pointer;
+}
+
+.nx-fixBtn:hover,
+.nx-saveInputsBtn:hover,
+.nx-removeStepBtn:hover
+{
+	background: var(--nx-secondaryHover);
+}
+
+.nx-stepNeeds
+{
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 8px;
+	padding: 8px;
+	border-radius: var(--nx-radius-1);
+	border: 1px solid color-mix(in srgb, var(--vscode-charts-yellow) 40%, transparent);
+	font-size: 12px;
+}
+
+.nx-needsMsg
+{
+	color: var(--vscode-charts-yellow);
+}
+
+.nx-stepInputError
+{
+	color: var(--vscode-errorForeground);
+}
+
+.nx-stepField
+{
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.nx-stepInputLabel
+{
+	color: var(--nx-muted);
+	font-size: 11px;
+}
+
+.nx-stepInput
+{
+	padding: 3px 6px;
+	font: inherit;
+	color: var(--nx-inputFg);
+	background: var(--nx-inputBg);
+	border: 1px solid var(--nx-inputBorder, var(--nx-border));
+	border-radius: var(--nx-radius-1);
+}
+
+textarea.nx-stepInput
+{
+	font-family: var(--vscode-editor-font-family, monospace);
+	resize: vertical;
+}
+
+.nx-saveInputsBtn
+{
+	align-self: flex-start;
+	background: var(--nx-primary);
+	color: var(--nx-primaryFg);
+}
+
+.nx-saveInputsBtn:hover
+{
+	background: var(--nx-primaryHover);
+}
+
+.nx-removeStepBtn
+{
+	margin-top: 6px;
+	color: var(--vscode-errorForeground);
+}
+
+/* Subagent cards (delegate): open while running, folded when done. */
+.nx-subagentCard
+{
+	margin: 6px 0;
+	padding: 6px 10px;
+	border: 1px solid var(--nx-border);
+	border-left: 3px solid var(--vscode-focusBorder, var(--nx-primary));
+	border-radius: var(--nx-radius-1);
+	background: var(--nx-surface-2);
+	font-size: 12px;
+}
+
+.nx-subagentCard[data-state="failed"]
+{
+	border-left-color: var(--vscode-errorForeground);
+}
+
+.nx-subagentCard[data-state="stopped"]
+{
+	border-left-color: var(--nx-muted);
+}
+
+.nx-subagentHead
+{
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.nx-subagentTask
+{
+	margin: 4px 0;
+	color: var(--nx-muted);
+}
+
+.nx-subagentTool
+{
+	display: flex;
+	gap: 6px;
+	padding: 1px 0;
+}
+
+.nx-subagentMark
+{
+	flex: 0 0 22px;
+	color: var(--nx-muted);
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.nx-subagentToolFailed
+{
+	color: var(--vscode-errorForeground);
+}
+
+.nx-subagentAnswer:not(:empty)
+{
+	margin-top: 6px;
+	padding-top: 6px;
+	border-top: 1px solid var(--nx-border);
+}
+
+.nx-subagentError
+{
+	color: var(--vscode-errorForeground);
+}
+
+/* Agent to-do list (todo_write): one card per request, updated in place. */
+.nx-todoCard
+{
+	margin: 6px 0;
+	padding: 8px 10px;
+	border: 1px solid var(--nx-border);
+	border-radius: var(--nx-radius-1);
+	background: var(--nx-surface-2);
+	font-size: 12px;
+}
+
+.nx-todoHead
+{
+	display: flex;
+	justify-content: space-between;
+	margin-bottom: 4px;
+	font-weight: 600;
+}
+
+.nx-todoCount
+{
+	font-weight: 400;
+	color: var(--nx-muted);
+}
+
+.nx-todoItem
+{
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 2px 0;
+}
+
+.nx-todoMark
+{
+	flex: 0 0 auto;
+	width: 10px;
+	height: 10px;
+	margin-top: 3px;
+	border: 1px solid var(--nx-muted);
+	border-radius: 3px;
+}
+
+.nx-todo-in_progress .nx-todoMark
+{
+	border-color: var(--vscode-focusBorder, var(--nx-primary));
+	box-shadow: inset 0 0 0 2px var(--vscode-focusBorder, var(--nx-primary));
+}
+
+.nx-todo-in_progress .nx-todoText
+{
+	font-weight: 600;
+}
+
+.nx-todo-completed .nx-todoMark
+{
+	border-color: var(--vscode-testing-iconPassed, var(--nx-primary));
+	background: var(--vscode-testing-iconPassed, var(--nx-primary));
+}
+
+.nx-todo-completed .nx-todoText
+{
+	color: var(--nx-muted);
+	text-decoration: line-through;
+}
+
+.nx-todoNote
+{
+	margin-top: 6px;
+	color: var(--nx-muted);
+	font-size: 11px;
+}
+/* Plan card: irreversible steps
+ *
+ * The count is stated once, in words, under the header. The per-step marker stays
+ * for the detail but stops shouting: with a red badge on every step, the loudest
+ * thing on the card was the risk, not the work.
+ */
+.nx-planUndoNote
+{
+	padding: 2px 0 6px;
+	font-size: 12px;
+	color: var(--nx-warn);
+}
+
+.nx-stepBadge.nx-noUndo
+{
+	border-color: transparent;
+	background: var(--nx-surface);
+	color: var(--nx-muted);
 }

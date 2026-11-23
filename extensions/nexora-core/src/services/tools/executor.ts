@@ -11,8 +11,16 @@ import { grepTool } from './grep';
 import { listFilesTool } from './listFiles';
 import { writeFileTool } from './writeFile';
 import { applyPatchTool, insertLinesTool } from './applyPatch';
-import { runTerminalCommandTool, type TerminalCommandProgress } from './terminalCommand';
+import {
+	readCommandOutputTool,
+	runTerminalCommandTool,
+	stopCommandTool,
+	type TerminalCommandProgress
+} from './terminalCommand';
 import { executePlatformTool } from './platformTool';
+import { delegateCall, runLimited, SUBAGENT_MAX_PARALLEL, type DelegateCall } from '../subagents';
+import { hookBlockedResult, withHookFeedback } from '../hooks';
+import { getDiagnosticsTool, withErrorsAfterEdit } from './diagnostics';
 import {
 	browserClickTool,
 	browserPressTool,
@@ -27,11 +35,25 @@ export interface ToolResult {
 	data?: any;
 	error?: string;
 	truncated?: boolean;
+	/** A PostToolUse hook's message for the model (Phase 4). */
+	hook_feedback?: string;
 }
 
 export interface ExecuteToolCallsOptions {
 	cancellationToken?: vscode.CancellationToken;
 	onToolProgress?: (toolCallId: string, name: string, progress: TerminalCommandProgress) => void;
+	/** todo_write: the agent's current checklist, for the chat to show. */
+	onTodos?: (todos: TodoItem[]) => void;
+	/** delegate: runs a subagent and returns its answer; absent inside a subagent (depth 1). */
+	runSubagent?: (call: DelegateCall) => Promise<ToolResult>;
+	/**
+	 * The user's PreToolUse / PostToolUse hooks (Phase 4); absent when there are none, so
+	 * no hooks costs nothing. before returns a reason to block; after, feedback for the model.
+	 */
+	hooks?: {
+		before: (tc: ToolCall) => Promise<string | undefined>;
+		after: (tc: ToolCall, result: ToolResult) => Promise<string | undefined>;
+	};
 }
 
 export interface ExecutedToolCall {
@@ -51,15 +73,92 @@ export async function executeToolCalls(
 	options?: ExecuteToolCallsOptions
 ): Promise<ExecutedToolCall[]> {
 	const results: ExecutedToolCall[] = [];
+	let i = 0;
+	while (i < toolCalls.length) {
+		// Reads next to each other run at the same time; edits, commands and
+		// platform calls run one by one, in the order the model asked for them.
+		// Subagents next to each other run together too, at most 3 at once.
+		if (isSubagentCall(toolCalls[i])) {
+			let j = i;
+			while (j < toolCalls.length && isSubagentCall(toolCalls[j])) {
+				j++;
+			}
+			results.push(...await runLimited(toolCalls.slice(i, j), SUBAGENT_MAX_PARALLEL, (tc) => executeOne(tc, workspaceRoot, options)));
+			i = j;
+		} else if (isParallelSafe(toolCalls[i])) {
+			let j = i;
+			while (j < toolCalls.length && isParallelSafe(toolCalls[j])) {
+				j++;
+			}
+			results.push(...await Promise.all(toolCalls.slice(i, j).map((tc) => executeOne(tc, workspaceRoot, options))));
+			i = j;
+		} else {
+			results.push(await executeOne(toolCalls[i], workspaceRoot, options));
+			i++;
+		}
+	}
+	return results;
+}
 
-	for (const tc of toolCalls) {
+/** A delegate call the engine left for the IDE (an unknown agent comes back already answered). */
+function isSubagentCall(tc: ToolCall): boolean {
+	return tc.name === 'delegate' && !(tc.arguments || {})._executed;
+}
+
+/** Tools that only read, so several can run at once. */
+const PARALLEL_SAFE = new Set(['read_file', 'grep', 'list_files', 'get_diagnostics', 'read_command_output']);
+
+function isParallelSafe(tc: ToolCall): boolean {
+	const args = tc.arguments || {};
+	if (typeof args._platform === 'string') {
+		return false;
+	}
+	return PARALLEL_SAFE.has(tc.name) || (args._executed === true && !!args._result);
+}
+
+/** One call with the user's hooks around it; calls the engine already answered skip them. */
+async function executeOne(
+	tc: ToolCall,
+	workspaceRoot: string,
+	options?: ExecuteToolCallsOptions
+): Promise<ExecutedToolCall> {
+	const hooks = options?.hooks;
+	if (!hooks || (tc.arguments || {})._executed) {
+		return executeTool(tc, workspaceRoot, options);
+	}
+	const blocked = await hooks.before(tc);
+	if (blocked) {
+		return { id: tc.id, name: tc.name, result: hookBlockedResult(blocked) };
+	}
+	const done = await executeTool(tc, workspaceRoot, options);
+	const feedback = await hooks.after(tc, done.result);
+	return feedback ? { ...done, result: withHookFeedback(done.result, feedback) } : done;
+}
+
+async function executeTool(
+	tc: ToolCall,
+	workspaceRoot: string,
+	options?: ExecuteToolCallsOptions
+): Promise<ExecutedToolCall> {
+	{
 		const args = tc.arguments;
+
+		// Already answered by the engine: run there (memory, codebase search, web, skills)
+		// or refused there (a tool the turn did not offer). Checked first, so a refused
+		// call can never go on as a platform call.
+		if (args._executed && args._result) {
+			return {
+				id: tc.id,
+				name: tc.name,
+				result: args._result as ToolResult
+			};
+		}
 
 		// A connected platform's tool. The engine deliberately did not run it:
 		// the call leaves the machine, so the user approves it here first and
 		// the engine then makes the call with the credential it holds.
 		if (typeof args._platform === 'string' && typeof args._platform_tool === 'string') {
-			results.push({
+			return {
 				id: tc.id,
 				name: tc.name,
 				result: await executePlatformTool(
@@ -68,19 +167,16 @@ export async function executeToolCalls(
 					args as Record<string, unknown>,
 					args._read_only_hint === true
 				)
-			});
-			continue;
+			};
 		}
 
-		// Already run by the engine, because that is where the data lives:
-		// the memory and codebase-search tools.
-		if (args._executed && args._result) {
-			results.push({
-				id: tc.id,
-				name: tc.name,
-				result: args._result as ToolResult
-			});
-			continue;
+		// A subagent: a second agent loop run by the chat panel, which shows it as a card.
+		if (tc.name === 'delegate') {
+			const call = delegateCall(tc);
+			if (!call || !options?.runSubagent) {
+				return { id: tc.id, name: tc.name, result: { success: false, error: 'Subagents are not available here.' } };
+			}
+			return { id: tc.id, name: tc.name, result: await options.runSubagent(call) };
 		}
 
 		let result: ToolResult;
@@ -101,7 +197,8 @@ export async function executeToolCalls(
 						workspaceRoot,
 						args.pattern,
 						args.glob || '**/*',
-						args.max_results || 20
+						args.max_results || 50,
+						{ mode: args.output_mode, context: args.context, caseInsensitive: args.case_insensitive === true }
 					);
 					break;
 
@@ -109,37 +206,43 @@ export async function executeToolCalls(
 					result = await listFilesTool(
 						workspaceRoot,
 						args.glob || '**/*',
-						args.max_results || 50
+						args.max_results || 100
 					);
 					break;
 
+				// Each edit comes back with the editor's errors in that file (errors_after_edit).
 				case 'write_file':
-					result = await writeFileTool(
+					result = await withErrorsAfterEdit(await writeFileTool(
 						workspaceRoot,
 						args.path,
 						args.content,
 						true
-					);
+					), path.resolve(workspaceRoot, String(args.path || '')));
 					break;
 
 				case 'apply_patch':
-					result = await applyPatchTool(
+					result = await withErrorsAfterEdit(await applyPatchTool(
 						workspaceRoot,
 						args.path,
 						args.old_text,
 						args.new_text,
-						true
-					);
+						true,
+						args.replace_all === true
+					), path.resolve(workspaceRoot, String(args.path || '')));
 					break;
 
 				case 'insert_lines':
-					result = await insertLinesTool(
+					result = await withErrorsAfterEdit(await insertLinesTool(
 						workspaceRoot,
 						args.path,
 						args.line_number,
 						args.lines,
 						true
-					);
+					), path.resolve(workspaceRoot, String(args.path || '')));
+					break;
+
+				case 'get_diagnostics':
+					result = await getDiagnosticsTool(workspaceRoot, args.path, args.include_warnings !== false);
 					break;
 
 				case 'run_terminal_command':
@@ -152,9 +255,18 @@ export async function executeToolCalls(
 							cancellationToken: options?.cancellationToken,
 							onProgress: options?.onToolProgress
 								? (progress) => options.onToolProgress!(tc.id, tc.name, progress)
-								: undefined
+								: undefined,
+							background: args.run_in_background === true
 						}
 					);
+					break;
+
+				case 'read_command_output':
+					result = readCommandOutputTool(args.id);
+					break;
+
+				case 'stop_command':
+					result = stopCommandTool(args.id);
 					break;
 
 				case 'open_browser':
@@ -181,6 +293,10 @@ export async function executeToolCalls(
 					result = await browserPressTool(args.key);
 					break;
 
+				case 'todo_write':
+					result = todoWriteTool(args.todos, options?.onTodos);
+					break;
+
 				default:
 					result = {
 						success: false,
@@ -194,14 +310,59 @@ export async function executeToolCalls(
 			};
 		}
 
-		results.push({
+		return {
 			id: tc.id,
 			name: tc.name,
 			result
-		});
+		};
 	}
+}
 
-	return results;
+export type TodoStatus = 'pending' | 'in_progress' | 'completed';
+export interface TodoItem {
+	content: string;
+	status: TodoStatus;
+}
+
+const TODO_STATUSES = new Set<TodoStatus>(['pending', 'in_progress', 'completed']);
+
+/**
+ * todo_write: the agent's checklist for a task of several steps. Each call
+ * sends the whole list; the chat shows it as a checklist (onTodos).
+ */
+export function todoWriteTool(raw: unknown, onTodos?: (todos: TodoItem[]) => void): ToolResult {
+	if (!Array.isArray(raw)) {
+		return { success: false, error: 'todos must be a list of { content, status }.' };
+	}
+	const todos: TodoItem[] = [];
+	for (const item of raw.slice(0, 20)) {
+		const content = typeof item?.content === 'string' ? item.content.trim().slice(0, 200) : '';
+		const status = TODO_STATUSES.has(item?.status) ? item.status as TodoStatus : 'pending';
+		if (content) {
+			todos.push({ content, status });
+		}
+	}
+	if (todos.length === 0) {
+		return { success: false, error: 'todos is empty.' };
+	}
+	onTodos?.(todos);
+	const done = todos.filter((t) => t.status === 'completed').length;
+	const current = todos.find((t) => t.status === 'in_progress');
+	const notes: string[] = [];
+	if (todos.filter((t) => t.status === 'in_progress').length > 1) {
+		notes.push('Keep only one item in_progress at a time.');
+	}
+	if (done < todos.length) {
+		// The 8 Nov test ended with "3 of 4 done" while the answer said all done.
+		notes.push('Before your final answer, call todo_write again with every finished item marked completed.');
+	}
+	return {
+		success: true,
+		data: {
+			summary: `${done} of ${todos.length} done${current ? `; now: ${current.content}` : ''}`,
+			note: notes.length ? notes.join(' ') : undefined
+		}
+	};
 }
 
 /**

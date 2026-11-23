@@ -5,15 +5,16 @@
 
 import * as vscode from 'vscode';
 import { ChatPanelProvider } from './chatPanel';
-import { SessionsViewProvider } from './sessionsView';
 import { PlatformBrowserProvider } from './platformPanel';
 import { TaskTreeProvider } from './taskTreeProvider';
+import { ConstellationPanelProvider } from './constellationPanel';
 import { WorkflowPanelProvider, workflowPlanFromSnapshot } from './workflowPanel';
 import { OutputPanelProvider, type TaskOutput } from './outputPanel';
 import { SettingsPanelProvider } from './settingsPanel';
+import { CustomizePanelProvider } from './customizePanel';
 import { WorkspaceIndexService } from './services/workspaceIndex';
 import { CloudAccount } from './services/cloudAccount';
-import { TemplatesPanelProvider } from './templatesPanel';
+import { refreshCapabilities } from './services/backend/capabilities';
 import { TimelinePanelProvider } from './timelinePanel';
 import { getBackendClient, notifyBackendClientConfigured, setApiKeyHeaderProvider } from './services/backendClient';
 import { getSettingsService } from './services/settingsService';
@@ -33,11 +34,13 @@ import {
 } from './services/engineProcess';
 import { enginePlaceholderHtml, engineStateLabel } from './services/editorPage';
 import { nexoraDiffProvider, NEXORA_DIFF_SCHEME } from './services/tools/diffProvider';
+import { agentEditHighlights } from './services/tools/editHighlights';
 import { openNexoraBrowser } from './services/browser';
 import { closeAgentBrowser } from './services/tools/browserSession';
+import { stopAllBackgroundCommands } from './services/tools/terminalCommand';
 
 /** Plan statuses after which the engine runs nothing more (backend PlanStatus). */
-const TERMINAL_PLAN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'partially_completed', 'timeout']);
+const TERMINAL_PLAN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'partially_completed', 'timeout', 'skipped']);
 
 async function setOperationInProgress(value: boolean): Promise<void> {
 	await vscode.commands.executeCommand('setContext', 'nexora.operationInProgress', value);
@@ -241,9 +244,12 @@ export async function activate(context: vscode.ExtensionContext) {
 	registerUriRoute('/cloud-auth', (uri) => void cloud.completeSignIn(uri));
 	context.subscriptions.push(
 		cloud,
+		// The engine reports Cloud as a usable model once the token header arrives; re-ask so the first-run card updates.
+		cloud.onDidChange(() => void refreshCapabilities()),
 		vscode.commands.registerCommand('nexora.cloudSignIn', () => cloud.signIn()),
 		vscode.commands.registerCommand('nexora.cloudSignOut', () => cloud.signOut()),
-		vscode.commands.registerCommand('nexora.cloudMenu', () => cloud.showMenu())
+		vscode.commands.registerCommand('nexora.cloudMenu', () => cloud.showMenu()),
+		vscode.commands.registerCommand('nexora.cloudOpenDashboard', () => cloud.openDashboard())
 	);
 	setApiKeyHeaderProvider(async () => {
 		const headers: Record<string, string> = {};
@@ -251,11 +257,13 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (cloudToken) {
 			headers['X-Nexora-Cloud-Token'] = cloudToken;
 		}
-		const [openai, anthropic, gemini, openrouter] = await Promise.all([
+		const [openai, anthropic, gemini, openrouter, groq, mistral] = await Promise.all([
 			settingsService.getApiKey('openai'),
 			settingsService.getApiKey('anthropic'),
 			settingsService.getApiKey('gemini'),
-			settingsService.getApiKey('openrouter')
+			settingsService.getApiKey('openrouter'),
+			settingsService.getApiKey('groq'),
+			settingsService.getApiKey('mistral')
 		]);
 		if (openai) {
 			headers['X-Nexora-OpenAI-Key'] = openai;
@@ -269,6 +277,12 @@ export async function activate(context: vscode.ExtensionContext) {
 		if (openrouter) {
 			headers['X-Nexora-OpenRouter-Key'] = openrouter;
 		}
+		if (groq) {
+			headers['X-Nexora-Groq-Key'] = groq;
+		}
+		if (mistral) {
+			headers['X-Nexora-Mistral-Key'] = mistral;
+		}
 		return headers;
 	});
 	const notifications = getNotificationService();
@@ -280,6 +294,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.workspace.registerTextDocumentContentProvider(NEXORA_DIFF_SCHEME, nexoraDiffProvider),
 		nexoraDiffProvider
 	);
+	agentEditHighlights.register(context);
 
 	const engineStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
 	engineStatusBar.name = 'Nexora Engine';
@@ -307,20 +322,26 @@ export async function activate(context: vscode.ExtensionContext) {
 	const gatedProviders: EngineGatedWebviewProvider[] = [];
 
 	const chatProvider = new ChatPanelProvider(context.extensionUri, context);
-	const sessionsProvider = new SessionsViewProvider(chatProvider);
-	chatProvider.setOnSessionsChanged(() => sessionsProvider.refresh());
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
 			'nexora.chatPanel',
 			gateWebview(chatProvider, context.subscriptions, gatedProviders),
 			retainHidden
-		),
-		vscode.window.registerWebviewViewProvider(
-			SessionsViewProvider.viewType,
-			sessionsProvider,
-			retainHidden
 		)
 	);
+
+	// One click to every Nexora page, like Copilot's status menu.
+	const menuStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+	menuStatusBar.name = 'Nexora Menu';
+	menuStatusBar.text = '$(sparkle) Nexora';
+	menuStatusBar.tooltip = 'Nexora: chats, recipes, platforms, customize';
+	menuStatusBar.command = 'nexora.quickMenu';
+	menuStatusBar.show();
+	context.subscriptions.push(menuStatusBar);
+
+	// Constellation: the workspace as a graph in its own editor tab, lit by the running plan.
+	const constellationProvider = new ConstellationPanelProvider(context.extensionUri);
+	context.subscriptions.push(constellationProvider);
 
 	// Week 11: Workflow / Output live in the bottom panel as horizontal tabs
 	const workflowProvider = new WorkflowPanelProvider(context.extensionUri);
@@ -341,20 +362,15 @@ export async function activate(context: vscode.ExtensionContext) {
 		)
 	);
 
-	const settingsProvider = new SettingsPanelProvider(context.extensionUri, context);
-	const templatesProvider = new TemplatesPanelProvider(context.extensionUri);
+	const settingsProvider = new SettingsPanelProvider(context.extensionUri, context, cloud);
 	const timelineProvider = new TimelinePanelProvider(context.extensionUri);
 	const platformProvider = new PlatformBrowserProvider(context.extensionUri);
+	const customizeProvider = new CustomizePanelProvider(context.extensionUri);
 
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
 			PlatformBrowserProvider.viewType,
 			gateWebview(platformProvider, context.subscriptions, gatedProviders),
-			retainHidden
-		),
-		vscode.window.registerWebviewViewProvider(
-			TemplatesPanelProvider.viewType,
-			gateWebview(templatesProvider, context.subscriptions, gatedProviders),
 			retainHidden
 		),
 		vscode.window.registerWebviewViewProvider(
@@ -371,6 +387,45 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.reindexWorkspace', () => workspaceIndex.indexNow())
 	);
 
+	// Registered before the engine wait: the status bar items and title bars use these while the engine
+	// is still starting (up to 180 s on a first run). The pages they open show their own waiting state.
+	context.subscriptions.push(
+		vscode.commands.registerCommand('nexora.showEngineOutput', () => showEngineOutput()),
+		vscode.commands.registerCommand('nexora.newSession', () => chatProvider.createNewSession()),
+		vscode.commands.registerCommand('nexora.toggleSessions', () => chatProvider.toggleSessionRail()),
+		vscode.commands.registerCommand('nexora.undoPlatformAction', () => chatProvider.undoPlatformAction()),
+		// section: plugins | platforms | skills | agents | recipes | commands | hooks | rules; none = All.
+		vscode.commands.registerCommand('nexora.openCustomize', async (section?: unknown, startNew?: unknown) => {
+			await customizeProvider.open(typeof section === 'string' ? section : undefined, startNew === true);
+		}),
+		// Templates are Customize > Recipes now; refreshTemplates is internal (after Save as recipe).
+		vscode.commands.registerCommand('nexora.openTemplates', () => customizeProvider.open('recipes')),
+		vscode.commands.registerCommand('nexora.refreshTemplates', () => customizeProvider.refresh()),
+		vscode.commands.registerCommand('nexora.openPlatformBrowser', () => platformProvider.open()),
+		vscode.commands.registerCommand('nexora.openTimeline', async () => {
+			await timelineProvider.open();
+			await timelineProvider.refresh();
+		}),
+		vscode.commands.registerCommand('nexora.openSettings', async (section?: unknown) => {
+			await settingsProvider.open(typeof section === 'string' ? section : undefined);
+			await settingsProvider.refresh();
+		}),
+		vscode.commands.registerCommand('nexora.quickMenu', async () => {
+			const items: Array<vscode.QuickPickItem & { run: () => Thenable<unknown> }> = [
+				{ label: '$(add) New chat', run: () => vscode.commands.executeCommand('nexora.newSession') },
+				{ label: '$(play-circle) Recipes', description: 'Run a saved plan', run: () => vscode.commands.executeCommand('nexora.openCustomize', 'recipes') },
+				{ label: '$(plug) Platforms', description: 'Connect services', run: () => vscode.commands.executeCommand('nexora.openPlatformBrowser') },
+				{ label: '$(extensions) Customize', description: 'Plugins, skills, agents, hooks, rules', run: () => vscode.commands.executeCommand('nexora.openCustomize') },
+				{ label: '$(circuit-board) Constellation', description: 'The workspace as a graph, lit by the running plan', run: () => vscode.commands.executeCommand('nexora.openConstellation') },
+				{ label: '$(discard) Undo a platform action', description: 'Reverse what a plan did on a platform', run: () => vscode.commands.executeCommand('nexora.undoPlatformAction') },
+				{ label: '$(history) Memory timeline', run: () => vscode.commands.executeCommand('nexora.openTimeline') },
+				{ label: '$(settings-gear) Settings', run: () => vscode.commands.executeCommand('nexora.openSettings') },
+				{ label: '$(output) Engine output', run: () => vscode.commands.executeCommand('nexora.showEngineOutput') }
+			];
+			const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Nexora' });
+			await picked?.run();
+		})
+	);
 	const engine = await startNexoraEngine(context);
 	getBackendClient({
 		baseUrl: engine.baseUrl,
@@ -493,6 +548,11 @@ export async function activate(context: vscode.ExtensionContext) {
 			await vscode.commands.executeCommand('nexora.chatPanel.focus');
 			await setChatFocused(true);
 		}),
+		// Puts text in the chat box (Customize's Try) without sending it.
+		vscode.commands.registerCommand('nexora.prefillChat', async (text?: unknown, mode?: unknown) => {
+			await vscode.commands.executeCommand('nexora.chatPanel.focus');
+			chatProvider.prefillInput(typeof text === 'string' ? text : '', mode === 'ask' || mode === 'chat' ? mode : 'agent');
+		}),
 		vscode.commands.registerCommand('nexora.openChatInEditor', async () => {
 			await chatProvider.openInEditor();
 			await setChatFocused(true);
@@ -505,21 +565,13 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 			await setChatFocused(true);
 		}),
-		vscode.commands.registerCommand('nexora.toggleSessions', async () => {
-			if (sessionsProvider.isVisible()) {
-				await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
-			} else {
-				await vscode.commands.executeCommand('nexora.sessionsPanel.focus');
-			}
-		}),
-		vscode.commands.registerCommand('nexora.openBrowser', async (url?: string | vscode.Uri) => {
-			await openNexoraBrowser(url);
+		vscode.commands.registerCommand('nexora.openBrowser', async (url?: unknown) => {
+			// An editor/title menu passes the chat tab's own webview-panel: URI; only a web address is a page to open.
+			const page = typeof url === 'string' || (url instanceof vscode.Uri && /^https?$/.test(url.scheme)) ? url : undefined;
+			await openNexoraBrowser(page);
 		}),
 		vscode.commands.registerCommand('nexora.openTaskPlan', () => {
 			void showOnlyNexoraPanelView('nexora.taskTree');
-		}),
-		vscode.commands.registerCommand('nexora.openPlatformBrowser', async () => {
-			await platformProvider.open();
 		}),
 		vscode.commands.registerCommand('nexora.refreshPlatforms', async () => {
 			await platformProvider.refresh();
@@ -539,9 +591,6 @@ export async function activate(context: vscode.ExtensionContext) {
 			} else {
 				void notifications.showError('Nexora engine is offline. Check the "Nexora Engine" output channel.');
 			}
-		}),
-		vscode.commands.registerCommand('nexora.showEngineOutput', () => {
-			showEngineOutput();
 		}),
 		vscode.commands.registerCommand('nexora.decomposeRequest', async () => {
 			const request = await vscode.window.showInputBox({
@@ -597,16 +646,27 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.openOutput', async () => {
 			await showOnlyNexoraPanelView('nexora.outputViewer');
 		}),
+		// The one place a plan is published. Four call sites in the chat panel reach it,
+		// so every surface that draws a plan is fed from here rather than from each of
+		// them remembering to call one more command.
 		vscode.commands.registerCommand('nexora.updateWorkflowPlan', (plan: any) => {
 			if (plan && plan.tasks) {
 				workflowProvider.updatePlan(plan);
+				constellationProvider.setPlan(plan);
 				outputProvider.clearOutputs();
-				void showOnlyNexoraPanelView('nexora.workflowViewer');
+				// The bottom panel is no longer forced open: a plan belongs in the
+				// Constellation tab and in the chat card, not on top of the terminal.
 			}
 		}),
-		vscode.commands.registerCommand('nexora.newSession', async () => {
-			await chatProvider.createNewSession();
-			void notifications.showInfo('New chat session created');
+		vscode.commands.registerCommand('nexora.openConstellation', async () => {
+			await constellationProvider.open();
+		}),
+		// Kept so an older call site or a recipe naming it still works; the plan reaches
+		// the Constellation through nexora.updateWorkflowPlan above.
+		vscode.commands.registerCommand('nexora.updateConstellationPlan', (plan: any) => {
+			if (plan && plan.tasks) {
+				constellationProvider.setPlan(plan);
+			}
 		}),
 		vscode.commands.registerCommand('nexora.cancelOperation', async () => {
 			if (chatProvider.isOperationInProgress()) {
@@ -619,11 +679,6 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 		}),
 		// Week 12: Settings + shortcuts
-		vscode.commands.registerCommand('nexora.openSettings', async (section?: unknown) => {
-			const sectionId = typeof section === 'string' ? section : undefined;
-			await settingsProvider.open(sectionId);
-			await settingsProvider.refresh();
-		}),
 		vscode.commands.registerCommand('nexora.refreshSettings', async () => {
 			await settingsProvider.refresh();
 			void notifications.showInfo('Settings status refreshed');
@@ -631,24 +686,6 @@ export async function activate(context: vscode.ExtensionContext) {
 		vscode.commands.registerCommand('nexora.openAnalytics', async () => {
 			await settingsProvider.open('analytics');
 			await settingsProvider.refresh();
-		}),
-		vscode.commands.registerCommand('nexora.refreshAnalytics', async () => {
-			await settingsProvider.refresh();
-			void notifications.showInfo('Analytics refreshed');
-		}),
-		vscode.commands.registerCommand('nexora.useTemplate', async () => {
-			await templatesProvider.useTemplate();
-		}),
-		vscode.commands.registerCommand('nexora.openTemplates', async () => {
-			await templatesProvider.open();
-			await templatesProvider.refresh();
-		}),
-		vscode.commands.registerCommand('nexora.refreshTemplates', async () => {
-			await templatesProvider.refresh();
-		}),
-		vscode.commands.registerCommand('nexora.openTimeline', async () => {
-			await timelineProvider.open();
-			await timelineProvider.refresh();
 		}),
 		vscode.commands.registerCommand('nexora.refreshTimeline', async () => {
 			await timelineProvider.refresh();
@@ -708,6 +745,7 @@ async function checkBackendOnStartup(notifications: ReturnType<typeof getNotific
 
 export async function deactivate() {
 	console.log('Nexora Core extension deactivated');
+	stopAllBackgroundCommands();
 	await closeAgentBrowser();
 	disposeWebSocket();
 	await stopNexoraEngine();

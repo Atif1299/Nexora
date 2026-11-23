@@ -1,0 +1,894 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Customize tab: a search bar, a scope menu and kind chips over one column of quiet,
+ * bordered lists of rows (icon tile, name, source line, actions). */
+
+.cz-root
+{
+	max-width: 920px;
+	margin: 0 auto;
+	padding: var(--nx-space-4);
+	font-size: 13px;
+}
+
+/* --- top bar ---------------------------------------------------------------------------- */
+
+.cz-top
+{
+	display: flex;
+	gap: var(--nx-space-2);
+	margin-bottom: var(--nx-space-3);
+}
+
+.cz-searchBox
+{
+	flex: 1 1 auto;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	padding: 0 10px;
+	border: 1px solid var(--nx-input-border, var(--nx-border));
+	border-radius: 8px;
+	background: var(--nx-input-bg);
+	color: var(--nx-muted);
+}
+
+.cz-searchBox:focus-within
+{
+	border-color: var(--nx-focus);
+}
+
+.cz-searchBox input
+{
+	flex: 1 1 auto;
+	min-width: 0;
+	height: 30px;
+	padding: 0;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	color: var(--nx-input-fg, var(--nx-fg));
+	font: inherit;
+}
+
+.cz-searchBox input::placeholder
+{
+	color: var(--nx-input-placeholder, var(--nx-muted));
+}
+
+.cz-top .nx-btn,
+.cz-headActions .nx-btn,
+.cz-invite .nx-btn
+{
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	white-space: nowrap;
+}
+
+.cz-chips
+{
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: var(--nx-space-4);
+}
+
+.cz-chipBtn
+{
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	height: 26px;
+	padding: 0 10px;
+	border: 1px solid var(--nx-border);
+	border-radius: 999px;
+	background: transparent;
+	color: var(--nx-fg);
+	font: inherit;
+	cursor: pointer;
+}
+
+.cz-chipBtn:hover
+{
+	background: var(--nx-surface-hover);
+}
+
+.cz-chipBtn:focus-visible,
+.cz-menuItem:focus-visible,
+.cz-rowMain:focus-visible
+{
+	outline: 1px solid var(--nx-focus);
+	outline-offset: -1px;
+}
+
+.cz-chipOn
+{
+	border-color: var(--nx-focus);
+	background: var(--nx-surface-active);
+}
+
+.cz-count
+{
+	color: var(--nx-muted);
+	font-weight: 400;
+}
+
+.cz-scopeWrap
+{
+	position: relative;
+}
+
+.cz-menu
+{
+	position: absolute;
+	z-index: 10;
+	top: calc(100% + 4px);
+	left: 0;
+	min-width: 160px;
+	padding: 4px;
+	border: 1px solid var(--nx-border);
+	border-radius: 8px;
+	background: var(--vscode-menu-background, var(--nx-bg));
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.cz-menuItem
+{
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	padding: 4px 8px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--nx-fg);
+	text-align: left;
+	font: inherit;
+	cursor: pointer;
+}
+
+.cz-menuItem:hover
+{
+	background: var(--nx-surface-hover);
+}
+
+.cz-menuItem[aria-checked='false'] .codicon
+{
+	visibility: hidden;
+}
+
+/* --- lists and rows ----------------------------------------------------------------------- */
+
+.cz-sec
+{
+	margin-bottom: var(--nx-space-4);
+}
+
+.cz-blurb
+{
+	margin: 0 0 var(--nx-space-3);
+	max-width: 680px;
+}
+
+.cz-listHead
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--nx-space-2);
+	margin: var(--nx-space-3) 0 var(--nx-space-2);
+}
+
+.cz-listTitle
+{
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.cz-headActions
+{
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--nx-space-2);
+	flex: 0 0 auto;
+}
+
+.cz-list
+{
+	border: 1px solid var(--nx-border);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.cz-row
+{
+	display: flex;
+	align-items: center;
+	gap: var(--nx-space-2);
+	border-bottom: 1px solid var(--nx-border);
+}
+
+.cz-row:last-child,
+.cz-list > .cz-invite:last-child
+{
+	border-bottom: 0;
+}
+
+.cz-row:hover
+{
+	background: var(--nx-surface-hover);
+}
+
+.cz-rowMain
+{
+	flex: 1 1 auto;
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	min-width: 0;
+	padding: 8px 12px;
+	border: 0;
+	background: transparent;
+	color: var(--nx-fg);
+	text-align: left;
+	font: inherit;
+}
+
+button.cz-rowMain
+{
+	cursor: pointer;
+}
+
+.cz-icon
+{
+	flex: 0 0 28px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+	background: var(--nx-surface-2, var(--nx-surface));
+	color: var(--nx-fg);
+}
+
+.cz-rowText
+{
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+	flex: 1 1 auto;
+}
+
+.cz-rowTop
+{
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.cz-rowActions
+{
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding-right: 8px;
+}
+
+.cz-name
+{
+	font-weight: 500;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
+}
+
+.cz-source
+{
+	color: var(--nx-muted);
+	font-size: 12px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.cz-usage
+{
+	margin-left: auto;
+	color: var(--nx-muted);
+	font-size: 11px;
+}
+
+.cz-off .cz-rowText,
+.cz-hidden .cz-rowText
+{
+	opacity: 0.65;
+}
+
+.cz-hiddenBy
+{
+	color: var(--nx-muted);
+	font-size: 11px;
+	word-break: break-all;
+}
+
+.cz-problem,
+.cz-warn
+{
+	color: var(--nx-warn);
+	font-size: 12px;
+}
+
+.cz-chip
+{
+	padding: 0 6px;
+	border-radius: 999px;
+	border: 1px solid var(--nx-border);
+	color: var(--nx-muted);
+	font-size: 11px;
+	font-weight: 400;
+}
+
+.cz-origin-nexora
+{
+	border-color: var(--nx-focus);
+	color: var(--nx-fg);
+}
+
+.cz-origin-plugin
+{
+	border-color: var(--nx-accent, var(--nx-focus));
+}
+
+.cz-warnChip
+{
+	border-color: var(--nx-warn);
+	color: var(--nx-warn);
+}
+
+.cz-runOk
+{
+	color: var(--nx-ok);
+}
+
+.cz-runBlocked
+{
+	color: var(--nx-warn);
+}
+
+.cz-runBad
+{
+	color: var(--nx-err);
+}
+
+.cz-invite
+{
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 12px;
+	border: 1px solid var(--nx-border);
+	border-radius: 8px;
+}
+
+.cz-list > .cz-invite
+{
+	border: 0;
+	border-bottom: 1px solid var(--nx-border);
+	border-radius: 0;
+}
+
+.cz-inviteText
+{
+	flex: 1 1 auto;
+	color: var(--nx-muted);
+}
+
+.cz-none
+{
+	margin: var(--nx-space-2) 0;
+}
+
+.cz-group
+{
+	margin-bottom: var(--nx-space-3);
+}
+
+.cz-groupTitle
+{
+	margin: var(--nx-space-2) 0;
+	font-weight: 600;
+}
+
+.cz-shellLine
+{
+	margin: 0 0 var(--nx-space-2);
+}
+
+.cz-error
+{
+	margin-bottom: var(--nx-space-3);
+	color: var(--nx-err);
+}
+
+.cz-mono,
+.cz-command
+{
+	font-family: var(--nx-font-mono);
+	font-size: 12px;
+}
+
+.cz-command
+{
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
+}
+
+.cz-meta .cz-command
+{
+	display: inline;
+	white-space: normal;
+	word-break: break-all;
+}
+
+/* --- forms and the detail view ------------------------------------------------------------ */
+
+.cz-newForm
+{
+	display: flex;
+	flex-direction: column;
+	gap: var(--nx-space-2);
+	margin-bottom: var(--nx-space-3);
+}
+
+.cz-formTitle
+{
+	font-weight: 600;
+}
+
+.cz-field
+{
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.cz-inline
+{
+	flex-direction: row;
+	align-items: center;
+	gap: var(--nx-space-2);
+	margin: var(--nx-space-2) 0;
+}
+
+.cz-scope
+{
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.cz-scope legend
+{
+	margin-bottom: 4px;
+}
+
+.cz-disabled
+{
+	opacity: 0.6;
+}
+
+.cz-formError
+{
+	color: var(--nx-err);
+	min-height: 1em;
+}
+
+.cz-narrow
+{
+	width: 90px;
+}
+
+.cz-grow
+{
+	flex: 1;
+	min-width: 0;
+}
+
+.cz-back
+{
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-bottom: var(--nx-space-2);
+}
+
+.cz-head
+{
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--nx-space-3);
+	margin-bottom: var(--nx-space-3);
+}
+
+.cz-head h1
+{
+	margin: 0 0 4px;
+	font-size: 18px;
+	font-weight: 600;
+}
+
+.cz-head p
+{
+	margin: 0;
+	max-width: 620px;
+}
+
+.cz-meta
+{
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin: var(--nx-space-3) 0;
+}
+
+.cz-metaRow
+{
+	display: flex;
+	gap: var(--nx-space-3);
+}
+
+.cz-metaLabel
+{
+	flex: 0 0 90px;
+	color: var(--nx-muted);
+}
+
+.cz-metaRow code
+{
+	word-break: break-all;
+}
+
+.cz-previewTitle
+{
+	margin: var(--nx-space-3) 0 var(--nx-space-2);
+	font-weight: 600;
+}
+
+.cz-preview
+{
+	margin: 0;
+	padding: var(--nx-space-3);
+	max-height: 420px;
+	overflow: auto;
+	border: 1px solid var(--nx-border);
+	border-radius: 6px;
+	background: var(--nx-surface-2);
+	font-family: var(--nx-font-mono);
+	font-size: 12px;
+	white-space: pre-wrap;
+}
+
+.cz-previewList
+{
+	margin: 4px 0 10px;
+	padding-left: 20px;
+	line-height: 1.6;
+}
+
+.cz-learned
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-top: 16px;
+}
+
+.cz-learned p
+{
+	margin: 4px 0 0;
+}
+
+/* --- dialogs ------------------------------------------------------------------------------ */
+
+.cz-dialog
+{
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	padding-top: 6vh;
+	background: rgba(0, 0, 0, 0.45);
+}
+
+.cz-dialog[hidden]
+{
+	display: none;
+}
+
+.cz-dialogBox
+{
+	width: min(640px, 92vw);
+	max-height: 84vh;
+	overflow: auto;
+	padding: var(--nx-space-4);
+	border: 1px solid var(--nx-border);
+	border-radius: 8px;
+	background: var(--nx-bg);
+}
+
+.cz-dialogHead
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.cz-dialogHead h2
+{
+	margin: 0;
+	font-size: 16px;
+}
+
+.cz-exRow
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--nx-space-3);
+	padding: 8px 0;
+	border-bottom: 1px solid var(--nx-border);
+}
+
+/* --- plugins: tabs, switch and the marketplace's cards ------------------------------------ */
+
+.cz-tabs
+{
+	display: flex;
+	gap: 2px;
+	margin-bottom: var(--nx-space-3);
+	border-bottom: 1px solid var(--nx-border);
+}
+
+.cz-tab
+{
+	padding: 6px 12px;
+	border: 0;
+	border-bottom: 2px solid transparent;
+	background: transparent;
+	color: var(--nx-muted);
+	font: inherit;
+	cursor: pointer;
+}
+
+.cz-tab:hover
+{
+	color: var(--nx-fg);
+}
+
+.cz-tabOn
+{
+	border-bottom-color: var(--nx-focus);
+	color: var(--nx-fg);
+	font-weight: 600;
+}
+
+.cz-cards
+{
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+	gap: var(--nx-space-3);
+	margin-bottom: var(--nx-space-4);
+}
+
+.cz-card
+{
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 12px 14px;
+	border: 1px solid var(--nx-border);
+	border-radius: 8px;
+	transition: border-color var(--nx-duration) var(--nx-ease);
+}
+
+.cz-card:hover
+{
+	border-color: var(--nx-focus);
+}
+
+.cz-card p
+{
+	margin: 0;
+}
+
+.cz-card .nx-row
+{
+	margin-top: auto;
+	padding-top: 4px;
+}
+
+.cz-cardHead
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--nx-space-2);
+}
+
+.cz-desc
+{
+	color: var(--nx-muted);
+}
+
+.cz-switch
+{
+	position: relative;
+	display: inline-flex;
+	flex: 0 0 auto;
+	margin-right: 4px;
+	cursor: pointer;
+}
+
+.cz-switch input
+{
+	position: absolute;
+	opacity: 0;
+	width: 32px;
+	height: 18px;
+	margin: 0;
+	cursor: pointer;
+}
+
+.cz-switch span[aria-hidden]
+{
+	width: 32px;
+	height: 18px;
+	border-radius: 9px;
+	background: var(--nx-border);
+	transition: background var(--nx-duration) var(--nx-ease);
+}
+
+.cz-switch span[aria-hidden]::after
+{
+	content: '';
+	display: block;
+	width: 14px;
+	height: 14px;
+	margin: 2px;
+	border-radius: 50%;
+	background: var(--nx-fg);
+	transition: transform var(--nx-duration) var(--nx-ease);
+}
+
+.cz-switch input:checked + span[aria-hidden]
+{
+	background: var(--nx-focus);
+}
+
+.cz-switch input:checked + span[aria-hidden]::after
+{
+	transform: translateX(14px);
+}
+
+.cz-switch input:focus-visible + span[aria-hidden]
+{
+	outline: 1px solid var(--nx-focus);
+	outline-offset: 2px;
+}
+
+.cz-srOnly
+{
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+}
+
+.cz-marketBar
+{
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-bottom: var(--nx-space-2);
+}
+
+.cz-filter
+{
+	padding: 3px 10px;
+	border: 1px solid var(--nx-border);
+	border-radius: 999px;
+	background: transparent;
+	color: var(--nx-fg);
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.cz-filterOn
+{
+	border-color: var(--nx-focus);
+	background: var(--nx-surface-active);
+}
+
+.cz-marketHead
+{
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--nx-space-2);
+	margin-bottom: var(--nx-space-3);
+}
+
+.cz-marketHead p
+{
+	margin: 0;
+}
+
+.cz-addMarket
+{
+	display: flex;
+	flex-direction: column;
+	gap: var(--nx-space-2);
+}
+
+.cz-inputRow
+{
+	display: flex;
+	gap: var(--nx-space-2);
+}
+
+.cz-inputRow .nx-input
+{
+	flex: 1 1 auto;
+}
+
+.cz-link
+{
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--vscode-textLink-foreground, var(--nx-focus));
+	font: inherit;
+	cursor: pointer;
+	text-decoration: underline;
+}
+
+@media (max-width: 640px)
+{
+	.cz-root
+	{
+		padding: var(--nx-space-3);
+	}
+
+	.cz-head,
+	.cz-row
+	{
+		flex-wrap: wrap;
+	}
+
+	.cz-rowActions
+	{
+		padding: 0 12px 8px 50px;
+	}
+}

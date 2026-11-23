@@ -28,6 +28,7 @@ import { IUserDataSyncEnablementService, IUserDataSyncService, IUserDataSyncStor
 import { IsWebContext } from '../../../../platform/contextkey/common/contextkeys.js';
 import { Promises } from '../../../../base/common/async.js';
 import { IUserDataSyncWorkbenchService } from '../../../services/userDataSync/common/userDataSync.js';
+import { IStatusbarService, StatusbarAlignment, IStatusbarEntryAccessor, IStatusbarEntry } from '../../../services/statusbar/browser/statusbar.js';
 import { Event } from '../../../../base/common/event.js';
 import { toAction } from '../../../../base/common/actions.js';
 
@@ -163,6 +164,8 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 	private readonly badgeDisposable = this._register(new MutableDisposable());
 	private updateStateContextKey: IContextKey<string>;
 	private majorMinorUpdateAvailableContextKey: IContextKey<boolean>;
+	/** The status bar entry, present only while an update is actually in play. */
+	private updateStatusEntry: IStatusbarEntryAccessor | undefined;
 
 	constructor(
 		@IStorageService private readonly storageService: IStorageService,
@@ -175,7 +178,8 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 		@IProductService private readonly productService: IProductService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
-		@IHostService private readonly hostService: IHostService
+		@IHostService private readonly hostService: IHostService,
+		@IStatusbarService private readonly statusbarService: IStatusbarService
 	) {
 		super();
 		this.state = updateService.state;
@@ -274,7 +278,95 @@ export class UpdateContribution extends Disposable implements IWorkbenchContribu
 			this.badgeDisposable.value = this.activityService.showGlobalActivity({ badge });
 		}
 
+		this.updateStatusBarEntry(state);
+
 		this.state = state;
+	}
+
+	/**
+	 * An update is only useful if the person notices it.
+	 *
+	 * The gear badge is easy to miss, and the notification is dismissed once and
+	 * gone. The status bar is the one surface always in view, so while an update is
+	 * in play it says so there, next to the other Nexora items, and a click does
+	 * the obvious thing for whichever stage it has reached. Nothing is shown when
+	 * there is no update, so the bar stays quiet the rest of the time.
+	 */
+	private updateStatusBarEntry(state: UpdateState): void {
+		let entry: IStatusbarEntry | undefined;
+		const name = this.productService.nameShort;
+
+		switch (state.type) {
+			case StateType.AvailableForDownload:
+				entry = {
+					name: nls.localize('updateStatus', "Update"),
+					text: `$(cloud-download) ${nls.localize('updateAvailableShort', "Update Available")}`,
+					ariaLabel: nls.localize('updateAvailableAria', "An update for {0} is available", name),
+					tooltip: nls.localize('updateAvailableTooltip', "A new {0} is available. Click to download it.", name),
+					command: 'update.downloadNow',
+					kind: 'prominent'
+				};
+				break;
+			case StateType.Downloading:
+				entry = {
+					name: nls.localize('updateStatus', "Update"),
+					text: `$(sync~spin) ${nls.localize('updateDownloadingShort', "Downloading update")}`,
+					ariaLabel: nls.localize('updateDownloadingAria', "Downloading the {0} update", name),
+					tooltip: nls.localize('updateDownloadingTooltip', "Downloading the new {0} in the background.", name)
+				};
+				break;
+			case StateType.Downloaded:
+				entry = {
+					name: nls.localize('updateStatus', "Update"),
+					text: `$(cloud-download) ${nls.localize('updateInstallShort', "Install Update")}`,
+					ariaLabel: nls.localize('updateInstallAria', "Install the {0} update", name),
+					tooltip: nls.localize('updateInstallTooltip', "The new {0} is downloaded. Click to install it.", name),
+					command: 'update.install',
+					kind: 'prominent'
+				};
+				break;
+			case StateType.Updating:
+				entry = {
+					name: nls.localize('updateStatus', "Update"),
+					text: `$(sync~spin) ${nls.localize('updateUpdatingShort', "Updating")}`,
+					ariaLabel: nls.localize('updateUpdatingAria', "Updating {0}", name),
+					tooltip: nls.localize('updateUpdatingTooltip', "Installing the new {0}.", name)
+				};
+				break;
+			case StateType.Ready:
+				entry = {
+					name: nls.localize('updateStatus', "Update"),
+					// Restarting is the whole remaining step, so the label is the instruction.
+					text: `$(sync) ${nls.localize('updateRestartShort', "Restart to Update")}`,
+					ariaLabel: nls.localize('updateRestartAria', "Restart {0} to finish updating", name),
+					tooltip: nls.localize('updateRestartTooltip', "The new {0} is ready. Click to restart and finish updating; your folder reopens.", name),
+					command: 'update.restart',
+					kind: 'prominent'
+				};
+				break;
+		}
+
+		if (!entry) {
+			this.updateStatusEntry?.dispose();
+			this.updateStatusEntry = undefined;
+			return;
+		}
+
+		if (this.updateStatusEntry) {
+			this.updateStatusEntry.update(entry);
+		} else {
+			// Right of centre, above the other right-hand items, so it reads as the
+			// one thing asking for attention without displacing anything permanent.
+			this.updateStatusEntry = this.statusbarService.addEntry(
+				entry, 'status.update', StatusbarAlignment.RIGHT, 100
+			);
+		}
+	}
+
+	override dispose(): void {
+		this.updateStatusEntry?.dispose();
+		this.updateStatusEntry = undefined;
+		super.dispose();
 	}
 
 	private onError(error: string): void {

@@ -74,8 +74,10 @@ export function createHistoryApi(transport: Transport) {
 			return await transport.get(`/api/history/workflow/${encodeURIComponent(workflowId)}`);
 		},
 
-		getRollbackable: async (userId: string = 'default'): Promise<RollbackableItem[]> => {
-			return await transport.get(`/api/history/rollbackable/${encodeURIComponent(userId)}`);
+		/** With workspaceId, only that folder's actions (plus older rows with no folder recorded). */
+		getRollbackable: async (userId: string = 'default', workspaceId?: string): Promise<RollbackableItem[]> => {
+			const query = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : '';
+			return await transport.get(`/api/history/rollbackable/${encodeURIComponent(userId)}${query}`);
 		},
 
 		getRollbackInfo: async (historyId: number): Promise<RollbackInfo> => {

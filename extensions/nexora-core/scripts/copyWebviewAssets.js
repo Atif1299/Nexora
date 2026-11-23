@@ -39,8 +39,14 @@ function main() {
 	// panels reference colour and spacing variables that nothing defines.
 	copyWebviewFolder(root, 'shared', ['tokens.css', 'base.css', 'components.css']);
 
+	// VS Code's icon font, served beside them (codicon.css loads codicon.ttf by relative URL).
+	const codicons = path.join(path.dirname(require.resolve('@vscode/codicons/package.json')), 'dist');
+	for (const file of ['codicon.css', 'codicon.ttf']) {
+		copyFile(path.join(codicons, file), path.join(root, 'out', 'webview', 'shared', file));
+	}
+
 	// Chat panel assets
-	copyWebviewFolder(root, 'chat', ['chat.css', 'chat.js']);
+	copyWebviewFolder(root, 'chat', ['chat.css', 'composer.js', 'chat.js']);
 
 	// Week 11: Workflow panel assets
 	copyWebviewFolder(root, 'workflow', ['workflow.css', 'workflow.js']);
@@ -51,15 +57,17 @@ function main() {
 	// Week 12: Settings panel assets
 	copyWebviewFolder(root, 'settings', ['settings.css', 'settings.js']);
 
-	// Week 15: Analytics panel assets
-	copyWebviewFolder(root, 'analytics', ['analytics.css', 'analytics.js']);
-
-	// Week 16: Templates + Timeline panel assets
-	copyWebviewFolder(root, 'templates', ['templates.css', 'templates.js']);
+	// Timeline panel assets
 	copyWebviewFolder(root, 'timeline', ['timeline.css', 'timeline.js']);
 
 	// Platforms editor page assets
 	copyWebviewFolder(root, 'platforms', ['platforms.css', 'platforms.js']);
+
+	// Customize editor page assets (Phase 3)
+	copyWebviewFolder(root, 'customize', ['customize.css', 'model.js', 'pages.js', 'orchestration.js', 'customize.js']);
+
+	// Constellation editor page assets: the workspace graph lit by the running plan
+	copyWebviewFolder(root, 'constellation', ['constellation.css', 'constellation.js']);
 }
 
 main();

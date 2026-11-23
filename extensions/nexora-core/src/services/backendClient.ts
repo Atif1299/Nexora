@@ -10,8 +10,11 @@ export interface BackendConfig {
 }
 
 import { createTransport, type HeaderProvider, type SSEEvent } from './backend/transport';
+import type { PlatformUsage, ServerTools } from './platformUsage';
+import type { ImportSource, MyServer, MyServers, ServerBody } from './mcpServers';
 import { createPlatformsApi } from './backend/platforms';
-import { createMemoryApi, type MemorySuggestion, type ProjectFact, type ProjectFactsResponse, type ProjectRulesResponse, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
+import { createCustomizeApi } from './backend/customize';
+import { createMemoryApi, type CodeGraph, type MemorySuggestion, type ProjectFact, type ProjectFactsResponse, type ProjectRulesResponse, type SuggestionsResponse, type TimelineEntry, type TimelineResponse, type TimelineDiff } from './backend/memory';
 import { createWorkflowsApi, type WorkflowTemplate, type TemplateListResponse, type SuggestFromPlanResponse, type SaveFromPlanRequest, type ImportPreview } from './backend/workflows';
 import { createCognitiveApi } from './backend/cognitive';
 import { createAuthApi, type AuthStatus, type SaasConnector } from './backend/auth';
@@ -35,9 +38,17 @@ import {
 	type McpDevicePoll
 } from './backend/mcpConnect';
 import { createA2AApi, type A2ADelegateResult } from './backend/a2a';
+import type { Effort } from '../webview/chat/types';
 
 export type { AgentMessage, AgentTurnResponse, ToolCall, AgentMode };
 export type { SSEEvent };
+
+/** One agent turn that called tools: the text before the calls, the calls, and their results. */
+export interface TranscriptRound {
+	content: string;
+	tool_calls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+	results: Array<{ tool_call_id: string; name: string; content: string }>;
+}
 export type { ConnectionsResponse, TestResult, ProviderStatus };
 export type { CapabilitiesReport };
 export type { ModelCatalog };
@@ -108,7 +119,8 @@ export class BackendClient {
 	private async _checkHealthOnce(): Promise<boolean> {
 		try {
 			const response = await this.transport.get('/api/health');
-			const ok = response?.status === 'ok';
+			// Same identity check as the engine start: another app answering ok is not the engine.
+			const ok = response?.status === 'ok' && response?.service === 'nexora-engine';
 			this._healthyUntil = ok ? Date.now() + 20_000 : 0;
 			return ok;
 		} catch {
@@ -119,6 +131,54 @@ export class BackendClient {
 
 	async getPlatforms(): Promise<any[]> {
 		return createPlatformsApi(this.transport).getPlatforms();
+	}
+
+	async getPlatformUsage(): Promise<Record<string, PlatformUsage> | undefined> {
+		return createPlatformsApi(this.transport).getPlatformUsage();
+	}
+
+	async getServerTools(server: string): Promise<ServerTools | undefined> {
+		return createPlatformsApi(this.transport).getServerTools(server);
+	}
+
+	async setToolEnabled(server: string, tool: string, enabled: boolean): Promise<ServerTools | undefined> {
+		return createPlatformsApi(this.transport).setToolEnabled(server, tool, enabled);
+	}
+
+	getMyServers(): Promise<MyServers | undefined> {
+		return createPlatformsApi(this.transport).getMyServers();
+	}
+
+	setMcpWorkspace(path: string | undefined): Promise<void> {
+		return createPlatformsApi(this.transport).setMcpWorkspace(path);
+	}
+
+	addServer(body: ServerBody): Promise<MyServer> {
+		return createPlatformsApi(this.transport).addServer(body);
+	}
+
+	editServer(scope: string, name: string, body: ServerBody): Promise<MyServer> {
+		return createPlatformsApi(this.transport).editServer(scope, name, body);
+	}
+
+	removeServer(scope: string, name: string): Promise<void> {
+		return createPlatformsApi(this.transport).removeServer(scope, name);
+	}
+
+	enableServer(scope: string, name: string, enabled: boolean): Promise<MyServer> {
+		return createPlatformsApi(this.transport).enableServer(scope, name, enabled);
+	}
+
+	approveServer(name: string, fingerprint?: string): Promise<MyServer> {
+		return createPlatformsApi(this.transport).approveServer(name, fingerprint);
+	}
+
+	getImportSources(): Promise<ImportSource[] | undefined> {
+		return createPlatformsApi(this.transport).getImportSources();
+	}
+
+	applyImport(items: { source: string; name: string; scope: string }[]): Promise<MyServer[]> {
+		return createPlatformsApi(this.transport).applyImport(items);
 	}
 
 	async searchPlatforms(query: string): Promise<any[]> {
@@ -161,6 +221,11 @@ export class BackendClient {
 
 	async getWorkspaceIdForPath(workspacePath: string): Promise<{ workspace_path: string; workspace_id: string }> {
 		return createMemoryApi(this.transport).getWorkspaceIdForPath(workspacePath);
+	}
+
+	/** The workspace as a graph (files, folders, resolved imports) for the Constellation page. */
+	async getCodeGraph(workspacePath: string, maxFiles?: number): Promise<CodeGraph> {
+		return createMemoryApi(this.transport).getCodeGraph(workspacePath, maxFiles);
 	}
 
 	/**
@@ -226,13 +291,14 @@ export class BackendClient {
 		message: string,
 		workspacePath?: string,
 		model?: string,
-		options?: { session_id?: string; workspace_id?: string; signal?: AbortSignal }
+		options?: { session_id?: string; workspace_id?: string; signal?: AbortSignal; effort?: Effort }
 	): AsyncIterable<SSEEvent> {
-		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string; project_rules: boolean } = {
+		const body: { message: string; workspace_path?: string; model?: string; session_id?: string; workspace_id?: string; project_rules: boolean; effort?: Effort } = {
 			message,
 			workspace_path: workspacePath,
 			model,
-			project_rules: projectRulesEnabled()
+			project_rules: projectRulesEnabled(),
+			effort: options?.effort
 		};
 		if (options?.session_id) {
 			body.session_id = options.session_id;
@@ -260,7 +326,8 @@ export class BackendClient {
 		model?: string,
 		mode: AgentMode = 'ask',
 		sessionId?: string,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		effort?: Effort
 	): Promise<AgentTurnResponse> {
 		return createAgentApi(this.transport).agentTurn(
 			messages,
@@ -269,7 +336,8 @@ export class BackendClient {
 			model,
 			mode,
 			sessionId,
-			signal
+			signal,
+			effort
 		);
 	}
 
@@ -283,7 +351,9 @@ export class BackendClient {
 		model?: string,
 		mode: AgentMode = 'ask',
 		sessionId?: string,
-		signal?: AbortSignal
+		signal?: AbortSignal,
+		effort?: Effort,
+		subagent?: string
 	): AsyncIterable<SSEEvent> {
 		return createAgentApi(this.transport).agentTurnStream(
 			messages,
@@ -292,7 +362,9 @@ export class BackendClient {
 			model,
 			mode,
 			sessionId,
-			signal
+			signal,
+			effort,
+			subagent
 		);
 	}
 
@@ -309,19 +381,24 @@ export class BackendClient {
 		});
 	}
 
+	/** rounds: the tool rounds before an Agent/Ask answer, so later messages remember them (G-46). */
 	async appendTranscript(
 		workspaceId: string,
 		sessionId: string,
 		role: string,
 		content: string,
-		mode: string
+		mode: string,
+		rounds?: TranscriptRound[],
+		usage?: { model: string; cost_usd: number }
 	): Promise<void> {
 		await this.transport.post('/api/transcript/append', {
 			workspace_id: workspaceId,
 			session_id: sessionId,
 			role,
 			content,
-			mode
+			mode,
+			...(rounds && rounds.length > 0 ? { rounds } : {}),
+			...(usage ? { usage } : {})
 		});
 	}
 
@@ -666,6 +743,7 @@ export class BackendClient {
 		success: boolean;
 		summary: string;
 		files: string[];
+		cost_usd?: number;
 	}): Promise<any> {
 		return createOrchestrateApi(this.transport).submitTaskResult(payload);
 	}
@@ -714,6 +792,11 @@ export class BackendClient {
 	 */
 	async modifyPlan(planId: string, modification: any): Promise<any> {
 		return createOrchestrateApi(this.transport).modifyPlan(planId, modification);
+	}
+
+	/** Recompute a waiting plan's readiness after a platform sign-in. */
+	async recheckPlan(planId: string): Promise<any> {
+		return createOrchestrateApi(this.transport).recheckPlan(planId);
 	}
 
 	/**
@@ -780,6 +863,10 @@ export class BackendClient {
 		return createWorkflowsApi(this.transport).exportTemplate(templateId);
 	}
 
+	async deleteTemplate(templateId: string): Promise<{ deleted: string }> {
+		return createWorkflowsApi(this.transport).deleteTemplate(templateId);
+	}
+
 	async previewImportTemplate(bundle: Record<string, unknown>): Promise<ImportPreview> {
 		return createWorkflowsApi(this.transport).previewImport(bundle);
 	}
@@ -793,8 +880,13 @@ export class BackendClient {
 		return createMemoryApi(this.transport).getFacts(workspaceId);
 	}
 
-	/** Project rule files (AGENTS.md, CLAUDE.md, .nexora/rules/*.md) the agent receives. */
-	async getProjectRules(workspacePath: string): Promise<ProjectRulesResponse> {
+	/** Skills, slash commands and subagents (Phase 3 Customize). */
+	customize() {
+		return createCustomizeApi(this.transport);
+	}
+
+	/** Rule files the agent receives: personal AGENTS.md, then AGENTS.md, CLAUDE.md, .nexora/rules/*.md. */
+	async getProjectRules(workspacePath?: string): Promise<ProjectRulesResponse> {
 		return createMemoryApi(this.transport).getRules(workspacePath);
 	}
 
@@ -842,6 +934,11 @@ export class BackendClient {
 		return createMemoryApi(this.transport).getTimeline(workspaceId);
 	}
 
+	/** Delete one snapshot; the engine refuses the current one. */
+	async deleteTimelineSnapshot(snapshotId: string, workspaceId?: string): Promise<{ deleted: string; workspace_id: string }> {
+		return createMemoryApi(this.transport).deleteTimelineSnapshot(snapshotId, workspaceId);
+	}
+
 	async getTimelineSnapshot(snapshotId: string, workspaceId?: string): Promise<TimelineEntry> {
 		return createMemoryApi(this.transport).getTimelineSnapshot(snapshotId, workspaceId);
 	}
@@ -882,8 +979,8 @@ export class BackendClient {
 	 * @param userId User identifier
 	 * @returns List of rollbackable items
 	 */
-	async getRollbackable(userId: string = 'default'): Promise<RollbackableItem[]> {
-		return createHistoryApi(this.transport).getRollbackable(userId);
+	async getRollbackable(userId: string = 'default', workspaceId?: string): Promise<RollbackableItem[]> {
+		return createHistoryApi(this.transport).getRollbackable(userId, workspaceId);
 	}
 
 	/**

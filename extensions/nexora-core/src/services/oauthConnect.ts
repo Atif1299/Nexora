@@ -6,6 +6,7 @@
 import * as vscode from 'vscode';
 import { getBackendClient } from './backendClient';
 import { refreshCapabilities } from './backend/capabilities';
+import { connectMcpServer } from './mcpConnect';
 
 /**
  * Browser OAuth Connect for GitHub and Vercel, shared by the platform sidebar,
@@ -87,7 +88,9 @@ export async function startOAuthConnect(provider: OAuthProvider): Promise<OAuthS
 	const client = getBackendClient();
 	try {
 		if (!(await isOAuthAppConfigured(provider))) {
-			return { status: 'needs_setup', message: oauthSetupStep(provider) };
+			// No OAuth app of the user's own (every fresh install): GitHub's device flow with the
+			// engine's shipped public client ID needs none, and its token works for plan steps too.
+			return provider === 'github' ? await connectGitHubByDevice() : { status: 'needs_setup', message: oauthSetupStep(provider) };
 		}
 	} catch (error) {
 		return { status: 'error', message: error instanceof Error ? error.message : 'Engine not reachable' };
@@ -112,6 +115,22 @@ export async function startOAuthConnect(provider: OAuthProvider): Promise<OAuthS
 	}
 	watchForCompletion(provider);
 	return { status: 'opened' };
+}
+
+async function connectGitHubByDevice(): Promise<OAuthStartOutcome> {
+	const result = await connectMcpServer('github');
+	switch (result.status) {
+		case 'connected':
+			completeEmitter.fire('github');
+			return { status: 'opened' };
+		case 'started':
+			watchForCompletion('github');
+			return { status: 'opened' };
+		case 'cancelled':
+			return { status: 'error', message: 'GitHub sign-in was cancelled.' };
+		default:
+			return result;
+	}
 }
 
 async function checkConnected(provider: OAuthProvider): Promise<boolean> {

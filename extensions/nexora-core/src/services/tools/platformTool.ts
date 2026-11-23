@@ -95,7 +95,9 @@ export async function executePlatformTool(
 	readOnlyHint: boolean
 ): Promise<ToolResult> {
 	const key = `${platform}__${tool}`;
-	const mode = getPlatformToolApproval();
+	// A server's own setting (engine `_trust`, from its mcp.json entry) wins over the global one.
+	const trust = typeof args._trust === 'string' ? args._trust : '';
+	const mode = trust === 'ask' || trust === 'trust-read-only' || trust === 'never-ask' ? trust : getPlatformToolApproval();
 
 	let approved = mode === 'never-ask' || sessionAllowed.has(key);
 	if (!approved && mode === 'trust-read-only' && readOnlyHint) {

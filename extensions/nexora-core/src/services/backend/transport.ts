@@ -24,6 +24,10 @@ export type SSEEvent = {
 	cost_usd?: number;
 	/** chat/stream "remembered": the project fact this message just saved. */
 	value?: string;
+	/** agent "tool_delta": the next piece of an edit tool call's JSON arguments. */
+	index?: number;
+	name?: string;
+	arguments?: string;
 };
 
 export type Transport = {
@@ -35,6 +39,7 @@ export type Transport = {
 	post: (endpoint: string, data: any, timeoutMs?: number, signal?: AbortSignal) => Promise<any>;
 	postStream: (endpoint: string, data: any, signal?: AbortSignal, timeoutMs?: number) => AsyncIterable<SSEEvent>;
 	put: (endpoint: string, data?: any) => Promise<any>;
+	patch: (endpoint: string, data?: any) => Promise<any>;
 	delete: (endpoint: string) => Promise<any>;
 };
 
@@ -47,15 +52,25 @@ export class RequestCancelledError extends Error {
 }
 
 async function errorFromHttpResponse(response: Response): Promise<Error> {
+	let detail = '';
 	try {
 		const body = await response.json() as { detail?: unknown };
-		if (typeof body?.detail === 'string' && body.detail.trim()) {
-			return new Error(body.detail);
-		}
+		detail = typeof body?.detail === 'string' ? body.detail.trim() : '';
 	} catch {
 		// body was not JSON
 	}
-	return new Error(`HTTP ${response.status}`);
+	// The engine's own errors explain themselves; a bare or route-level 404 names the address,
+	// so a wrong server on the port reads as that rather than as a broken feature.
+	if (detail && detail !== 'Not Found') {
+		return new Error(detail);
+	}
+	let path = response.url;
+	try {
+		path = new URL(response.url).pathname;
+	} catch {
+		// keep the raw url
+	}
+	return new Error(`${detail || 'HTTP ' + response.status} (${response.status} from ${path || 'the engine'})`);
 }
 
 export function isRequestCancelled(error: unknown): boolean {
@@ -243,7 +258,7 @@ export function createTransport(
 				clearTimeout(timer);
 
 				if (!response.ok) {
-					throw new Error(`HTTP ${response.status}`);
+					throw await errorFromHttpResponse(response);
 				}
 				const body = response.body as { getReader?: () => { read(): Promise<{ done: boolean; value?: Uint8Array }>; releaseLock(): void } } | null;
 				if (!body || typeof body.getReader !== 'function') {
@@ -302,7 +317,22 @@ export function createTransport(
 			}, config.timeout);
 
 			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
+				throw await errorFromHttpResponse(response);
+			}
+
+			return await response.json();
+		},
+		patch: async (endpoint: string, data?: any) => {
+			const url = `${config.baseUrl}${endpoint}`;
+
+			const response = await fetchWithTimeout(url, {
+				method: 'PATCH',
+				headers: await buildHeaders(),
+				body: data ? JSON.stringify(data) : undefined
+			}, config.timeout);
+
+			if (!response.ok) {
+				throw await errorFromHttpResponse(response);
 			}
 
 			return await response.json();
@@ -316,7 +346,7 @@ export function createTransport(
 			}, config.timeout);
 
 			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
+				throw await errorFromHttpResponse(response);
 			}
 
 			return await response.json();

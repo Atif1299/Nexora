@@ -19,7 +19,7 @@ export function getChatWebviewHtml(
 		folder: 'chat',
 		title: 'Nexora Chat',
 		styles: ['chat.css'],
-		scripts: ['chat.js'],
+		scripts: ['composer.js', 'chat.js'],
 		// chat.js reads this as it initializes; without it the panel renders
 		// as disconnected and signed out until the first push arrives.
 		initialState,
@@ -52,8 +52,10 @@ export function getChatWebviewHtml(
 
 		<div class="nx-firstRun" id="firstRunCard" hidden>
 			<div class="nx-firstRunBody">
-				<div class="nx-firstRunTitle">Add an API key to start</div>
-				<div class="nx-firstRunSub">Chat needs a provider key. Paste one here or open Settings. You can dismiss this and keep using the editor.</div>
+				<div class="nx-firstRunTitle">Start chatting</div>
+				<div class="nx-firstRunSub">Sign in with GitHub to use Nexora Cloud: $1 of free credit, no API keys needed.</div>
+				<button type="button" class="nx-firstRunCloud" id="firstRunCloud">Sign in with GitHub</button>
+				<div class="nx-firstRunOr">Or use your own provider key:</div>
 				<div class="nx-firstRunRow">
 					<label class="sr-only" for="firstRunProvider">Provider</label>
 					<select id="firstRunProvider" class="nx-firstRunSelect" aria-label="LLM provider">
@@ -77,27 +79,55 @@ export function getChatWebviewHtml(
 			<section class="nx-messages" id="messages" aria-label="Messages">
 				<div class="nx-welcome" id="welcome">
 					<div class="nx-welcomeIcon">
-						<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-							<path d="M12 2L2 7l10 5 10-5-10-5z"/>
-							<path d="M2 17l10 5 10-5"/>
-							<path d="M2 12l10 5 10-5"/>
+						<svg width="56" height="56" viewBox="13 11 78 78" aria-hidden="true">
+							<defs>
+								<linearGradient id="nxw-green" x1="0" y1="0" x2="1" y2="1">
+									<stop offset="0" stop-color="#43E6A1"/>
+									<stop offset="1" stop-color="#0B8550"/>
+								</linearGradient>
+								<filter id="nxw-glow" x="-100%" y="-100%" width="300%" height="300%">
+									<feGaussianBlur stdDeviation="2.5"/>
+								</filter>
+								<filter id="nxw-shadow" x="-20%" y="-20%" width="140%" height="140%">
+									<feGaussianBlur stdDeviation="1.3"/>
+								</filter>
+							</defs>
+							<rect x="18" y="25" width="48" height="38" rx="8" fill="#3A4641"/>
+							<rect x="27.5" y="37.8" width="48" height="38" rx="8" fill="#000000" fill-opacity="0.22" filter="url(#nxw-shadow)"/>
+							<rect x="27" y="36" width="48" height="38" rx="8" fill="url(#nxw-green)"/>
+							<circle cx="33.5" cy="42.5" r="1.5" fill="#FFFFFF" fill-opacity="0.85"/>
+							<circle cx="38" cy="42.5" r="1.5" fill="#FFFFFF" fill-opacity="0.6"/>
+							<circle cx="42.5" cy="42.5" r="1.5" fill="#FFFFFF" fill-opacity="0.4"/>
+							<path d="M36 52 L43 57.5 L36 63" fill="none" stroke="#FFFFFF" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+							<path d="M48 63 H60" fill="none" stroke="#FFFFFF" stroke-width="4.4" stroke-linecap="round"/>
+							<circle cx="75" cy="36" r="7" fill="#7CF7C0" fill-opacity="0.8" filter="url(#nxw-glow)"/>
+							<circle cx="75" cy="36" r="5" fill="#5EF2B5" stroke="#0B6B43" stroke-width="1.2"/>
+							<circle cx="75" cy="36" r="2.3" fill="#FFFFFF"/>
 						</svg>
 					</div>
 					<div class="nx-welcomeTitle">Nexora AI</div>
-					<div class="nx-welcomeSub">Universal AI Orchestration - Chat, Plan, or Execute</div>
-					
-					<div class="nx-quickActions">
-						<button class="nx-quickBtn" data-action="platforms">
-							<span class="nx-quickIcon" aria-hidden="true">#</span>
-							Browse Platforms
+					<div class="nx-welcomeSub">Chat, plan across your platforms, or let the agent build.</div>
+
+					<div class="nx-welcomeCards">
+						<button type="button" class="nx-welcomeCard" data-page="platforms">
+							<i class="codicon codicon-plug" aria-hidden="true"></i>
+							<span class="nx-welcomeCardTitle">Connect a platform</span>
+							<span class="nx-welcomeCardDesc">GitHub, Vercel, Supabase and your MCP servers</span>
 						</button>
-						<button class="nx-quickBtn" data-action="history">
-							<span class="nx-quickIcon" aria-hidden="true">H</span>
-							View History
+						<button type="button" class="nx-welcomeCard" data-page="recipes">
+							<i class="codicon codicon-play-circle" aria-hidden="true"></i>
+							<span class="nx-welcomeCardTitle">Run a recipe</span>
+							<span class="nx-welcomeCardDesc">Start from a saved multi-step plan</span>
 						</button>
-						<button class="nx-quickBtn" data-action="memory">
-							<span class="nx-quickIcon" aria-hidden="true">I</span>
-							Index Workspace
+						<button type="button" class="nx-welcomeCard" data-page="customize">
+							<i class="codicon codicon-extensions" aria-hidden="true"></i>
+							<span class="nx-welcomeCardTitle">Add a skill or agent</span>
+							<span class="nx-welcomeCardDesc">Plugins, skills, agents, hooks and rules</span>
+						</button>
+						<button type="button" class="nx-welcomeCard" data-action="indexWorkspace">
+							<i class="codicon codicon-database" aria-hidden="true"></i>
+							<span class="nx-welcomeCardTitle">Index this workspace</span>
+							<span class="nx-welcomeCardDesc">Let chat and the agent search your code</span>
 						</button>
 					</div>
 				</div>
@@ -106,64 +136,46 @@ export function getChatWebviewHtml(
 
 		<footer class="nx-footer">
 			<div class="nx-composerCard" id="composerCard">
+				<div class="nx-composerTags" id="composerTags" hidden></div>
 				<div class="nx-composerInputRow">
-					<input class="nx-input" type="text" id="input" placeholder="Ask a question, describe what to build, or give a command..." />
+					<textarea class="nx-input" id="input" rows="1" placeholder="Ask anything. Type @ to add a file, / for commands"></textarea>
 				</div>
 				<div class="nx-composerToolbar">
-					<div class="nx-modeSelector">
-						<div class="nx-dd" id="modeDd" data-dd-kind="mode">
-							<button type="button" class="nx-ddTrigger" id="modeDdTrigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="modeDdMenu" title="Select interaction mode">
-								<span class="nx-ddTriggerText" id="modeDdText">Chat</span>
-								<span class="nx-ddChevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 3.5 5 6 7.5 3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-							</button>
-							<div class="nx-ddMenu" id="modeDdMenu" role="listbox" aria-labelledby="modeDdTrigger" hidden>
-								<button type="button" class="nx-ddItem" role="option" data-value="chat" data-label="Chat"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Chat</span></button>
-								<button type="button" class="nx-ddItem" role="option" data-value="ask" data-label="Ask"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Ask</span></button>
-								<button type="button" class="nx-ddItem" role="option" data-value="plan" data-label="Plan"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Plan</span></button>
-								<button type="button" class="nx-ddItem" role="option" data-value="execute" data-label="Execute"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Execute</span></button>
-								<button type="button" class="nx-ddItem" role="option" data-value="agent" data-label="Agent"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Agent</span></button>
-							</div>
-							<input type="hidden" id="modeSelect" value="chat" />
-						</div>
-						<div class="nx-dd nx-ddModel" id="modelDd" data-dd-kind="model">
-							<button type="button" class="nx-ddTrigger" id="modelDdTrigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="modelDdMenu" title="Select AI model">
-								<span class="nx-ddTriggerText" id="modelDdText">Auto</span>
-								<span class="nx-ddChevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2.5 3.5 5 6 7.5 3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-							</button>
-							<div class="nx-ddMenu nx-ddMenuModel" id="modelDdMenu" role="listbox" aria-labelledby="modelDdTrigger" hidden>
-								<div class="nx-ddSearchWrap" id="modelDdSearchWrap" hidden>
-									<input type="search" class="nx-ddSearch" id="modelDdSearch" placeholder="Search models" aria-label="Search models" autocomplete="off" />
-								</div>
-								<div class="nx-ddMenuBody" id="modelDdList">
-									<button type="button" class="nx-ddItem" role="option" data-value="auto" data-label="Auto"><span class="nx-ddItemCheck" aria-hidden="true"></span><span class="nx-ddItemLabel">Auto</span></button>
-								</div>
-							</div>
-							<input type="hidden" id="modelSelect" value="auto" />
-						</div>
+					<div class="nx-composerChips" id="composerChips">
+						<button type="button" class="nx-chip nx-chipIcon" id="plusChip" title="Add context" aria-label="Add context" aria-haspopup="listbox">+</button>
+						<button type="button" class="nx-chip" id="modeChip" title="Mode (Shift+Tab)" aria-haspopup="listbox"><span class="nx-chipText">Chat</span><svg class="nx-chipChevron" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M2.5 3.5 5 6 7.5 3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+						<button type="button" class="nx-chip nx-chipModel" id="modelChip" title="Model and effort" aria-haspopup="listbox"><span class="nx-chipText">Auto</span><svg class="nx-chipChevron" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M2.5 3.5 5 6 7.5 3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+						<button type="button" class="nx-chip" id="approvalChip" title="What the agent may do without asking" aria-haspopup="listbox" hidden><span class="nx-chipText">Accept edits</span><svg class="nx-chipChevron" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M2.5 3.5 5 6 7.5 3.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+						<input type="hidden" id="modeSelect" value="chat" />
+						<input type="hidden" id="modelSelect" value="auto" />
 					</div>
 					<div class="nx-sendActions">
 						<button class="nx-btn nx-btnPrimary nx-sendBtn" id="sendBtn" type="button" title="Send (Enter)" aria-label="Send, press Enter">
-							<span class="nx-sendGlyph nx-sendGlyphSend" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M22 2 11 13" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2l-7 20-4-9-9-4 20-7z" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+							<span class="nx-sendGlyph nx-sendGlyphSend" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
 							<span class="nx-sendGlyph nx-sendGlyphStop" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/></svg></span>
 							<span class="nx-sendBtnSr" id="sendBtnText">Send</span>
 						</button>
 					</div>
 				</div>
-			</div>
-			<div class="nx-modeHint" id="modeHint">
-				<span class="nx-hintText">Chat mode: Have a conversation, ask questions, get explanations</span>
+				<div class="nx-composerMenu" id="composerMenu" role="listbox" hidden></div>
 			</div>
 		</footer>
 		</div>
-		<aside class="nx-sessionRail" id="sessionRail" aria-label="Chat sessions">
-			<div class="nx-railResize" id="railResize" role="separator" aria-orientation="vertical" aria-label="Resize session list"></div>
-			<div class="nx-railTop">
-				<button class="nx-railNew" id="newSessionBtn" type="button" title="New chat">
-					<span class="nx-railNewMark" aria-hidden="true">+</span>
-					<span>New chat</span>
-				</button>
+		<aside class="nx-sessionRail${initialState.sessionRailHidden ? ' is-hidden' : ''}" id="sessionRail" aria-label="Chats">
+			<div class="nx-railResize" id="railResize" role="separator" aria-orientation="vertical" aria-label="Resize chat list"></div>
+			<nav class="nx-railNav" aria-label="Chat navigation">
+				<button type="button" class="nx-railNavItem" id="newSessionBtn"><i class="codicon codicon-add" aria-hidden="true"></i><span>New chat</span></button>
+				<button type="button" class="nx-railNavItem" id="railSearchBtn" aria-controls="railSearch"><i class="codicon codicon-search" aria-hidden="true"></i><span>Search chats</span></button>
+				<button type="button" class="nx-railNavItem" data-page="recipes"><i class="codicon codicon-play-circle" aria-hidden="true"></i><span>Recipes</span></button>
+				<button type="button" class="nx-railNavItem" data-page="platforms"><i class="codicon codicon-plug" aria-hidden="true"></i><span>Platforms</span><span class="nx-railNavCount" id="railPlatformCount" hidden></span></button>
+				<button type="button" class="nx-railNavItem" data-page="constellation"><i class="codicon codicon-circuit-board" aria-hidden="true"></i><span>Constellation</span></button>
+				<button type="button" class="nx-railNavItem" data-page="customize"><i class="codicon codicon-extensions" aria-hidden="true"></i><span>Customize</span></button>
+			</nav>
+			<div class="nx-railSearch" id="railSearchRow" hidden>
+				<i class="codicon codicon-search" aria-hidden="true"></i>
+				<input type="text" id="railSearch" placeholder="Search chats" aria-label="Search chats" autocomplete="off" spellcheck="false" />
 			</div>
-			<div class="nx-railList" id="sessionList" role="list"></div>
+			<div class="nx-railList" id="sessionList"></div>
 		</aside>
 	</div>`
 	});

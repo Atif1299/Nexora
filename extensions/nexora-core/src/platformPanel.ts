@@ -41,6 +41,9 @@ import {
 	type LocalAgentProbe
 } from './services/agents/localAgents';
 import type { SaasConnector } from './services/backend/auth';
+import { section, usageFor, type PlatformUsage, type ServerTool } from './services/platformUsage';
+import { approvalDetail, validateForm, type MyServer, type MyServers, type ServerForm } from './services/mcpServers';
+import { executePlatformTool } from './services/tools/platformTool';
 
 /**
  * Catalogue rows whose credential is the Settings > LLM API Keys entry in SecretStorage.
@@ -50,13 +53,25 @@ const LLM_KEY_ROWS: Record<string, ApiKeyProvider> = {
 	openai: 'openai',
 	claude: 'anthropic',
 	gemini: 'gemini',
-	openrouter: 'openrouter'
+	openrouter: 'openrouter',
+	groq: 'groq',
+	mistral: 'mistral'
 };
 
 /** Rows with a real card in Settings, so Configure has somewhere to go. */
 const SETTINGS_BACKED_PLATFORMS = new Set([
 	'github', 'vercel', 'supabase', 'stripe', 'v0-dev', 'elevenlabs', 'tavily'
 ]);
+
+/**
+ * Rows a plan reaches through an engine handler that needs a key (DALL-E runs on the OpenAI
+ * key, Perplexity on its own): there is nothing to sign in to, so Connect and Configure open
+ * the Settings card that holds the key.
+ */
+const ENGINE_KEY_CARDS: Record<string, string> = {
+	'dall-e': 'openai',
+	perplexity: 'perplexity'
+};
 
 /** platforms.json has no OpenRouter row, but its key is a first-class LLM key in Settings. */
 const OPENROUTER_ROW: PlatformApiRow = {
@@ -95,6 +110,8 @@ interface Platform {
 	configurable?: boolean;
 	/** Holds a credential that Disconnect can clear. */
 	disconnectable?: boolean;
+	/** Where the engine says this row works (GET /api/platforms/usage); absent from an older engine. */
+	usage?: PlatformUsage;
 }
 
 interface PlatformApiRow {
@@ -130,12 +147,22 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	private llmKeys: Partial<Record<ApiKeyProvider, boolean>> = {};
 	private oauthApps: Partial<Record<OAuthProvider, boolean>> = {};
 	private mcpConnections: Record<string, boolean> = {};
+	/** 'stdio' for servers that run on this PC (Connect starts them), 'http' for hosted ones. */
+	private mcpTransports: Record<string, string> = {};
 	private mcpClientIds: Record<string, boolean> = {};
 	/** Local coding agents found on PATH, keyed by platform id. */
 	private localAgents: Record<string, LocalAgentProbe> = {};
+	/** The engine's usage report, or undefined when it has none. */
+	private usage: Record<string, PlatformUsage> | undefined;
+	/** Your own MCP servers, or undefined when the engine has no such route (older build). */
+	private myServers: MyServers | undefined;
 
 	constructor(extensionUri: vscode.Uri) {
 		this._extensionUri = extensionUri;
+		// Another folder means another .nexora/mcp.json.
+		vscode.workspace.onDidChangeWorkspaceFolders(() => {
+			void this.loadPlatforms();
+		});
 		getSettingsService().onDidChangeApiKeys(() => {
 			void this._syncLlmKeys().then(() => this._pushState());
 		});
@@ -147,6 +174,8 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			this.mcpConnections = { ...this.mcpConnections, [serverId]: true };
 			this._applyCapabilities(getCachedCapabilities());
 			this._pushState();
+			// Tools are discovered just after a sign-in; their counts arrive with the next report.
+			void this._syncUsage().then(() => this._pushState());
 		});
 		onDidChangeEngineState((state) => {
 			if (state === 'ready') {
@@ -211,6 +240,9 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			await this._syncOAuthApps();
 			await this._syncMcpConnections();
 			await this._syncLocalAgents();
+			this.usage = await client.getPlatformUsage();
+			await client.setMcpWorkspace(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+			this.myServers = await client.getMyServers();
 			const platformsData = await client.getPlatforms() as PlatformApiRow[];
 			if (!platformsData.some(p => (p.id || '').toLowerCase() === OPENROUTER_ROW.id)) {
 				platformsData.push(OPENROUTER_ROW);
@@ -257,7 +289,26 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		view.webview.html = getPlatformsWebviewHtml(view.webview, this._extensionUri);
 
 		this._disposables = [
-			view.webview.onDidReceiveMessage(async (msg: { type?: string; id?: string }) => {
+			view.webview.onDidReceiveMessage(async (msg: {
+				type?: string; id?: string; tool?: string; enabled?: boolean;
+				form?: ServerForm; edit?: { scope: string; name: string } | null; scope?: string; name?: string;
+				items?: { source: string; name: string; scope: string }[]; trust?: string;
+			}) => {
+				if (await this._handleServerMessage(msg)) {
+					return;
+				}
+				if (msg?.type === 'details' && msg.id) {
+					await this._postDetails(msg.id);
+					return;
+				}
+				if (msg?.type === 'setToolEnabled' && msg.id && msg.tool) {
+					await this._setToolEnabled(msg.id, msg.tool, msg.enabled !== false);
+					return;
+				}
+				if (msg?.type === 'tryTool' && msg.id && msg.tool) {
+					await this._tryTool(msg.id, msg.tool);
+					return;
+				}
 				if (msg?.type === 'refresh') {
 					await this.refresh();
 					return;
@@ -285,7 +336,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			view.onDidChangeVisibility(() => {
 				if (view.visible && this._attached) {
 					// A key or sign-in may have landed in Settings meanwhile.
-					void Promise.all([this._syncOAuthApps(), this._syncMcpConnections()])
+					void Promise.all([this._syncOAuthApps(), this._syncMcpConnections(), this._syncUsage()])
 						.then(() => this._pushState());
 				}
 			}),
@@ -315,14 +366,218 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 				error: this.error,
 				embeddingInProgress: this.embeddingInProgress,
 				backendConnected: this.backendConnected,
-				categories: this._categoriesPayload()
+				categories: this._categoriesPayload(),
+				discover: this.platforms.filter(p => section(p) === 'discover'),
+				myServers: this.myServers || null
 			}
 		});
 	}
 
+	/**
+	 * The detail view: the row's tools (for a platform with an MCP server) with
+	 * their effects and switches. The webview already holds the row itself.
+	 */
+	private async _postDetails(platformId: string): Promise<void> {
+		if (!this._view) {
+			return;
+		}
+		const server = this._serverIdFor(platformId);
+		if (!this._row(platformId) && !server) {
+			return;
+		}
+		const found = server ? await getBackendClient().getServerTools(server) : undefined;
+		void this._view.webview.postMessage({
+			type: 'platformDetail',
+			detail: {
+				id: platformId,
+				server: server || null,
+				connected: !!found?.connected,
+				tools: found?.tools || [],
+				unavailable: !!server && !found
+			}
+		});
+	}
+
+	private async _setToolEnabled(platformId: string, tool: string, enabled: boolean): Promise<void> {
+		const server = this._serverIdFor(platformId);
+		if (!server) {
+			return;
+		}
+		try {
+			await getBackendClient().setToolEnabled(server, tool, enabled);
+		} catch {
+			void getNotificationService().showError(`Could not change ${tool}. Is the Nexora engine running?`);
+		}
+		await this._postDetails(platformId);
+		void this._syncUsage().then(() => this._pushState());
+	}
+
+	/**
+	 * Try one tool by hand: ask each required (string) input, then call it
+	 * through the same approval as chat, and show the result as JSON.
+	 */
+	private async _tryTool(platformId: string, tool: string): Promise<void> {
+		const server = this._serverIdFor(platformId);
+		if (!server) {
+			return;
+		}
+		const info: ServerTool | undefined = (await getBackendClient().getServerTools(server))?.tools.find(t => t.name === tool);
+		if (!info || !info.string_inputs_only) {
+			return;
+		}
+		const args: Record<string, unknown> = {};
+		for (const name of info.required) {
+			const value = await vscode.window.showInputBox({
+				title: `${info.title || tool}: ${name}`,
+				prompt: `Value for ${name}`,
+				ignoreFocusOut: true
+			});
+			if (value === undefined) {
+				return;
+			}
+			args[name] = value;
+		}
+		const result = await executePlatformTool(server, tool, args, info.effect === 'read');
+		const doc = await vscode.workspace.openTextDocument({ language: 'json', content: JSON.stringify(result, null, 2) });
+		await vscode.window.showTextDocument(doc, { preview: true });
+	}
+
+	/** The MCP server behind a platform row, or the id itself for one of your own servers. */
+	private _serverIdFor(platformId: string): string | undefined {
+		return this._row(platformId)?.mcpServerId || this._myServer(platformId)?.id;
+	}
+
+	private _myServer(id: string | undefined): MyServer | undefined {
+		return id ? this.myServers?.servers.find(s => s.id === id) : undefined;
+	}
+
+	private async _refreshMyServers(): Promise<void> {
+		this.myServers = await getBackendClient().getMyServers();
+		this._pushState();
+	}
+
+	private _post(message: Record<string, unknown>): void {
+		void this._view?.webview.postMessage(message);
+	}
+
+	/**
+	 * Your own MCP servers: add, edit, remove, turn on/off, approve, connect and import.
+	 * The form is checked here (services/mcpServers.ts), so the webview holds no rules.
+	 * Returns true when the message was one of these.
+	 */
+	private async _handleServerMessage(msg: {
+		type?: string; id?: string; form?: ServerForm; edit?: { scope: string; name: string } | null;
+		scope?: string; name?: string; enabled?: boolean; items?: { source: string; name: string; scope: string }[]; section?: string;
+	}): Promise<boolean> {
+		const client = getBackendClient();
+		const notify = getNotificationService();
+		try {
+			switch (msg?.type) {
+				case 'saveServer': {
+					const checked = msg.form ? validateForm(msg.form) : { errors: ['The form is empty.'] };
+					if (!checked.body) {
+						this._post({ type: 'serverFormResult', errors: checked.errors });
+						return true;
+					}
+					const saved = msg.edit
+						? await client.editServer(msg.edit.scope, msg.edit.name, checked.body)
+						: await client.addServer(checked.body);
+					this._post({ type: 'serverFormResult', errors: [], saved: saved.id });
+					void notify.showSuccess(`${saved.name} saved`);
+					await this._refreshMyServers();
+					return true;
+				}
+				case 'openCustomize':
+					await vscode.commands.executeCommand('nexora.openCustomize', typeof msg.section === 'string' ? msg.section : undefined);
+					return true;
+				case 'removeServer': {
+					if (!msg.scope || !msg.name) {
+						return true;
+					}
+					const ok = await vscode.window.showWarningMessage(
+						`Remove the MCP server ${msg.name}? Its saved keys are deleted too.`, { modal: true }, 'Remove');
+					if (ok === 'Remove') {
+						await client.removeServer(msg.scope, msg.name);
+						this._post({ type: 'serverRemoved', name: msg.name });
+						await this._refreshMyServers();
+					}
+					return true;
+				}
+				case 'enableServer':
+					if (msg.scope && msg.name) {
+						await client.enableServer(msg.scope, msg.name, msg.enabled !== false);
+						await this._refreshMyServers();
+					}
+					return true;
+				case 'approveServer': {
+					const server = this.myServers?.servers.find(s => s.scope === 'project' && s.name === msg.name);
+					if (!server) {
+						return true;
+					}
+					const ok = await vscode.window.showWarningMessage(
+						`This project's .nexora/mcp.json wants to run the MCP server ${server.name}. Only allow it if you trust this project.`,
+						{ modal: true, detail: approvalDetail(server) }, 'Allow');
+					if (ok === 'Allow') {
+						await client.approveServer(server.name, server.fingerprint);
+						await this._refreshMyServers();
+					}
+					return true;
+				}
+				case 'connectServer':
+					if (msg.id) {
+						await connectMcpServer(msg.id);
+						await this._refreshMyServers();
+					}
+					return true;
+				case 'importPreview': {
+					const sources = await client.getImportSources();
+					this._post({ type: 'importSources', sources: sources || [], workspace: this.myServers?.workspace || null });
+					return true;
+				}
+				case 'importApply': {
+					const added = await client.applyImport(msg.items || []);
+					this._post({ type: 'importDone', count: added.length });
+					void notify.showSuccess(`Imported ${added.length} MCP server${added.length === 1 ? '' : 's'}`);
+					await this._refreshMyServers();
+					return true;
+				}
+				default:
+					return false;
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (msg?.type === 'saveServer') {
+				this._post({ type: 'serverFormResult', errors: [message] });
+			} else {
+				void notify.showError(message);
+			}
+			return true;
+		}
+	}
+
+	private async _syncUsage(): Promise<void> {
+		if (getEngineState() !== 'ready' || !isBackendClientConfigured()) {
+			return;
+		}
+		this.usage = await getBackendClient().getPlatformUsage();
+		this.platforms = this.platforms.map(p => this._withUsage(p));
+	}
+
+	/**
+	 * Attach the engine's usage. A key-based row the engine finds missing from
+	 * this build shows Unavailable with the engine's reason instead of Ready.
+	 */
+	private _withUsage(p: Platform): Platform {
+		const usage = usageFor(p.id, this.usage);
+		if (usage && p.integration === 'rest' && !p.keyProvider && usage.state === 'unavailable') {
+			return { ...p, usage, capabilityStatus: 'unavailable', capabilityReason: usage.reason || p.capabilityReason };
+		}
+		return { ...p, usage };
+	}
+
 	private _mapPlatform(p: PlatformApiRow, report: CapabilitiesReport | undefined): Platform {
 		const id = String(p.id || '');
-		return {
+		return this._withUsage({
 			id,
 			name: p.name || id,
 			category: p.category || 'Other',
@@ -336,12 +591,12 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 				{ id, integration: p.integration, mcpServerId: p.mcp_server_id, isEnabled: p.is_enabled },
 				report
 			)
-		};
+		});
 	}
 
 	private _applyCapabilities(report: CapabilitiesReport | undefined): void {
 		this.embeddingInProgress = !!report?.vectors.embedding_in_progress;
-		this.platforms = this.platforms.map(p => ({
+		this.platforms = this.platforms.map(p => this._withUsage({
 			...p,
 			...this._statusFields(
 				{ id: p.id, integration: p.integration, mcpServerId: p.mcpServerId, isEnabled: p.is_enabled },
@@ -399,7 +654,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			keyProvider: undefined,
 			setupHint: undefined,
 			mcpServerId: undefined,
-			configurable: SETTINGS_BACKED_PLATFORMS.has(id),
+			configurable: SETTINGS_BACKED_PLATFORMS.has(id) || !!ENGINE_KEY_CARDS[id],
 			disconnectable: live && status === 'ready' && SETTINGS_BACKED_PLATFORMS.has(id)
 		};
 	}
@@ -486,7 +741,9 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			capabilityStatus: connected ? 'ready' : 'not_configured',
 			capabilityReason: connected
 				? undefined
-				: (setupHint || 'Not connected - Connect opens sign-in in your browser'),
+				: (setupHint || (this.mcpTransports[mcpServerId] === 'stdio'
+					? 'Not started - Connect starts it on this PC (the first start downloads it and can take a minute)'
+					: 'Not connected - Connect opens sign-in in your browser')),
 			is_enabled: isEnabled !== false,
 			keyProvider: undefined,
 			setupHint,
@@ -517,6 +774,7 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			const rows = await getBackendClient().getMcpConnectStatus();
 			this.mcpConnections = Object.fromEntries(rows.map(r => [r.id, r.connected]));
 			this.mcpClientIds = Object.fromEntries(rows.map(r => [r.id, r.has_client_id]));
+			this.mcpTransports = Object.fromEntries(rows.map(r => [r.id, r.transport || 'http']));
 		} catch {
 			// Unknown: do not claim a setup is missing when the engine is unreachable.
 			this.mcpConnections = {};
@@ -575,6 +833,10 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 			await this._openSettings(keyProvider);
 			return;
 		}
+		if (ENGINE_KEY_CARDS[platformId]) {
+			await this._openSettings(ENGINE_KEY_CARDS[platformId]);
+			return;
+		}
 		if (this._row(platformId)?.integration === 'catalogue') {
 			return;
 		}
@@ -624,7 +886,13 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 	private async _connectMcp(mcpServerId: string): Promise<void> {
 		const notifications = getNotificationService();
 		const label = mcpServerLabel(mcpServerId);
-		const result = await connectMcpServer(mcpServerId);
+		// A local server is started, not signed in to; its first start can take a minute.
+		const result = this.mcpTransports[mcpServerId] === 'stdio'
+			? await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: `Starting ${label} on this PC (the first start downloads it)...` },
+				() => connectMcpServer(mcpServerId)
+			)
+			: await connectMcpServer(mcpServerId);
 
 		switch (result.status) {
 			case 'connected':
@@ -670,6 +938,10 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		}
 		if (platformId === 'crewai' || platformId === 'gpt-researcher') {
 			await this._handleConfigure(platformId);
+			return;
+		}
+		if (ENGINE_KEY_CARDS[platformId]) {
+			await this._openSettings(ENGINE_KEY_CARDS[platformId]);
 			return;
 		}
 		const mcpServerId = this._row(platformId)?.mcpServerId;
@@ -753,9 +1025,10 @@ export class PlatformBrowserProvider implements vscode.WebviewViewProvider {
 		);
 	}
 
+	/** The main list: rows the engine calls usable, or every row when it has no usage report. */
 	private _groupByCategory(): Record<string, Platform[]> {
 		const acc: Record<string, Platform[]> = {};
-		for (const p of this.platforms) {
+		for (const p of this.platforms.filter(row => section(row) === 'main')) {
 			const cat = p.category || 'Other';
 			if (!acc[cat]) {
 				acc[cat] = [];

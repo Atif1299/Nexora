@@ -33,7 +33,7 @@ const editorGates = new WeakMap<vscode.WebviewPanel, EditorGate>();
 export function engineStateLabel(state: EngineState): string {
 	switch (state) {
 		case 'starting':
-			return 'Nexora engine is starting…';
+			return 'Nexora engine is starting (the first start after installing can take a few minutes)...';
 		case 'restarting':
 			return 'Nexora engine is restarting…';
 		case 'failed':
